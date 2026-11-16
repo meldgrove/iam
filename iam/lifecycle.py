@@ -18,6 +18,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import audit
+from .accounts import removable_groups
 from .jobs import refresh_workflow, start_jobs, stop_workflow
 from .models import Account, AppSettings, Job, Person, User, Workflow
 from .policy import (
@@ -161,8 +162,7 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
     jobs = []
     for connection in provisioning_connections(include_disabled=offboarding):
         account = accounts.get(connection.pk)
-        applied = set(account.applied_groups or []) if account else set()
-        managed = sorted(managed_group_ids(connection) | applied)
+        managed = sorted(removable_groups(connection.pk, person.pk, managed_group_ids(connection)))
         grant = desired.get(connection.pk)
         if grant is not None:
             job = Job(
