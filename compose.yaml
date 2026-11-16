@@ -4,7 +4,7 @@
 # IAM_VERSION names a release series such as 0.1 (every 0.1.x release), latest,
 # or an exact version (docs/updates.md). Every deploy pulls the tag again.
 # Coolify reads this file from the branch `stable`, which is at the newest release.
-x-image: &image ghcr.io/meldgrove/meldgrove-iam:${IAM_VERSION:?Set the release series, e.g. 0.1}
+x-image: &image ghcr.io/meldgrove/iam:${IAM_VERSION:?Set the release series, e.g. 0.1}
 
 x-application: &application
   image: *image

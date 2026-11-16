@@ -39,19 +39,19 @@ jobs:
         run: python3 scripts/check_public_repository.py
 
       - name: Build test image
-        run: docker build --target test --tag meldgrove-iam:test .
+        run: docker build --target test --tag iam:test .
 
       - name: Lint, migrations check and tests on SQLite
-        run: docker run --rm meldgrove-iam:test
+        run: docker run --rm iam:test
 
       - name: Tests on PostgreSQL
         run: >-
           docker run --rm --network host
           -e TEST_DATABASE_URL=postgresql://iam:iam@localhost:5432/iam
-          meldgrove-iam:test pytest
+          iam:test pytest
 
       - name: Build production image
-        run: docker build --target runtime --tag meldgrove-iam:ci .
+        run: docker build --target runtime --tag iam:ci .
 
       - name: Check production settings
         run: >-
@@ -60,7 +60,7 @@ jobs:
           -e ENCRYPTION_KEY=$(python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
           -e ALLOWED_HOSTS=iam.example.invalid
           -e DATABASE_URL=sqlite:////tmp/check.sqlite3
-          meldgrove-iam:ci python manage.py check --deploy --fail-level WARNING
+          iam:ci python manage.py check --deploy --fail-level WARNING
 
   end-to-end:
     name: End-to-end with Keycloak
@@ -76,7 +76,7 @@ jobs:
         run: docker compose -f compose.dev.yaml up --detach --wait
 
       - name: Build production image
-        run: docker build --target runtime --tag meldgrove-iam:ci .
+        run: docker build --target runtime --tag iam:ci .
 
       - name: Start web and worker
         run: |
@@ -87,9 +87,9 @@ jobs:
             -e OIDC_CLIENT_ID=iam -e OIDC_CLIENT_SECRET=iam-dev-client-secret
             -e OIDC_ADMIN_GROUPS=/iam/admins -e WORKER_POLL_SECONDS=1
           )
-          docker run --rm --network host "${env_args[@]}" meldgrove-iam:ci python manage.py migrate --noinput
-          docker run -d --name web --network host "${env_args[@]}" meldgrove-iam:ci
-          docker run -d --name worker --network host "${env_args[@]}" meldgrove-iam:ci python manage.py run_worker
+          docker run --rm --network host "${env_args[@]}" iam:ci python manage.py migrate --noinput
+          docker run -d --name web --network host "${env_args[@]}" iam:ci
+          docker run -d --name worker --network host "${env_args[@]}" iam:ci python manage.py run_worker
           for i in $(seq 1 30); do curl -fsS http://localhost:8000/-/healthz && break; sleep 1; done
 
       - name: Install Playwright and Chromium

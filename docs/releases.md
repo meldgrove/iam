@@ -58,7 +58,7 @@ small for a pull request labelled `breaking`. Otherwise it:
 - raises the latest `vX.Y.Z` tag by the chosen part, tags the commit, and pushes
   only the tag;
 - builds the production image with the version for amd64 and arm64 and publishes
-  it as `ghcr.io/meldgrove/meldgrove-iam:X.Y.Z`, `:X.Y`, from 1.0.0 also `:X`,
+  it as `ghcr.io/meldgrove/iam:X.Y.Z`, `:X.Y`, from 1.0.0 also `:X`,
   and `:latest`. Deployments that run a series tag or `latest` install the release
   after their cooldown when [automatic updates](updates.md) are on;
 - attests the image's build provenance and creates the GitHub Release;
@@ -81,7 +81,7 @@ publishing.
 ## Release images
 
 Release images set `APP_VERSION`. The sidebar and `/-/readyz` (with the health
-check token) report it, and error reports name the release `meldgrove-iam@X.Y.Z`
+check token) report it, and error reports name the release `iam@X.Y.Z`
 unless `SENTRY_RELEASE` is set. Images built
 from source report no version unless built with `--build-arg APP_VERSION=X.Y.Z`;
 Coolify passes its environment variables as build arguments.
@@ -89,14 +89,14 @@ Coolify passes its environment variables as build arguments.
 Verify an image's origin with:
 
 ```bash
-gh attestation verify oci://ghcr.io/meldgrove/meldgrove-iam:X.Y.Z \
-  --repo meldgrove/meldgrove-iam --signer-repo meldgrove/.github
+gh attestation verify oci://ghcr.io/meldgrove/iam:X.Y.Z \
+  --repo meldgrove/iam --signer-repo meldgrove/.github
 ```
 
 
 ## Repository settings
 
-- **Package visibility:** after the first release, make the `meldgrove-iam`
+- **Package visibility:** after the first release, make the `iam`
   package public in the organisation's package settings if it is not already, so
   operators can pull it without signing in.
 - **Immutable releases** are on: a published release's tag can never move or be

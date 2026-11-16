@@ -1,6 +1,6 @@
 # Automatic updates
 
-Each release publishes the production image `ghcr.io/meldgrove/meldgrove-iam` under
+Each release publishes the production image `ghcr.io/meldgrove/iam` under
 its version, its series and `latest` (see [releases](releases.md)). `compose.yaml` runs
 the tag named in `IAM_VERSION` and pulls it again on every deploy.
 
@@ -76,7 +76,7 @@ Without a deploy link, leave `UPDATE_DEPLOY_HOOK_URL` empty and run Docker Compo
 every hour, for example with cron:
 
 ```cron
-0 * * * * cd /srv/meldgrove-iam && docker compose up --detach --quiet-pull
+0 * * * * cd /srv/iam && docker compose up --detach --quiet-pull
 ```
 
 It pulls the tag and replaces only containers whose image changed, after the migration

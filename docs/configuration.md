@@ -41,7 +41,7 @@ can read the database, and the sign-in settings.
 | `WORKER_HEARTBEAT_MAX_AGE_SECONDS` | `300` | After this, the dashboard and `/-/readyz` report the worker as stale. |
 | `JOB_LEASE_SECONDS` | `300` | A running job whose worker stopped runs again after this. |
 | `PROVIDER_TIMEOUT_SECONDS` | `20` | Timeout of each call to a connected app. |
-| `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | empty | Error reporting without personal data. The release defaults to `meldgrove-iam@<version>`. |
+| `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | empty | Error reporting without personal data. The release defaults to `iam@<version>`. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0` | Performance tracing share. |
 
 ## Development only

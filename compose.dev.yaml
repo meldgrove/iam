@@ -4,7 +4,7 @@
 #   cp .env.example .env && uv run python manage.py migrate && uv run python manage.py runserver
 # Keycloak: http://localhost:8098 (admin/admin; realm "iam", user admin@example.invalid / admin)
 # Mailpit:  http://localhost:8027 (SMTP on 1027)
-name: meldgrove-iam-dev
+name: iam-dev
 
 services:
   postgres:
