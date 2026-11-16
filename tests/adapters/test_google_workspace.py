@@ -228,6 +228,24 @@ def test_disable_suspends_and_removes_only_managed_groups(mock_transport):
     assert not result.account.active
 
 
+def test_unreadable_groups_never_stop_the_suspension(mock_transport):
+    directory = Directory([user()], memberships={"managed": {"u1"}})
+
+    def handler(request):
+        if request.url.path == f"{PREFIX}/groups":
+            # What Google answers when it cannot resolve the account's domain.
+            return httpx.Response(404, json={"error": {"message": "Domain not found."}})
+        return directory(request)
+
+    adapter = make_adapter(mock_transport(handler))
+    result = adapter.disable_account(spec(), external_id="u1", managed_groups={"managed"})
+    assert result.changed
+    assert directory.users["u1"]["suspended"] is True
+    assert isinstance(result.group_error, AdapterError)
+    assert "404" in str(result.group_error)
+    assert result.groups_removed == []
+
+
 def test_disable_without_account_does_nothing(mock_transport):
     adapter = make_adapter(mock_transport(Directory()))
     result = adapter.disable_account(spec(), managed_groups={"g1"})

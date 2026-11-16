@@ -120,6 +120,18 @@ def _supersede_open_workflows(person: Person, actor) -> list[int]:
         workflow.finished_at = timezone.now()
         workflow.save(update_fields=["status", "finished_at"])
         ids.append(workflow.pk)
+    # Groups an earlier job left unfinished: the new workflow plans them again.
+    Task.objects.filter(
+        person=person,
+        kind=Task.Kind.FAILURE,
+        status=Task.Status.OPEN,
+        job__status=Job.Status.SUCCEEDED,
+    ).update(
+        status=Task.Status.CANCELLED,
+        completed_at=timezone.now(),
+        completed_by=actor,
+        note="Replaced by a newer workflow.",
+    )
     return ids
 
 

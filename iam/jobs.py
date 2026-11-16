@@ -4,9 +4,11 @@ The worker claims queued jobs one at a time. A connection that may change
 accounts gets the adapter call; any other connection gets a manual task. A
 failure that clears on its own (timeouts, rate limits, server errors) runs
 again with growing pauses; any other failure, or the last retry, hands the
-job to a person as a failure task. Nothing here stores passwords: a new
-account's initial password is emailed once to the personal address and
-forgotten.
+job to a person as a failure task. Groups never hold up an account: once
+the account is created, reactivated or disabled, a group step that keeps
+failing becomes a task while the job succeeds. Nothing here stores
+passwords: a new account's initial password is emailed once to the personal
+address and forgotten.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ from .adapters.base import (
     AdapterError,
     DisableResult,
     EnsureResult,
-    PartialProvisioning,
 )
 from .crypto import SecretUnreadable
 from .lifecycle import cancel_job, refresh_workflow
@@ -188,12 +189,6 @@ def run_job(job: Job) -> Job:
             result = adapter.disable_account(
                 spec, external_id=external_id, managed_groups=managed_groups(job)
             )
-    except PartialProvisioning as exc:
-        # The account exists now; its password must reach the person even
-        # though the job runs again for the rest.
-        if exc.result.initial_password:
-            deliver_initial_password(job, exc.result.initial_password)
-        return fail_job(job, str(exc), retryable=exc.retryable)
     except AdapterError as exc:
         return fail_job(job, str(exc), retryable=exc.retryable)
     except SecretUnreadable as exc:
@@ -206,7 +201,24 @@ def run_job(job: Job) -> Job:
             f"Unexpected error ({type(exc).__name__}). The details are in the worker log.",
             retryable=False,
         )
+    error = result.group_error
+    if error is not None and not isinstance(error, AdapterError):
+        logger.error("Job %s: the group step failed unexpectedly", job.pk, exc_info=error)
+        _report_to_sentry(error)
+    elif error is not None and error.retryable and job.attempts < MAX_ATTEMPTS:
+        # The account step is done; the job runs again for the groups. A new
+        # account's password must reach the person now: the next run finds
+        # the account and generates none.
+        if getattr(result, "initial_password", None):
+            deliver_initial_password(job, result.initial_password)
+        return fail_job(job, str(error), retryable=True)
     return succeed_job(job, result)
+
+
+def _group_error_message(error: Exception) -> str:
+    if isinstance(error, AdapterError):
+        return str(error)
+    return f"Unexpected error ({type(error).__name__}). The details are in the worker log."
 
 
 def _can_write(connection: Connection) -> bool:
@@ -224,6 +236,7 @@ def _report_to_sentry(exc: Exception) -> None:
 def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
     password = getattr(result, "initial_password", None)
     conflict = ""
+    group_task = None
     with transaction.atomic():
         job = Job.objects.select_for_update().get(pk=job.pk)
         if job.status != Job.Status.RUNNING:
@@ -245,6 +258,8 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
             job.tasks.filter(status=Task.Status.OPEN, kind=Task.Kind.FAILURE).update(
                 status=Task.Status.DONE, completed_at=timezone.now(), note="Resolved by a retry."
             )
+            if result.group_error is not None:
+                group_task = _open_group_task(job, result.group_error)
             audit.record(
                 f"job.{job.action}",
                 _success_summary(job, result),
@@ -253,6 +268,7 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
                 details=job.result,
             )
             refresh_workflow(job.workflow)
+            notify_after_commit([group_task] if group_task else [])
     if conflict:
         return fail_job(job, conflict, retryable=False)
     if password:
@@ -301,7 +317,12 @@ def _record_account(job: Job, result: EnsureResult | DisableResult) -> None:
     account.observed_at = timezone.now()
     if isinstance(result, EnsureResult):
         account.created_by_app = account.created_by_app or result.created
-        account.applied_groups = sorted(set(job.groups))
+        if result.group_error is None:
+            account.applied_groups = sorted(set(job.groups))
+        else:
+            # Unfinished: keep every group the app may have to remove later.
+            applied = set(account.applied_groups or []) | set(job.groups)
+            account.applied_groups = sorted(applied - set(result.groups_removed))
     else:
         removed = set(result.groups_removed)
         account.applied_groups = [g for g in account.applied_groups or [] if g not in removed]
@@ -319,6 +340,8 @@ def _result_summary(result: EnsureResult | DisableResult) -> dict:
         "groups_removed": list(result.groups_removed),
         "notes": list(result.notes),
     }
+    if result.group_error is not None:
+        summary["group_error"] = _group_error_message(result.group_error)[:500]
     if isinstance(result, EnsureResult):
         summary.update(
             created=result.created,
@@ -389,6 +412,42 @@ def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
     return job
 
 
+def _open_group_task(job: Job, error: Exception) -> Task | None:
+    """The account step is done; hand the unfinished groups to a person."""
+    adapter = job.connection.adapter_class
+    label = adapter.group_label if adapter else "Groups"
+    disabling = job.action == Job.Action.DISABLE_ACCOUNT
+    done = "is disabled" if disabling else "is ready"
+    steps = []
+    if not disabling and job.groups:
+        steps.append(f"Make sure they are in: {', '.join(sorted(group_labels(job)))}.")
+    remove = _group_names(job, managed_groups(job) - set(job.groups))
+    if remove:
+        steps.append(f"Remove them from these, if a member: {remove}.")
+    return _open_task(
+        job,
+        Task.Kind.FAILURE,
+        f"Fix: {label} of {job.person.full_name} at {job.connection.name}",
+        "\n\n".join(
+            [
+                f"The {job.connection.name} account {done}, but the app could not update "
+                f"its {label}: {_group_error_message(error)}",
+                "Fix the cause, make these changes by hand, then complete this task.",
+                "\n".join(steps),
+            ]
+        ),
+    )
+
+
+def _group_names(job: Job, ids: set[str]) -> str:
+    labels = dict(
+        ProviderGroup.objects.filter(connection=job.connection, external_id__in=ids).values_list(
+            "external_id", "name"
+        )
+    )
+    return ", ".join(sorted(labels.get(gid, gid) for gid in ids))
+
+
 def _manual_steps(job: Job) -> str:
     try:
         adapter = job.connection.build_adapter()
@@ -396,15 +455,9 @@ def _manual_steps(job: Job) -> str:
     except Exception:  # noqa: BLE001 - instructions are best effort
         verb = "Disable" if job.action == Job.Action.DISABLE_ACCOUNT else "Create or update"
         steps = f"{verb} the {job.connection.name} account of {job.person.full_name}."
-    remove = sorted(managed_groups(job) - set(job.groups))
+    remove = managed_groups(job) - set(job.groups)
     if job.action == Job.Action.ENSURE_ACCOUNT and remove:
-        labels = dict(
-            ProviderGroup.objects.filter(
-                connection=job.connection, external_id__in=remove
-            ).values_list("external_id", "name")
-        )
-        names = ", ".join(labels.get(gid, gid) for gid in remove)
-        steps += f"\nRemove from these, if a member: {names}."
+        steps += f"\nRemove from these, if a member: {_group_names(job, remove)}."
     return steps
 
 
