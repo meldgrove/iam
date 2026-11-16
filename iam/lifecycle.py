@@ -139,12 +139,14 @@ def _deactivate_app_user(person: Person, actor) -> None:
 
 
 def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
+    offboarding = workflow.kind == Workflow.Kind.OFFBOARDING
     desired = desired_access(person)
-    entitled = entitled_access(person) if workflow.kind == Workflow.Kind.OFFBOARDING else {}
+    # Offboarding never skips an app: turned-off connections get a manual task.
+    entitled = entitled_access(person, include_disabled=True) if offboarding else {}
     accounts = {a.connection_id: a for a in person.accounts.all()}
     settings = AppSettings.load()
     jobs = []
-    for connection in provisioning_connections():
+    for connection in provisioning_connections(include_disabled=offboarding):
         managed = sorted(managed_group_ids(connection))
         grant = desired.get(connection.pk)
         if grant is not None:

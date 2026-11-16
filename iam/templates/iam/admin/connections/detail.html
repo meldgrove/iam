@@ -5,7 +5,7 @@
 <p class="sub">{{ adapter.name }}{% if connection.kind == 'provisioning' %} · {{ connection.get_mode_display }}{% endif %}</p></div>
 <div class="actions">
   <form class="inline" method="post" action="{% url 'connection_test' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Test connection</button></form>
-  {% if adapter.supports_groups and not adapter.manual_groups or adapter.slug == 'slack' %}<form class="inline" method="post" action="{% url 'connection_import_groups' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Import {{ adapter.group_label|lower }}</button></form>{% endif %}
+  {% if connection.can_import_groups %}<form class="inline" method="post" action="{% url 'connection_import_groups' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Import {{ adapter.group_label|lower }}</button></form>{% endif %}
   {% if connection.kind == 'hr_source' %}<form class="inline" method="post" action="{% url 'connection_sync' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Import people now</button></form>{% elif can_compare %}<form class="inline" method="post" action="{% url 'connection_sync' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Compare accounts now</button></form>{% endif %}
   <a class="btn" href="{% url 'connection_edit' connection.pk %}">Edit</a>
   <form class="inline" method="post" action="{% url 'connection_toggle' connection.pk %}">{% csrf_token %}<button class="btn {% if not connection.enabled %}primary{% endif %}" type="submit">{% if connection.enabled %}Turn off{% else %}Turn on{% endif %}</button></form>
@@ -22,7 +22,7 @@
 {% if connection.kind == 'hr_source' %}<p class="small muted">People imports run every {{ connection.sync_interval_minutes }} minutes while the connection is on.</p>{% elif can_compare %}<p class="small muted">Account comparisons run every {{ connection.sync_interval_minutes }} minutes while the connection is on (0 = never).</p>{% endif %}
 </div>
 </div>
-{% if adapter.supports_groups %}
+{% if connection.supports_groups %}
 <div class="card"><h2>{{ adapter.group_label }} <span class="muted small">{{ groups|length }}</span></h2>
 {% if adapter.manual_groups %}<form method="post" action="{% url 'connection_add_group' connection.pk %}" class="filters">{% csrf_token %}<input type="text" name="name" placeholder="Name" aria-label="Name" maxlength="255" style="max-width:280px"><button class="btn" type="submit">Add</button></form>{% endif %}
 {% if groups %}<table><thead><tr><th>Name</th><th>ID</th><th></th></tr></thead><tbody>{% for g in groups %}<tr><td>{{ g.label }}{% if g.missing %} <span class="badge danger">no longer listed</span>{% endif %}</td><td class="small muted mono">{{ g.external_id|truncatechars:40 }}</td><td>{% if g.manual %}<form class="inline" method="post" action="{% url 'connection_remove_group' connection.pk g.pk %}">{% csrf_token %}<button class="btn small" type="submit">Remove</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table>

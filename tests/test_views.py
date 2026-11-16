@@ -349,3 +349,18 @@ def test_readiness_reports_a_stale_worker(client, settings):
 
     WorkerHeartbeat.objects.create(name="worker")
     assert client.get("/-/readyz").status_code == 200
+
+
+def test_scim_without_groups_offers_no_group_import(client_for, admin_user):
+    connection = Connection.objects.create(
+        adapter="scim", name="SCIM app", settings={"groups_enabled": False}
+    )
+    assert not connection.supports_groups and not connection.can_import_groups
+    page = client_for(admin_user).get(reverse("connection_detail", args=[connection.pk]))
+    assert b"Import groups" not in page.content
+    with_groups = Connection.objects.create(
+        adapter="scim", name="SCIM groups", settings={"groups_enabled": True}
+    )
+    assert with_groups.can_import_groups
+    manual = Connection.objects.create(adapter="manual", name="Manual", settings={})
+    assert manual.supports_groups and not manual.can_import_groups

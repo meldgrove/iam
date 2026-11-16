@@ -321,3 +321,36 @@ def test_cancel_onboarding_returns_to_planned_but_offboarding_cannot_be_cancelle
 def test_status_rules(person):
     with pytest.raises(LifecycleError):
         start_workflow(person, Workflow.Kind.ACCESS_UPDATE)
+
+
+def test_offboarding_reaches_turned_off_connections_as_tasks(person, fake_connection, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    fake_connection.enabled = False
+    fake_connection.save()
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    job = workflow.jobs.get()
+    assert job.action == Job.Action.DISABLE_ACCOUNT and job.status == Job.Status.MANUAL
+    assert "turned off" in Task.objects.get(job=job).instructions
+    assert all(data["active"] for data in fake_store.accounts.values())
+
+
+def test_access_updates_skip_turned_off_connections(person, fake_connection, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    fake_connection.enabled = False
+    fake_connection.save()
+    workflow = start_workflow(person, Workflow.Kind.ACCESS_UPDATE)
+    assert not workflow.jobs.exists()
+
+
+def test_manual_tasks_name_the_groups_to_remove(person, fake_connection, groups):
+    fake_connection.mode = Connection.Mode.MANUAL
+    fake_connection.save()
+    from iam.models import Team
+
+    # Another team makes Operations a managed group that Ada should not have.
+    Team.objects.create(name="Ops").groups.add(groups["g-ops"])
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    task = Task.objects.get(kind=Task.Kind.CHANGE)
+    assert "Remove from these, if a member: Operations." in task.instructions

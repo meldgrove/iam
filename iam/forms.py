@@ -129,7 +129,10 @@ class ConnectionForm(forms.Form):
     name = forms.CharField(max_length=100)
     enabled = forms.BooleanField(
         required=False,
-        help_text="Turned off, the connection is ignored by workflows and the schedule.",
+        help_text=(
+            "Turned off, the app changes nothing there: onboarding skips it, offboarding "
+            "creates a task, and the schedule does not read it."
+        ),
     )
     mode = forms.ChoiceField(choices=Connection.Mode.choices, initial=Connection.Mode.AUTOMATIC)
 

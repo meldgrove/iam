@@ -87,6 +87,10 @@ class ScimAdapter(Adapter):
         SYNC_INTERVAL_FIELD,
     )
 
+    @classmethod
+    def groups_enabled(cls, settings: dict) -> bool:
+        return _flag(settings.get("groups_enabled", True))
+
     def __init__(self, config: dict, **kwargs):
         super().__init__(config, **kwargs)
         # Instance value: apps without /Groups manage accounts only.

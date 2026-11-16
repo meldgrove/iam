@@ -205,6 +205,15 @@ class Adapter:
     # What a group is called in this app (shown in forms).
     group_label: ClassVar[str] = "Groups"
 
+    @classmethod
+    def groups_enabled(cls, settings: dict) -> bool:
+        """Whether a connection with these (non-secret) settings has groups."""
+        return cls.supports_groups
+
+    @classmethod
+    def imports_groups(cls) -> bool:
+        return cls.supports_groups and cls.list_groups is not Adapter.list_groups
+
     def __init__(
         self, config: dict, *, connection=None, transport: httpx.BaseTransport | None = None
     ):

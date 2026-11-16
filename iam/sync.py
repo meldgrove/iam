@@ -241,6 +241,10 @@ def import_people(connection: Connection, actor=None) -> SyncRun:
             .exclude(status__in=[Person.Status.OFFBOARDED, Person.Status.ARCHIVED])
         )
         summary["not_listed"] = [{"id": p.pk, "name": p.full_name} for p in not_listed[:100]]
+        summary["skipped"] = [
+            {"source_id": source_id, "reason": reason}
+            for source_id, reason in getattr(adapter, "skipped", [])[:100]
+        ]
         return summary
 
     return _run(connection, SyncRun.Kind.PEOPLE, actor, body)

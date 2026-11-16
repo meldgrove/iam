@@ -30,14 +30,13 @@ Slack, Notion and "Other app" never write, so their changes are always tasks.
 
 A new connection starts turned off. Test it, then turn it on.
 
-- Turned-off connections are left out of new workflows and the schedule.
-- A job that was already queued when its connection was turned off becomes a
-  manual task when the worker reaches it. The app never skips such a change
-  silently.
-
-Turning a connection off does not create tasks for workflows that start
-afterwards. Before turning off a connection that still holds accounts, offboard
-the people concerned or remove their accounts by hand.
+- The app changes nothing at a turned-off connection, and the schedule does
+  not read it.
+- Onboarding and access updates skip it.
+- Offboarding still plans a step for it, as a manual task, wherever the person
+  has a known account or the access profile grants one. A job that was already
+  queued when the connection was turned off also becomes a manual task. The
+  app never skips a removal silently.
 
 ### Secrets
 

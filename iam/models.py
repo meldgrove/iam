@@ -179,6 +179,16 @@ class Connection(models.Model):
         return cls(self.config(), connection=self, **kwargs)
 
     @property
+    def supports_groups(self) -> bool:
+        cls = self.adapter_class
+        return bool(cls and cls.groups_enabled(self.settings))
+
+    @property
+    def can_import_groups(self) -> bool:
+        cls = self.adapter_class
+        return bool(cls and cls.imports_groups() and self.supports_groups)
+
+    @property
     def writes_automatically(self) -> bool:
         cls = self.adapter_class
         return bool(

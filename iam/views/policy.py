@@ -24,7 +24,7 @@ def _group_connections():
                 "connection": connection,
                 "groups": [g for g in connection.groups.all() if not g.missing],
                 "group_label": connection.adapter_class.group_label,
-                "supports_groups": connection.adapter_class.supports_groups,
+                "supports_groups": connection.supports_groups,
             }
         )
     return rows

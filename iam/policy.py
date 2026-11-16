@@ -34,24 +34,25 @@ class Grant:
         return sorted(self.groups)
 
 
-def provisioning_connections():
+def provisioning_connections(*, include_disabled: bool = False):
+    connections = Connection.objects.all()
+    if not include_disabled:
+        connections = connections.filter(enabled=True)
     return [
-        c
-        for c in Connection.objects.filter(enabled=True)
-        if c.adapter_class is not None and c.kind == AdapterKind.PROVISIONING
+        c for c in connections if c.adapter_class is not None and c.kind == AdapterKind.PROVISIONING
     ]
 
 
-def entitled_access(person: Person) -> dict[int, Grant]:
-    """What the person's profile and team grant, regardless of status."""
+def entitled_access(person: Person, *, include_disabled: bool = False) -> dict[int, Grant]:
+    """What the person's profile and team grant, regardless of status.
+    Turned-off connections count only when asked for (offboarding)."""
     grants: dict[int, Grant] = {}
     if person.access_profile_id is None:
         return grants
-    profile_grants = (
-        ProfileGrant.objects.filter(profile_id=person.access_profile_id, connection__enabled=True)
-        .select_related("connection")
-        .prefetch_related("groups")
-    )
+    profile_grants = ProfileGrant.objects.filter(profile_id=person.access_profile_id)
+    if not include_disabled:
+        profile_grants = profile_grants.filter(connection__enabled=True)
+    profile_grants = profile_grants.select_related("connection").prefetch_related("groups")
     for profile_grant in profile_grants:
         if profile_grant.connection.kind != AdapterKind.PROVISIONING:
             continue

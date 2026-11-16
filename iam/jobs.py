@@ -326,10 +326,20 @@ def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
 def _manual_steps(job: Job) -> str:
     try:
         adapter = job.connection.build_adapter()
-        return adapter.manual_instructions(job.action, account_spec(job.person), group_labels(job))
+        steps = adapter.manual_instructions(job.action, account_spec(job.person), group_labels(job))
     except Exception:  # noqa: BLE001 - instructions are best effort
         verb = "Disable" if job.action == Job.Action.DISABLE_ACCOUNT else "Create or update"
-        return f"{verb} the {job.connection.name} account of {job.person.full_name}."
+        steps = f"{verb} the {job.connection.name} account of {job.person.full_name}."
+    remove = sorted(set(job.managed_groups) - set(job.groups))
+    if job.action == Job.Action.ENSURE_ACCOUNT and remove:
+        labels = dict(
+            ProviderGroup.objects.filter(
+                connection=job.connection, external_id__in=remove
+            ).values_list("external_id", "name")
+        )
+        names = ", ".join(labels.get(gid, gid) for gid in remove)
+        steps += f"\nRemove from these, if a member: {names}."
+    return steps
 
 
 def _open_task(job: Job, kind: str, title: str, instructions: str) -> Task | None:
