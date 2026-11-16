@@ -52,10 +52,11 @@ never contain credentials or provider responses.
 
 Groups never hold up onboarding or offboarding. When a group step fails, the
 account is still created, reactivated or disabled, and a new account's
-password is still sent. Passing errors run the job again for the groups.
-Once retries run out, or at once for any other error, the job succeeds and a
-failure task names the groups to fix by hand. The next workflow for the
-person cancels that task, because it plans the groups again.
+password is still sent. Passing errors run the job again for the groups; the
+account change is audited before that. Once retries run out, or
+at once for any other error, the job succeeds and a failure task names the
+groups to fix by hand. A later workflow that plans a job at the same
+connection cancels that task, because that job does the groups again.
 
 **Manual tasks.** A connection in manual mode, a read-only or turned-off
 connection, and apps without write support (Slack, Notion, other apps) get a

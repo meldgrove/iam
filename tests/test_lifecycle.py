@@ -496,14 +496,61 @@ def test_passing_group_errors_retry_before_they_become_a_task(person, fake_store
     job = workflow.jobs.get()
     assert job.status == Job.Status.QUEUED and job.last_error == "Fake app answered 503."
     assert not Task.objects.exists()
+    account = Account.objects.get(person=person)
+    assert account.status == Account.Status.ACTIVE and account.created_by_app
+    assert AuditEvent.objects.get(action="job.ensure_account").summary.startswith("Created")
     Job.objects.filter(pk=job.pk).update(attempts=MAX_ATTEMPTS - 1, next_attempt_at=timezone.now())
     run_all()
     job.refresh_from_db()
     workflow.refresh_from_db()
+    account.refresh_from_db()
     assert len(fake_store.accounts) == 1
+    assert account.created_by_app
     assert job.status == Job.Status.SUCCEEDED
     assert workflow.status == Workflow.Status.COMPLETED
     assert Task.objects.get(job=job).kind == Task.Kind.FAILURE
+
+
+def test_an_account_disabled_before_a_group_retry_is_audited(person, fake_store, profile):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    fake_store.fail_group_read_with = TransientError("Fake app answered 503.")
+    job = start_workflow(person, Workflow.Kind.OFFBOARDING).jobs.get()
+    run_all()
+    job.refresh_from_db()
+    account = Account.objects.get(person=person)
+    assert job.status == Job.Status.QUEUED
+    assert fake_store.accounts[account.external_id]["active"] is False
+    event = AuditEvent.objects.get(action="job.disable_account")
+    assert event.summary.startswith("Disabled the Fake app account")
+    assert event.details["group_error"] == "Fake app answered 503."
+    # A newer offboarding without the app replaces the retry, and still
+    # removes the groups.
+    fake_store.fail_group_read_with = None
+    profile.grants.all().delete()
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    run_all()
+    account.refresh_from_db()
+    assert workflow.jobs.get().status == Job.Status.SUCCEEDED
+    assert account.status == Account.Status.DISABLED and account.applied_groups == []
+    assert fake_store.accounts[account.external_id]["groups"] == set()
+
+
+def test_a_group_task_stays_open_where_no_newer_job_runs(person, fake_store, profile):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    fake_store.fail_group_read_with = AdapterError(GROUPS_UNREADABLE)
+    start_workflow(person, Workflow.Kind.OFFBOARDING)
+    run_all()
+    fake_store.fail_group_read_with = None
+    task = Task.objects.get(kind=Task.Kind.FAILURE, status=Task.Status.OPEN)
+    # Hired again with a profile that no longer has this app.
+    profile.grants.all().delete()
+    rehire = start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    task.refresh_from_db()
+    assert not rehire.jobs.exists()
+    assert task.status == Task.Status.OPEN, "nothing else removes the groups"
 
 
 def test_unexpected_group_errors_do_not_leak_details(person, fake_store):

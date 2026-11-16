@@ -209,10 +209,37 @@ def run_job(job: Job) -> Job:
         # The account step is done; the job runs again for the groups. A new
         # account's password must reach the person now: the next run finds
         # the account and generates none.
+        conflict = record_account_step(job, result)
+        if conflict:
+            return fail_job(job, conflict, retryable=False)
         if getattr(result, "initial_password", None):
             deliver_initial_password(job, result.initial_password)
         return fail_job(job, str(error), retryable=True)
     return succeed_job(job, result)
+
+
+def record_account_step(job: Job, result: EnsureResult | DisableResult) -> str:
+    """Audit an account that changed while its groups did not, before the
+    job runs again. Returns why the account cannot be linked, if so."""
+    with transaction.atomic():
+        job = Job.objects.select_for_update().get(pk=job.pk)
+        if isinstance(result, EnsureResult):
+            # IAM must know a new account even if a newer workflow replaces
+            # this job. A disabled account stays active in IAM until its
+            # groups are done, so a newer workflow still plans a job there.
+            try:
+                with transaction.atomic():
+                    _record_account(job, result)
+            except AccountConflict as exc:
+                return str(exc)
+        audit.record(
+            f"job.{job.action}",
+            f"{_success_summary(job, result)}. The groups are not done yet.",
+            person=job.person,
+            target=job,
+            details=_result_summary(result),
+        )
+    return ""
 
 
 def _group_error_message(error: Exception) -> str:
@@ -415,7 +442,8 @@ def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
 def _workflow_is_current(job: Job) -> bool:
     """Whether no newer workflow replaced the job's. Takes the person lock
     that starting a workflow takes: a newer one either replaced this one
-    already, or starts after this commits and cancels its group task."""
+    already, or starts after this commits and cancels its group task if it
+    plans a job at the same connection."""
     Person.objects.select_for_update().get(pk=job.person_id)
     return (
         Workflow.objects.filter(pk=job.workflow_id)

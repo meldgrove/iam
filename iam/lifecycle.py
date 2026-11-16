@@ -85,6 +85,7 @@ def start_workflow(
             created_by=actor,
         )
         jobs = _plan_jobs(workflow, person)
+        cancelled_tasks = _cancel_group_tasks(person, actor, jobs)
         audit.record(
             f"workflow.{kind}",
             f"Started {workflow.get_kind_display().lower()} of {person.full_name}"
@@ -96,6 +97,7 @@ def start_workflow(
                 "jobs": len(jobs),
                 "automatic": automatic,
                 "superseded_workflows": superseded,
+                "cancelled_group_tasks": cancelled_tasks,
             },
         )
         tasks = []
@@ -120,18 +122,6 @@ def _supersede_open_workflows(person: Person, actor) -> list[int]:
         workflow.finished_at = timezone.now()
         workflow.save(update_fields=["status", "finished_at"])
         ids.append(workflow.pk)
-    # Groups an earlier job left unfinished: the new workflow plans them again.
-    Task.objects.filter(
-        person=person,
-        kind=Task.Kind.FAILURE,
-        status=Task.Status.OPEN,
-        job__status=Job.Status.SUCCEEDED,
-    ).update(
-        status=Task.Status.CANCELLED,
-        completed_at=timezone.now(),
-        completed_by=actor,
-        note="Replaced by a newer workflow.",
-    )
     return ids
 
 
@@ -194,6 +184,28 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
         job.save()
         jobs.append(job)
     return jobs
+
+
+def _cancel_group_tasks(person: Person, actor, jobs: list[Job]) -> list[int]:
+    """Groups an earlier job left unfinished, at the connections the new
+    workflow plans again. Elsewhere the task stays open: nothing else will
+    finish those groups."""
+    ids = list(
+        Task.objects.filter(
+            person=person,
+            kind=Task.Kind.FAILURE,
+            status=Task.Status.OPEN,
+            job__status=Job.Status.SUCCEEDED,
+            job__connection__in=[job.connection_id for job in jobs],
+        ).values_list("pk", flat=True)
+    )
+    Task.objects.filter(pk__in=ids).update(
+        status=Task.Status.CANCELLED,
+        completed_at=timezone.now(),
+        completed_by=actor,
+        note="Replaced by a newer workflow.",
+    )
+    return ids
 
 
 def _over_removal_limit(connection, settings: AppSettings) -> bool:
