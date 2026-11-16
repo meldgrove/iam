@@ -50,7 +50,7 @@ jobs:
       bump: ${{ inputs.bump || 'patch' }}
       candidate: ${{ inputs.candidate || false }}
       dry_run: ${{ inputs.dry_run || false }}
-      image: ghcr.io/meldgrove/meldgrove-iam
+      image: ghcr.io/meldgrove/iam
       target: runtime
       ci_workflow: ci.yml
       upgrade_doc: docs/deployment.md

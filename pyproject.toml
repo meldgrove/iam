@@ -1,5 +1,5 @@
 [project]
-name = "meldgrove-iam"
+name = "iam"
 # Releases take their version from the git tag (docs/releases.md).
 version = "0.0.0"
 description = "Self-hosted identity and access management: people, teams, access profiles, onboarding and offboarding across connected apps."

@@ -180,7 +180,7 @@ PROVIDER_TIMEOUT_SECONDS = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "20"))
 
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", DEPLOYMENT_ENV)
-SENTRY_RELEASE = os.getenv("SENTRY_RELEASE", f"meldgrove-iam@{APP_VERSION}" if APP_VERSION else "")
+SENTRY_RELEASE = os.getenv("SENTRY_RELEASE", f"iam@{APP_VERSION}" if APP_VERSION else "")
 
 LOGGING = {
     "version": 1,

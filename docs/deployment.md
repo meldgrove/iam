@@ -1,6 +1,6 @@
 # Deployment
 
-One Docker image, `ghcr.io/meldgrove/meldgrove-iam`, runs three processes
+One Docker image, `ghcr.io/meldgrove/iam`, runs three processes
 from `compose.yaml`:
 
 | Service | Command | Notes |
@@ -27,7 +27,7 @@ resource). Nothing else is needed: no Redis, no message queue.
    | --- | --- |
    | `IAM_VERSION` | `0.1` (a release series; see [updates.md](updates.md)) |
    | `DJANGO_SECRET_KEY` | random, 50+ characters |
-   | `ENCRYPTION_KEY` | `docker run --rm ghcr.io/meldgrove/meldgrove-iam:0.1 python manage.py generate_key`; keep a copy with the backups |
+   | `ENCRYPTION_KEY` | `docker run --rm ghcr.io/meldgrove/iam:0.1 python manage.py generate_key`; keep a copy with the backups |
    | `DATABASE_URL` | the PostgreSQL resource's internal URL |
    | `ALLOWED_HOSTS` | `iam.example.invalid` |
    | `CSRF_TRUSTED_ORIGINS` | `https://iam.example.invalid` |
