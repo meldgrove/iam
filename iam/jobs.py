@@ -25,11 +25,11 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
-from . import audit
+from . import accounts, audit
 from .adapters import AdapterKind
 from .adapters.base import (
     AccountSpec,
@@ -77,14 +77,8 @@ def account_spec(person: Person) -> AccountSpec:
 
 def managed_groups(job: Job) -> set[str]:
     """The groups the job may remove: the policy's managed groups when it was
-    planned, plus the groups the app has put the account in since. Jobs for
-    the same person and app run one after another, so this includes what a
-    job that was still running at planning time applied."""
-    account = Account.objects.filter(
-        connection_id=job.connection_id, person_id=job.person_id
-    ).first()
-    applied = set(account.applied_groups or []) if account else set()
-    return set(job.managed_groups) | applied
+    planned, plus the groups the app has put the account in since."""
+    return accounts.removable_groups(job.connection_id, job.person_id, job.managed_groups)
 
 
 def group_labels(job: Job) -> list[str]:
@@ -297,18 +291,12 @@ def run_job(job: Job) -> Job:
         # Check whose account the app is about to change before changing it.
         found = adapter.find_account(spec, external_id)
         if found is not None and found.external_id:
-            owner = (
-                Account.objects.filter(connection=connection, external_id=found.external_id)
-                .exclude(person=None)
-                .exclude(person=person)
-                .select_related("person")
-                .first()
-            )
+            owner = accounts.other_owner(connection, found.external_id, person)
             if owner is not None:
                 return fail_job(
                     job,
                     f"The {connection.name} account {found.username or found.external_id} "
-                    f"belongs to {owner.person}. Nothing was changed. Check the work email "
+                    f"belongs to {owner}. Nothing was changed. Check the work email "
                     "and username.",
                     retryable=False,
                 )
@@ -364,8 +352,8 @@ def record_account_step(job: Job, result: EnsureResult | DisableResult) -> str:
             # groups are done, so a newer workflow still plans a job there.
             try:
                 with transaction.atomic():
-                    _record_account(job, result)
-            except AccountConflict as exc:
+                    accounts.record_job_result(job, result)
+            except accounts.AccountConflict as exc:
                 return str(exc)
         audit.record(
             f"job.{job.action}",
@@ -406,8 +394,8 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
         # back to the queue after its lease ran out, while it ran.
         try:
             with transaction.atomic():
-                _record_account(job, result)
-        except AccountConflict as exc:
+                accounts.record_job_result(job, result)
+        except accounts.AccountConflict as exc:
             conflict = str(exc)
         else:
             job.status = Job.Status.SUCCEEDED
@@ -438,65 +426,6 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
     if password:
         deliver_initial_password(job, password)
     return job
-
-
-class AccountConflict(Exception):
-    pass
-
-
-def _record_account(job: Job, result: EnsureResult | DisableResult) -> None:
-    external = result.account
-    existing = Account.objects.filter(connection=job.connection, person=job.person).first()
-    if external is None:
-        if existing is not None:
-            existing.status = Account.Status.MISSING
-            existing.applied_groups = []
-            existing.observed_at = timezone.now()
-            existing.save()
-        return
-    if external.external_id:
-        other = (
-            Account.objects.filter(connection=job.connection, external_id=external.external_id)
-            .exclude(pk=existing.pk if existing else None)
-            .first()
-        )
-        if other is not None:
-            if other.person_id and other.person_id != job.person_id:
-                raise AccountConflict(
-                    f"The {job.connection.name} account {external.username or external.external_id} "
-                    f"is linked to {other.person}. Check the work email and username."
-                )
-            if existing is not None:
-                existing.delete()
-            existing = other
-    account = existing or Account(connection=job.connection)
-    account.person = job.person
-    account.external_id = external.external_id or account.external_id
-    account.username = external.username or account.username
-    account.email = external.email or account.email
-    account.display_name = external.display_name or account.display_name
-    account.status = Account.Status.ACTIVE if external.active else Account.Status.DISABLED
-    if external.groups is not None:
-        account.observed_groups = sorted(external.groups)
-    account.observed_at = timezone.now()
-    if isinstance(result, EnsureResult):
-        account.created_by_app = account.created_by_app or result.created
-        if result.group_error is None:
-            account.applied_groups = sorted(set(job.groups))
-        else:
-            # Unfinished: keep every group the app may have to remove later.
-            applied = set(account.applied_groups or []) | set(job.groups)
-            account.applied_groups = sorted(applied - set(result.groups_removed))
-    else:
-        removed = set(result.groups_removed)
-        account.applied_groups = [g for g in account.applied_groups or [] if g not in removed]
-    try:
-        with transaction.atomic():
-            account.save()
-    except IntegrityError as exc:
-        raise AccountConflict(
-            f"The {job.connection.name} account could not be linked to {job.person}."
-        ) from exc
 
 
 def _result_summary(result: EnsureResult | DisableResult) -> dict:
@@ -734,7 +663,7 @@ def complete_task(task: Task, *, actor: User, note: str = "") -> None:
             job.finished_at = timezone.now()
             job.result = {**job.result, "manual": True, "completed_by": actor.email}
             job.save(update_fields=["status", "finished_at", "result"])
-            _record_manual_change(job)
+            accounts.record_manual_change(job)
             _settle(job)
         audit.record(
             "task.done",
@@ -744,20 +673,6 @@ def complete_task(task: Task, *, actor: User, note: str = "") -> None:
             target=task,
             details={"note": note[:500]} if note else {},
         )
-
-
-def _record_manual_change(job: Job) -> None:
-    account, _ = Account.objects.get_or_create(connection=job.connection, person=job.person)
-    account.status = (
-        Account.Status.DISABLED
-        if job.action == Job.Action.DISABLE_ACCOUNT
-        else Account.Status.ACTIVE
-    )
-    account.applied_groups = sorted(job.groups) if job.action == Job.Action.ENSURE_ACCOUNT else []
-    if job.action == Job.Action.ENSURE_ACCOUNT:
-        account.observed_groups = sorted(job.groups)
-    account.observed_at = timezone.now()
-    account.save()
 
 
 def cancel_task(task: Task, *, actor: User, note: str = "") -> None:

@@ -28,7 +28,10 @@ explains how the pieces work together.
 - **Managed group**: a group any profile or team uses. The app adds and
   removes only managed groups.
 - **Account**: an account in a connected app, linked to a person or not, with
-  the status and groups the app last saw.
+  the status and groups the app last saw. Linked to at most one person;
+  never changed for anyone else.
+- **Applied groups**: the groups this app put an account in. They stay
+  removable from that account after a profile or team stops using them.
 - **Workflow**: onboarding, access update or offboarding of one person. It
   keeps the desired-access snapshot it was started with.
 - **Job**: one change at one connection: create or update an account, or

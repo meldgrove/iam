@@ -1,8 +1,8 @@
 """Reads from connections: group import, account comparison and people import.
 
 None of these change anything in a connected app. The account comparison
-links accounts to people and reports drift; fixing drift is a workflow an
-approver starts. The people import creates and updates people but never
+records what the app lists (iam.accounts links accounts to people) and
+reports drift; fixing drift is a workflow an approver starts. The people import creates and updates people but never
 offboards anyone by itself: an end date does that through the schedule.
 """
 
@@ -12,10 +12,10 @@ import logging
 from datetime import date
 
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from . import audit
+from .accounts import record_listing
 from .adapters import AdapterKind
 from .adapters.base import AdapterError, HRRecord
 from .crypto import SecretUnreadable
@@ -114,71 +114,9 @@ def compare_accounts(connection: Connection, actor=None) -> SyncRun:
         if not can_compare_accounts(connection):
             raise SyncError(f"{connection.name} cannot list accounts.")
         listed = list(adapter.list_accounts())
-        now = timezone.now()
-        seen_ids = set()
-        new_links = 0
-        with transaction.atomic():
-            by_id = {a.external_id: a for a in connection.accounts.exclude(external_id="")}
-            for external in listed:
-                if not external.external_id:
-                    continue
-                seen_ids.add(external.external_id)
-                account = by_id.get(external.external_id) or Account(
-                    connection=connection, external_id=external.external_id
-                )
-                account.username = external.username[:255]
-                account.email = external.email[:255]
-                account.display_name = external.display_name[:255]
-                account.status = (
-                    Account.Status.ACTIVE if external.active else Account.Status.DISABLED
-                )
-                if external.groups is not None:
-                    account.observed_groups = sorted(external.groups)
-                account.observed_at = now
-                if account.person_id is None:
-                    person = _match_person(connection, external)
-                    if person is not None:
-                        _drop_placeholder(connection, person)
-                        account.person = person
-                        new_links += 1
-                account.save()
-            missing = (
-                connection.accounts.exclude(external_id="")
-                .exclude(external_id__in=seen_ids)
-                .exclude(status=Account.Status.MISSING)
-                .update(status=Account.Status.MISSING, observed_at=now)
-            )
-        return {
-            "accounts": len(seen_ids),
-            "new_links": new_links,
-            "missing": missing,
-            **drift(connection),
-        }
+        return {**record_listing(connection, listed), **drift(connection)}
 
     return _run(connection, SyncRun.Kind.ACCOUNTS, actor, body)
-
-
-def _match_person(connection: Connection, external) -> Person | None:
-    filters = Q()
-    if external.email:
-        filters |= Q(work_email__iexact=external.email)
-    if external.username:
-        filters |= Q(username__iexact=external.username)
-        if "@" in external.username:
-            filters |= Q(work_email__iexact=external.username)
-    if not filters:
-        return None
-    candidates = list(Person.objects.filter(filters)[:2])
-    if len(candidates) != 1:
-        return None
-    person = candidates[0]
-    linked = Account.objects.filter(connection=connection, person=person).exclude(external_id="")
-    return None if linked.exists() else person
-
-
-def _drop_placeholder(connection: Connection, person: Person) -> None:
-    """A manual task records an account without its ID; the listed account replaces it."""
-    Account.objects.filter(connection=connection, person=person, external_id="").delete()
 
 
 def drift(connection: Connection) -> dict:
