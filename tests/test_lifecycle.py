@@ -321,6 +321,10 @@ def test_cancel_onboarding_returns_to_planned_but_offboarding_cannot_be_cancelle
 def test_status_rules(person):
     with pytest.raises(LifecycleError):
         start_workflow(person, Workflow.Kind.ACCESS_UPDATE)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    # An onboarding restarts only through an access update.
+    with pytest.raises(LifecycleError):
+        start_workflow(person, Workflow.Kind.ONBOARDING)
 
 
 def test_offboarding_reaches_turned_off_connections_as_tasks(person, fake_connection, fake_store):
@@ -645,7 +649,7 @@ def test_job_locks_never_cover_joined_rows(person, admin_user):
     workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
     with CaptureQueriesContext(connection) as queries:
         claim_next_job()
-        start_workflow(person, Workflow.Kind.ONBOARDING)
+        start_workflow(person, Workflow.Kind.ACCESS_UPDATE)  # restarts the onboarding
         cancel_workflow(Workflow.objects.latest("pk"), actor=admin_user)
     locking = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"] and " JOIN " in q["sql"]]
     assert locking, workflow

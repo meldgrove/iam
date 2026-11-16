@@ -95,9 +95,7 @@ def dashboard(request):
         "open_tasks": Task.objects.filter(status=Task.Status.OPEN).count(),
         "failed_jobs": Job.objects.filter(status=Job.Status.FAILED).count(),
         "held_jobs": Job.objects.filter(status=Job.Status.HELD).count(),
-        "open_workflows": Workflow.objects.filter(
-            status__in=[Workflow.Status.RUNNING, Workflow.Status.WAITING, Workflow.Status.FAILED]
-        ).count(),
+        "open_workflows": Workflow.objects.filter(status__in=Workflow.OPEN_STATUSES).count(),
         "connection_errors": Connection.objects.filter(
             enabled=True, status=Connection.Status.ERROR
         ),

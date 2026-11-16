@@ -16,9 +16,7 @@ def workflow_list(request):
     workflows = Workflow.objects.select_related("person", "created_by")
     status = request.GET.get("status", "open")
     if status == "open":
-        workflows = workflows.filter(
-            status__in=[Workflow.Status.RUNNING, Workflow.Status.WAITING, Workflow.Status.FAILED]
-        )
+        workflows = workflows.filter(status__in=Workflow.OPEN_STATUSES)
     elif status in Workflow.Status.values:
         workflows = workflows.filter(status=status)
     return render(
