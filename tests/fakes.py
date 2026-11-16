@@ -21,6 +21,8 @@ class FakeStore:
         self.groups = {"g-staff": "Staff", "g-eng": "Engineering", "g-ops": "Operations"}
         self.fail_with: Exception | None = None
         self.fail_group_with: Exception | None = None
+        # Raised on every read of an account's groups while set.
+        self.fail_group_read_with: Exception | None = None
         self.calls: list[str] = []
         self.ids = itertools.count(1)
 
@@ -87,6 +89,11 @@ class FakeAdapter(Adapter):
         STORE.accounts[account.external_id]["active"] = active
         STORE.calls.append(f"active:{account.external_id}:{active}")
         return self._external(account.external_id)
+
+    def account_groups(self, account):
+        if STORE.fail_group_read_with is not None:
+            raise STORE.fail_group_read_with
+        return set(STORE.accounts[account.external_id]["groups"])
 
     def add_to_group(self, account, group_id):
         if STORE.fail_group_with is not None:

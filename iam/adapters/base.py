@@ -88,21 +88,6 @@ class ConfigurationError(AdapterError):
     """The connection's settings or credentials are wrong or incomplete."""
 
 
-class PartialProvisioning(AdapterError):
-    """The account was created, then a later step (groups) failed. Carries the
-    result, so the engine can still hand over the initial password."""
-
-    def __init__(self, cause: Exception, result):
-        message = (
-            str(cause)
-            if isinstance(cause, AdapterError)
-            else f"Unexpected error ({type(cause).__name__}) after creating the account."
-        )
-        super().__init__(message)
-        self.retryable = getattr(cause, "retryable", False)
-        self.result = result
-
-
 @dataclass
 class ExternalAccount:
     external_id: str
@@ -153,6 +138,9 @@ class EnsureResult:
     # Generated for a new account and delivered by email; never stored.
     initial_password: str | None = None
     notes: list[str] = field(default_factory=list)
+    # Why the groups were left unfinished. The account step still counts:
+    # a group never holds up onboarding.
+    group_error: Exception | None = None
 
 
 @dataclass
@@ -161,6 +149,9 @@ class DisableResult:
     changed: bool = False
     groups_removed: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Why the groups were left unfinished. The account is disabled anyway: a
+    # group never holds up offboarding.
+    group_error: Exception | None = None
 
 
 @dataclass
@@ -338,7 +329,8 @@ class Adapter:
         managed_groups: set[str],
     ) -> EnsureResult:
         """Make the account exist, be active and be in exactly the wanted
-        managed groups. Groups the app does not manage stay as they are."""
+        managed groups. Groups the app does not manage stay as they are. A
+        failing group step ends in `group_error`, never in an exception."""
         account = self.find_account(spec, external_id)
         if account is None:
             result = self.create_account(spec)
@@ -358,11 +350,11 @@ class Adapter:
                 for group_id in sorted((current & managed_groups) - groups):
                     self.remove_from_group(account, group_id)
                     result.groups_removed.append(group_id)
-            except Exception as exc:
-                if result.created:
-                    raise PartialProvisioning(exc, result) from exc
-                raise
-            account.groups = frozenset((current | groups) - set(result.groups_removed))
+            except Exception as exc:  # noqa: BLE001 - the engine reports it
+                result.group_error = exc
+                account.groups = None
+            else:
+                account.groups = frozenset((current | groups) - set(result.groups_removed))
         return result
 
     def disable_account(
@@ -373,11 +365,16 @@ class Adapter:
             return DisableResult(account=None, notes=["No account found; nothing to disable."])
         result = DisableResult(account=account)
         if self.supports_groups and self.remove_groups_on_disable:
-            current = self.account_groups(account)
-            for group_id in sorted(current & managed_groups):
-                self.remove_from_group(account, group_id)
-                result.groups_removed.append(group_id)
-            account.groups = frozenset(current - set(result.groups_removed))
+            try:
+                current = self.account_groups(account)
+                for group_id in sorted(current & managed_groups):
+                    self.remove_from_group(account, group_id)
+                    result.groups_removed.append(group_id)
+            except Exception as exc:  # noqa: BLE001 - the engine reports it
+                result.group_error = exc
+                account.groups = None
+            else:
+                account.groups = frozenset(current - set(result.groups_removed))
         if account.active:
             result.account = self.set_active(account, False)
             result.changed = True

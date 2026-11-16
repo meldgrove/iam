@@ -409,6 +409,160 @@ def test_initial_password_survives_a_failed_group_step(person, fake_store, monke
     assert job.status == Job.Status.SUCCEEDED and len(sent) == 1
 
 
+GROUPS_UNREADABLE = "Fake app answered 404 while trying to list the user's groups."
+
+
+def test_a_failing_group_never_blocks_offboarding(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    fake_store.fail_group_read_with = AdapterError(GROUPS_UNREADABLE)
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    run_all()
+    workflow.refresh_from_db()
+    person.refresh_from_db()
+    job = workflow.jobs.get()
+    account = Account.objects.get(person=person)
+    assert fake_store.accounts[account.external_id]["active"] is False
+    assert job.status == Job.Status.SUCCEEDED
+    assert workflow.status == Workflow.Status.COMPLETED
+    assert person.status == Person.Status.OFFBOARDED
+    assert account.status == Account.Status.DISABLED
+    assert account.applied_groups == ["g-eng", "g-staff"], "still the app's to remove"
+    assert job.result["group_error"] == GROUPS_UNREADABLE
+    task = Task.objects.get(job=job, status=Task.Status.OPEN)
+    assert task.kind == Task.Kind.FAILURE
+    assert GROUPS_UNREADABLE in task.instructions
+    assert "Engineering, Staff" in task.instructions
+
+
+def test_a_failing_group_never_blocks_onboarding(person, fake_store, monkeypatch):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    sent = []
+    monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(body) or True)
+    fake_store.fail_group_read_with = AdapterError(GROUPS_UNREADABLE)
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    workflow.refresh_from_db()
+    person.refresh_from_db()
+    job = workflow.jobs.get()
+    account = Account.objects.get(person=person)
+    assert [body for body in sent if "Initial-Pass-123" in body] == sent[:1]
+    assert job.status == Job.Status.SUCCEEDED
+    assert workflow.status == Workflow.Status.COMPLETED
+    assert person.status == Person.Status.ACTIVE
+    assert account.status == Account.Status.ACTIVE
+    assert account.observed_groups is None, "groups the app could not read are not claimed"
+    task = Task.objects.get(job=job, status=Task.Status.OPEN)
+    assert task.kind == Task.Kind.FAILURE and GROUPS_UNREADABLE in task.instructions
+    assert "Engineering, Staff" in task.instructions
+
+
+def test_a_newer_workflow_replaces_an_unfinished_group_task(person, fake_store):
+    fake_store.fail_group_read_with = AdapterError(GROUPS_UNREADABLE)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    task = Task.objects.get(kind=Task.Kind.FAILURE, status=Task.Status.OPEN)
+    fake_store.fail_group_read_with = None
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    run_all()
+    task.refresh_from_db()
+    workflow.refresh_from_db()
+    assert task.status == Task.Status.CANCELLED, "never add an offboarded person to groups"
+    assert workflow.status == Workflow.Status.COMPLETED
+    assert not Task.objects.filter(status=Task.Status.OPEN).exists()
+
+
+def test_a_replaced_running_job_opens_no_group_task(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    running = claim_next_job()
+    offboarding = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    fake_store.fail_group_read_with = AdapterError(GROUPS_UNREADABLE)
+    run_job(running)
+    fake_store.fail_group_read_with = None
+    run_all()
+    offboarding.refresh_from_db()
+    person.refresh_from_db()
+    assert offboarding.status == Workflow.Status.COMPLETED
+    assert person.status == Person.Status.OFFBOARDED
+    assert not Task.objects.filter(status=Task.Status.OPEN).exists()
+
+
+def test_passing_group_errors_retry_before_they_become_a_task(person, fake_store):
+    fake_store.fail_group_read_with = TransientError("Fake app answered 503.")
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    job = workflow.jobs.get()
+    assert job.status == Job.Status.QUEUED and job.last_error == "Fake app answered 503."
+    assert not Task.objects.exists()
+    account = Account.objects.get(person=person)
+    assert account.status == Account.Status.ACTIVE and account.created_by_app
+    assert AuditEvent.objects.get(action="job.ensure_account").summary.startswith("Created")
+    Job.objects.filter(pk=job.pk).update(attempts=MAX_ATTEMPTS - 1, next_attempt_at=timezone.now())
+    run_all()
+    job.refresh_from_db()
+    workflow.refresh_from_db()
+    account.refresh_from_db()
+    assert len(fake_store.accounts) == 1
+    assert account.created_by_app
+    assert job.status == Job.Status.SUCCEEDED
+    assert workflow.status == Workflow.Status.COMPLETED
+    assert Task.objects.get(job=job).kind == Task.Kind.FAILURE
+
+
+def test_an_account_disabled_before_a_group_retry_is_audited(person, fake_store, profile):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    fake_store.fail_group_read_with = TransientError("Fake app answered 503.")
+    job = start_workflow(person, Workflow.Kind.OFFBOARDING).jobs.get()
+    run_all()
+    job.refresh_from_db()
+    account = Account.objects.get(person=person)
+    assert job.status == Job.Status.QUEUED
+    assert fake_store.accounts[account.external_id]["active"] is False
+    event = AuditEvent.objects.get(action="job.disable_account")
+    assert event.summary.startswith("Disabled the Fake app account")
+    assert event.details["group_error"] == "Fake app answered 503."
+    # A newer offboarding without the app replaces the retry, and still
+    # removes the groups.
+    fake_store.fail_group_read_with = None
+    profile.grants.all().delete()
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    run_all()
+    account.refresh_from_db()
+    assert workflow.jobs.get().status == Job.Status.SUCCEEDED
+    assert account.status == Account.Status.DISABLED and account.applied_groups == []
+    assert fake_store.accounts[account.external_id]["groups"] == set()
+
+
+def test_a_group_task_stays_open_where_no_newer_job_runs(person, fake_store, profile):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    fake_store.fail_group_read_with = AdapterError(GROUPS_UNREADABLE)
+    start_workflow(person, Workflow.Kind.OFFBOARDING)
+    run_all()
+    fake_store.fail_group_read_with = None
+    task = Task.objects.get(kind=Task.Kind.FAILURE, status=Task.Status.OPEN)
+    # Hired again with a profile that no longer has this app.
+    profile.grants.all().delete()
+    rehire = start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    task.refresh_from_db()
+    assert not rehire.jobs.exists()
+    assert task.status == Task.Status.OPEN, "nothing else removes the groups"
+
+
+def test_unexpected_group_errors_do_not_leak_details(person, fake_store):
+    fake_store.fail_group_read_with = RuntimeError("token=supersecret")
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    job = Job.objects.get()
+    assert job.status == Job.Status.SUCCEEDED
+    assert "supersecret" not in str(job.result)
+    assert "supersecret" not in Task.objects.get(job=job).instructions
+
+
 def test_groups_dropped_from_the_policy_are_removed(person, fake_store, profile):
     start_workflow(person, Workflow.Kind.ONBOARDING)
     run_all()

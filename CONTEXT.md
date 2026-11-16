@@ -34,7 +34,7 @@ explains how the pieces work together.
 - **Job**: one change at one connection: create or update an account, or
   disable it. Run by the worker, retried on passing errors.
 - **Task**: work for a person: a change in an app without automation, a failed
-  job, or sign-in details to hand over.
+  job, groups a job could not update, or sign-in details to hand over.
 - **Held removal**: an automatic removal over the daily removal limit; it
   waits for an admin's approval.
 - **Sync run**: a read from a connection: group import, account comparison
