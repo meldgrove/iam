@@ -37,6 +37,9 @@ async function shot(page, name) {
 }
 
 async function waitForWorkflow(page, status) {
+  // The start button submits a form that redirects here; a reload before the
+  // redirect lands races the navigation and fails.
+  await page.waitForURL(/\/workflows\/\d+\/$/);
   for (let i = 0; i < 40; i += 1) {
     await page.reload();
     const text = await page.locator("h1").innerText();
