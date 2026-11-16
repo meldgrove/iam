@@ -1,0 +1,44 @@
+{% extends "iam/base.html" %}{% load iam_tags %}
+{% block title %}{{ connection }}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>{{ connection }} {% if connection.enabled %}{% badge connection.status connection.get_status_display %}{% else %}<span class="badge">Off</span>{% endif %}</h1>
+<p class="sub">{{ adapter.name }}{% if connection.kind == 'provisioning' %} · {{ connection.get_mode_display }}{% endif %}</p></div>
+<div class="actions">
+  <form class="inline" method="post" action="{% url 'connection_test' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Test connection</button></form>
+  {% if adapter.supports_groups and not adapter.manual_groups or adapter.slug == 'slack' %}<form class="inline" method="post" action="{% url 'connection_import_groups' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Import {{ adapter.group_label|lower }}</button></form>{% endif %}
+  {% if connection.kind == 'hr_source' %}<form class="inline" method="post" action="{% url 'connection_sync' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Import people now</button></form>{% elif can_compare %}<form class="inline" method="post" action="{% url 'connection_sync' connection.pk %}">{% csrf_token %}<button class="btn" type="submit">Compare accounts now</button></form>{% endif %}
+  <a class="btn" href="{% url 'connection_edit' connection.pk %}">Edit</a>
+  <form class="inline" method="post" action="{% url 'connection_toggle' connection.pk %}">{% csrf_token %}<button class="btn {% if not connection.enabled %}primary{% endif %}" type="submit">{% if connection.enabled %}Turn off{% else %}Turn on{% endif %}</button></form>
+</div></div>
+{% if connection.status_message %}<div class="notice {% if connection.status == 'ok' %}info{% else %}danger{% endif %}">{{ connection.status_message }}{% if connection.checked_at %} <span class="small">({{ connection.checked_at|date:"d.m.Y H:i" }})</span>{% endif %}</div>{% endif %}
+<div class="grid two">
+<div class="card"><h2>Settings</h2>
+<dl class="facts">
+{% for spec, value in settings_rows %}<dt>{{ spec.label }}</dt><dd class="small">{% if spec.kind == 'bool' %}{% if value %}yes{% else %}no{% endif %}{% else %}{{ value|default:"—"|linebreaksbr }}{% endif %}</dd>{% endfor %}
+{% for spec, saved in secret_rows %}<dt>{{ spec.label }}</dt><dd>{% if saved %}<span class="badge ok">saved</span>{% else %}<span class="badge">not set</span>{% endif %}</dd>{% endfor %}
+</dl></div>
+<div class="card"><h2>Used by</h2>
+{% if grants %}<ul>{% for g in grants %}<li><a href="{% url 'profile_detail' g.profile.pk %}">{{ g.profile }}</a></li>{% endfor %}</ul>{% else %}<p class="empty">No access profile grants this connection yet.</p>{% endif %}
+{% if connection.kind == 'hr_source' %}<p class="small muted">People imports run every {{ connection.sync_interval_minutes }} minutes while the connection is on.</p>{% elif can_compare %}<p class="small muted">Account comparisons run every {{ connection.sync_interval_minutes }} minutes while the connection is on (0 = never).</p>{% endif %}
+</div>
+</div>
+{% if adapter.supports_groups %}
+<div class="card"><h2>{{ adapter.group_label }} <span class="muted small">{{ groups|length }}</span></h2>
+{% if adapter.manual_groups %}<form method="post" action="{% url 'connection_add_group' connection.pk %}" class="filters">{% csrf_token %}<input type="text" name="name" placeholder="Name" aria-label="Name" maxlength="255" style="max-width:280px"><button class="btn" type="submit">Add</button></form>{% endif %}
+{% if groups %}<table><thead><tr><th>Name</th><th>ID</th><th></th></tr></thead><tbody>{% for g in groups %}<tr><td>{{ g.label }}{% if g.missing %} <span class="badge danger">no longer listed</span>{% endif %}</td><td class="small muted mono">{{ g.external_id|truncatechars:40 }}</td><td>{% if g.manual %}<form class="inline" method="post" action="{% url 'connection_remove_group' connection.pk g.pk %}">{% csrf_token %}<button class="btn small" type="submit">Remove</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table>
+{% else %}<p class="empty">None yet.{% if not adapter.manual_groups %} Import them with the button above.{% endif %}</p>{% endif %}
+{% if connection.groups_synced_at %}<p class="small muted">Imported {{ connection.groups_synced_at|date:"d.m.Y H:i" }}.</p>{% endif %}
+</div>
+{% endif %}
+{% if connection.kind == 'provisioning' %}
+<div class="card"><h2>Accounts <span class="muted small">{{ account_count }}</span></h2>
+{% if accounts %}<table><thead><tr><th>Account</th><th>Person</th><th>Status</th><th>Seen</th></tr></thead><tbody>{% for a in accounts %}<tr><td class="small mono">{{ a.username|default:a.email|default:a.external_id }}</td><td>{% if a.person %}<a href="{% url 'person_detail' a.person_id %}">{{ a.person }}</a>{% else %}<span class="badge warn">not linked</span>{% endif %}</td><td>{% badge a.status a.get_status_display %}</td><td class="small muted">{{ a.observed_at|date:"d.m.Y H:i"|default:"—" }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">No accounts known yet.</p>{% endif %}
+</div>
+{% endif %}
+<div class="card"><h2>Recent reads</h2>
+{% if sync_runs %}<table><thead><tr><th>Kind</th><th>Started</th><th>Status</th><th>Summary</th></tr></thead><tbody>{% for r in sync_runs %}<tr><td>{{ r.get_kind_display }}</td><td class="small muted">{{ r.started_at|date:"d.m.Y H:i" }}{% if r.triggered_by %} · {{ r.triggered_by }}{% endif %}</td><td>{% badge r.status r.get_status_display %}</td><td class="small">{% if r.error %}{{ r.error }}{% else %}{{ r.summary|summarize }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">Nothing read yet.</p>{% endif %}
+</div>
+{% if not connection.jobs.exists and not grants %}
+<form method="post" action="{% url 'connection_delete' connection.pk %}" style="margin-top:1rem">{% csrf_token %}<button class="btn danger" type="submit">Delete connection</button></form>
+{% endif %}
+{% endblock %}

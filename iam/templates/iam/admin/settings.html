@@ -1,0 +1,9 @@
+{% extends "iam/base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Settings</h1><p class="sub">Lifecycle rules and notifications. Sign-in and deployment settings are environment variables (docs/configuration.md).</p></div></div>
+<form method="post" class="card">{% csrf_token %}
+  <div class="form-grid">{% for field in form %}{% if field.name == "notification_emails" %}{% include "iam/includes/field.html" with wide=True %}{% else %}{% include "iam/includes/field.html" %}{% endif %}{% endfor %}</div>
+  <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
+</form>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "iam/plain.html" %}
+{% block title %}Development sign-in{% endblock %}
+{% block content %}
+<div class="notice">Development only. Never enable DEV_LOGIN on a server.</div>
+<form method="post">{% csrf_token %}
+  <div class="field"><label for="email">App user</label>
+  <select id="email" name="email">{% for u in users %}<option value="{{ u.email }}">{{ u.email }} ({{ u.get_role_display }})</option>{% endfor %}</select></div>
+  <div class="form-actions"><button class="btn primary" type="submit">Sign in</button></div>
+</form>
+{% endblock %}

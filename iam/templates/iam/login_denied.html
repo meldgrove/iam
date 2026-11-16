@@ -1,0 +1,7 @@
+{% extends "iam/plain.html" %}
+{% block title %}No access{% endblock %}
+{% block content %}
+<p>You signed in, but this app has no active user for you.</p>
+<p class="muted small">Ask an admin to add your email address in Admin › Users and roles, then sign in again.</p>
+<a class="btn" href="{% url 'login' %}">Back to sign-in</a>
+{% endblock %}

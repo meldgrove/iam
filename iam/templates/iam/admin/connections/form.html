@@ -1,0 +1,17 @@
+{% extends "iam/base.html" %}
+{% block title %}{% if connection %}Edit {{ connection }}{% else %}Add {{ adapter.name }}{% endif %}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>{% if connection %}Edit {{ connection }}{% else %}Add {{ adapter.name }}{% endif %}</h1><p class="sub">{{ adapter.description }}</p></div></div>
+<form method="post" class="card" autocomplete="off">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="notice danger">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+  <div class="form-grid">
+    {% include "iam/includes/field.html" with field=form.name %}
+    {% if form.mode %}{% include "iam/includes/field.html" with field=form.mode %}{% endif %}
+    {% include "iam/includes/field.html" with field=form.enabled wide=True %}
+  </div>
+  <h2 style="margin-top:1.2rem">Settings</h2>
+  <p class="small muted">Secret values are stored encrypted and never shown again. See docs/connections.md for what each app needs.</p>
+  <div class="form-grid">{% for field in form.config_fields %}{% if field.widget_type == "textarea" %}{% include "iam/includes/field.html" with wide=True %}{% else %}{% include "iam/includes/field.html" %}{% endif %}{% endfor %}</div>
+  <div class="form-actions"><button class="btn primary" type="submit">Save</button><a class="btn" href="{% if connection %}{% url 'connection_detail' connection.pk %}{% else %}{% url 'connection_choose' %}{% endif %}">Cancel</a></div>
+</form>
+{% endblock %}

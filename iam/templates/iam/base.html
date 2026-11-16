@@ -1,0 +1,45 @@
+{% load static iam_tags %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · {{ organization_name|default:"Meldgrove IAM" }}</title>
+  <link rel="stylesheet" href="{% static 'iam/app.css' %}">
+  <link rel="icon" href="{% static 'iam/icon.svg' %}" type="image/svg+xml">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="{% url 'dashboard' %}"><span class="brand-mark">IAM</span><span>{{ organization_name|default:"Meldgrove IAM" }}<small>Meldgrove IAM{% if app_version %} {{ app_version }}{% endif %}</small></span></a>
+    <nav class="nav">
+      <a class="{% nav_active '/' %}" href="{% url 'dashboard' %}">Dashboard</a>
+      <a class="{% nav_active '/people/' %}" href="{% url 'person_list' %}">People</a>
+      <a class="{% nav_active '/tasks/' %}" href="{% url 'task_list' %}">Tasks {% if nav_open_tasks %}<span class="count">{{ nav_open_tasks }}</span>{% endif %}</a>
+      <a class="{% nav_active '/workflows/' %}" href="{% url 'workflow_list' %}">Workflows</a>
+      <a class="{% nav_active '/jobs/' %}" href="{% url 'job_list' %}">Jobs {% if nav_failed_jobs or nav_held_jobs %}<span class="count alert">{{ nav_failed_jobs|add:nav_held_jobs }}</span>{% endif %}</a>
+      <div class="nav-section">Access policy</div>
+      <a class="{% nav_active '/profiles/' %}" href="{% url 'profile_list' %}">Access profiles</a>
+      <a class="{% nav_active '/teams/' %}" href="{% url 'team_list' %}">Teams</a>
+      <a class="{% nav_active '/audit/' %}" href="{% url 'audit_list' %}">Audit log</a>
+      {% if user.is_admin %}
+      <div class="nav-section">Admin</div>
+      <a class="{% nav_active '/admin/connections/' %}" href="{% url 'connection_list' %}">Connections</a>
+      <a class="{% nav_active '/admin/users/' %}" href="{% url 'user_list' %}">Users and roles</a>
+      <a class="{% nav_active '/admin/settings/' %}" href="{% url 'settings' %}">Settings</a>
+      {% endif %}
+    </nav>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <span class="who">{{ user }} · {{ user.get_role_display }}</span>
+      {% if account_url %}<a class="btn small" href="{{ account_url }}">My account</a>{% endif %}
+      <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn small" type="submit">Sign out</button></form>
+    </header>
+    <main class="content">
+      {% if messages %}<ul class="messages">{% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}</ul>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+</body>
+</html>

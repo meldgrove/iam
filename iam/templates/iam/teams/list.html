@@ -1,0 +1,13 @@
+{% extends "iam/base.html" %}
+{% block title %}Teams{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Teams</h1><p class="sub">Members join the team's groups in every app their access profile gives them an account in.</p></div>
+{% if user.is_admin %}<div class="actions"><a class="btn primary" href="{% url 'team_create' %}">Add team</a></div>{% endif %}</div>
+<div class="table-wrap">
+{% if teams %}
+<table><thead><tr><th>Team</th><th>Members</th><th>Groups</th></tr></thead><tbody>
+{% for t in teams %}<tr><td><a href="{% url 'team_detail' t.pk %}">{{ t }}</a>{% if t.description %}<div class="small muted">{{ t.description|truncatechars:100 }}</div>{% endif %}</td><td>{{ t.member_count }}</td><td class="small">{% for g in t.groups.all %}{{ g.connection.name }}: {{ g.label }}{% if not forloop.last %}<br>{% endif %}{% empty %}—{% endfor %}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">No teams yet.</p>{% endif %}
+</div>
+{% endblock %}

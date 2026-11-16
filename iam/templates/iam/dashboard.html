@@ -1,0 +1,24 @@
+{% extends "iam/base.html" %}{% load iam_tags %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Dashboard</h1><p class="sub">People, access changes and what needs attention.</p></div>
+{% if user.is_approver %}<div class="actions"><a class="btn primary" href="{% url 'person_create' %}">Add person</a></div>{% endif %}</div>
+{% if not connections and user.is_admin %}<div class="notice info">No apps are connected yet. Start in <a href="{% url 'connection_list' %}">Admin › Connections</a>, then create access profiles.</div>{% endif %}
+{% if worker_stale %}<div class="notice danger">The worker has not reported in {{ worker_max_age }} seconds{% if worker_beat %} (last: {{ worker_beat.beat_at|date:"d.m.Y H:i" }}){% endif %}. Jobs and the schedule do not run without it.</div>{% endif %}
+{% for c in connection_errors %}<div class="notice danger">Connection <a href="{% url 'connection_detail' c.pk %}">{{ c.name }}</a> has an error: {{ c.status_message|truncatechars:160 }}</div>{% endfor %}
+<div class="grid stats">
+  <a class="stat {% if open_tasks %}alert{% endif %}" href="{% url 'task_list' %}"><div class="value">{{ open_tasks }}</div><div class="label">Open tasks</div></a>
+  <a class="stat {% if failed_jobs %}alert{% endif %}" href="{% url 'job_list' %}?status=failed"><div class="value">{{ failed_jobs }}</div><div class="label">Failed jobs</div></a>
+  <a class="stat {% if held_jobs %}alert{% endif %}" href="{% url 'job_list' %}?status=held"><div class="value">{{ held_jobs }}</div><div class="label">Removals to approve</div></a>
+  <a class="stat" href="{% url 'workflow_list' %}"><div class="value">{{ open_workflows }}</div><div class="label">Open workflows</div></a>
+  <a class="stat" href="{% url 'person_list' %}?status=active"><div class="value">{{ people_counts.active }}</div><div class="label">Active people</div></a>
+  <a class="stat" href="{% url 'person_list' %}?status=planned"><div class="value">{{ people_counts.planned }}</div><div class="label">Planned</div></a>
+</div>
+<div class="grid two">
+  <div class="card"><h2>Starting in the next 30 days</h2>
+  {% if starting %}<table><tbody>{% for p in starting %}<tr><td><a href="{% url 'person_detail' p.pk %}">{{ p }}</a></td><td class="small muted">{{ p.start_date|date:"d.m.Y" }}</td><td>{% badge p.status p.get_status_display %}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">Nobody.</p>{% endif %}</div>
+  <div class="card"><h2>Leaving in the next 30 days</h2>
+  {% if leaving %}<table><tbody>{% for p in leaving %}<tr><td><a href="{% url 'person_detail' p.pk %}">{{ p }}</a></td><td class="small muted">{{ p.end_date|date:"d.m.Y" }}</td><td>{% badge p.status p.get_status_display %}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">Nobody.</p>{% endif %}</div>
+</div>
+<div class="card"><h2>Recent activity</h2>{% include "iam/includes/events.html" with events=recent_events show_person=True %}<p class="small"><a href="{% url 'audit_list' %}">Full audit log</a></p></div>
+{% endblock %}

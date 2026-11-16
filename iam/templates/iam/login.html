@@ -1,0 +1,10 @@
+{% extends "iam/plain.html" %}
+{% block content %}
+{% if oidc_enabled %}
+<p class="muted">Sign in to manage people and access.</p>
+<a class="btn primary" href="{% url 'oidc_authentication_init' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Sign in with {{ provider_name }}</a>
+{% else %}
+<div class="notice">Sign-in is not set up. Set OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET (or KEYCLOAK_URL and KEYCLOAK_REALM); see docs/authentication.md.</div>
+{% endif %}
+{% if dev_login %}<p class="small" style="margin-top:1rem"><a href="{% url 'dev_login' %}">Development sign-in</a></p>{% endif %}
+{% endblock %}

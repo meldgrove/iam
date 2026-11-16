@@ -1,0 +1,20 @@
+{% extends "iam/base.html" %}{% load iam_tags %}
+{% block title %}Connections{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Connections</h1><p class="sub">The apps and services this app manages accounts in, imports people from, or sends email through.</p></div>
+<div class="actions"><a class="btn primary" href="{% url 'connection_choose' %}">Add connection</a></div></div>
+{% if not has_connections %}<div class="notice info">Nothing connected yet. Add your directory first (for example Keycloak or Google Workspace), then an email connection for sign-in details and task notifications.</div>{% endif %}
+{% for label, connections in sections %}{% if connections %}
+<h2>{{ label }}</h2>
+<div class="table-wrap" style="margin-bottom:1.2rem"><table>
+<thead><tr><th>Name</th><th>Type</th><th>Mode</th><th>State</th><th>Last check</th></tr></thead><tbody>
+{% for c in connections %}<tr>
+  <td><a href="{% url 'connection_detail' c.pk %}">{{ c.name }}</a></td>
+  <td class="small">{{ c.adapter_class.name|default:c.adapter }}</td>
+  <td class="small">{% if c.kind == 'provisioning' %}{{ c.get_mode_display|truncatewords:1|cut:"…" }}{% else %}—{% endif %}</td>
+  <td>{% if c.enabled %}{% badge c.status c.get_status_display %}{% else %}<span class="badge">Off</span>{% endif %}</td>
+  <td class="small muted">{{ c.checked_at|date:"d.m.Y H:i"|default:"never" }}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% endif %}{% endfor %}
+{% endblock %}

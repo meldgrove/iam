@@ -1,0 +1,91 @@
+# Production: the application as one stack (migrations, web, worker, updater).
+# PostgreSQL runs separately (a managed database or its own Coolify resource);
+# set DATABASE_URL to it. Local development uses compose.dev.yaml.
+# IAM_VERSION names a release series such as 0.1 (every 0.1.x release), latest,
+# or an exact version (docs/updates.md). Every deploy pulls the tag again.
+# Coolify reads this file from the branch `stable`, which is at the newest release.
+x-image: &image ghcr.io/meldgrove/meldgrove-iam:${IAM_VERSION:?Set the release series, e.g. 0.1}
+
+x-application: &application
+  image: *image
+  pull_policy: ${PULL_POLICY:-always}
+  restart: unless-stopped
+  mem_limit: 512m
+  environment:
+    DJANGO_DEBUG: "0"
+    DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-production}
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set a random secret of at least 50 characters}
+    ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a Fernet key (manage.py generate_key)}
+    ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Include the public hostname}
+    CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set the public HTTPS origin}
+    DATABASE_URL: ${DATABASE_URL:?Set the PostgreSQL URL}
+    TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-1}
+    FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+    HEALTHCHECK_TOKEN: ${HEALTHCHECK_TOKEN:?Set a random health check token}
+    TZ: ${TZ:-UTC}
+    # Sign-in: OIDC_ISSUER for any OpenID Connect provider, or KEYCLOAK_URL and KEYCLOAK_REALM.
+    OIDC_ISSUER: ${OIDC_ISSUER:-}
+    KEYCLOAK_URL: ${KEYCLOAK_URL:-}
+    KEYCLOAK_REALM: ${KEYCLOAK_REALM:-}
+    OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set the sign-in client ID}
+    OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Set the sign-in client secret}
+    OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-}
+    OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
+    OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
+    OIDC_ADMIN_GROUPS: ${OIDC_ADMIN_GROUPS:-}
+    OIDC_APPROVER_GROUPS: ${OIDC_APPROVER_GROUPS:-}
+    OIDC_VIEWER_GROUPS: ${OIDC_VIEWER_GROUPS:-}
+    BOOTSTRAP_ADMIN_EMAILS: ${BOOTSTRAP_ADMIN_EMAILS:-}
+    SENTRY_DSN: ${SENTRY_DSN:-}
+    SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+    SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+
+services:
+  # One-time job. Coolify leaves services with restart "no" out of the stack's
+  # health, so the exited container does not mark the stack unhealthy.
+  migrate:
+    <<: *application
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    restart: "no"
+
+  web:
+    <<: *application
+    expose:
+      - "8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/-/healthz', timeout=3)"]
+      interval: 30s
+      start_period: 30s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    <<: *application
+    command: ["python", "manage.py", "run_worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request; r=urllib.request.Request('http://web:8000/-/readyz',headers={'X-Health-Token':os.environ['HEALTHCHECK_TOKEN'],'X-Forwarded-Proto':'https'}); urllib.request.urlopen(r,timeout=5)"]
+      interval: 60s
+      start_period: 120s
+      timeout: 10s
+      retries: 3
+
+  # Automatic updates (docs/updates.md): off until UPDATE_DEPLOY_HOOK_URL is set. When
+  # the tag in IAM_VERSION points to a new image, it calls that deploy link.
+  updater:
+    image: ghcr.io/meldgrove/updater:0.1
+    pull_policy: ${PULL_POLICY:-always}
+    restart: unless-stopped
+    mem_limit: 64m
+    environment:
+      IMAGE: *image
+      DEPLOY_HOOK_URL: ${UPDATE_DEPLOY_HOOK_URL:-}
+      DEPLOY_HOOK_TOKEN: ${UPDATE_DEPLOY_HOOK_TOKEN:-}
+      COOLDOWN: ${UPDATE_COOLDOWN:-3d}
+      WINDOW: ${UPDATE_WINDOW:-}
+      TZ: ${TZ:-UTC}
