@@ -102,7 +102,8 @@ def claim_next_job() -> Job | None:
     )
     with transaction.atomic():
         job = (
-            Job.objects.select_for_update(skip_locked=True)
+            # Locks only the job row, not the workflow the filter joins.
+            Job.objects.select_for_update(skip_locked=True, of=("self",))
             .filter(status=Job.Status.QUEUED, next_attempt_at__lte=now)
             .exclude(workflow__status=Workflow.Status.CANCELLED)
             .exclude(Exists(busy))

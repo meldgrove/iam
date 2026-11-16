@@ -127,8 +127,9 @@ def _supersede_open_workflows(person: Person, actor) -> list[int]:
 
 def _jobs_to_cancel(workflow: Workflow):
     """A running job finishes: its change may already have happened in the
-    connected app. The lock keeps the worker from claiming a job meanwhile."""
-    return workflow.jobs.select_for_update().exclude(
+    connected app. The lock keeps the worker from claiming a job meanwhile;
+    it covers only the job rows, not the connections the ordering joins."""
+    return workflow.jobs.select_for_update(of=("self",)).exclude(
         status__in=[Job.Status.SUCCEEDED, Job.Status.CANCELLED, Job.Status.RUNNING]
     )
 

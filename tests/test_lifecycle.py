@@ -480,3 +480,19 @@ def test_a_job_cancelled_while_it_ran_still_records_its_change(person, fake_stor
     run_job(job)
     assert Account.objects.get(person=person).status == Account.Status.ACTIVE
     assert len(sent) == 1 and "Initial-Pass-123" in sent[0]
+
+
+def test_job_locks_never_cover_joined_rows(person, admin_user):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Only PostgreSQL locks rows.")
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    with CaptureQueriesContext(connection) as queries:
+        claim_next_job()
+        start_workflow(person, Workflow.Kind.ONBOARDING)
+        cancel_workflow(Workflow.objects.latest("pk"), actor=admin_user)
+    locking = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"] and " JOIN " in q["sql"]]
+    assert locking, workflow
+    assert all('FOR UPDATE OF "iam_job"' in sql for sql in locking), locking
