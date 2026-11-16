@@ -226,8 +226,9 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
     conflict = ""
     with transaction.atomic():
         job = Job.objects.select_for_update().get(pk=job.pk)
-        if job.status != Job.Status.RUNNING:
-            return job
+        # The change happened in the connected app, so the account and the
+        # initial password count even when the job was cancelled, or handed
+        # back to the queue after its lease ran out, while it ran.
         try:
             with transaction.atomic():
                 _record_account(job, result)

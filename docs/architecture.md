@@ -23,13 +23,14 @@ per connection:
 | Workflow | Starts | Person's status | Jobs |
 | --- | --- | --- | --- |
 | Onboarding | By an approver, or by the schedule a set number of days before the start date | Planned → Onboarding → Active | Create or update the account where the profile grants one |
-| Access update | By an approver after changing profile, team or policy | stays Active | Create or update where granted; disable known accounts no longer granted |
+| Access update | By an approver after changing profile, team or policy; during onboarding it starts a new onboarding instead | stays Active | Create or update where granted; disable known accounts no longer granted |
 | Offboarding | By an approver, or by the schedule the day after the last day | → Offboarding → Offboarded | Disable every known account and every account the profile grants |
 
 A new workflow for the same person replaces the open one: its unfinished jobs
 are cancelled. Onboarding and access updates can be cancelled; offboarding
-cannot (retry or complete its steps instead). Offboarding turns off the
-person's app user at once.
+cannot (retry or complete its steps instead). A job that is running when its
+workflow ends finishes, and its result (the account, an initial password)
+is kept. Offboarding turns off the person's app user at once.
 
 **Jobs.** The worker (`manage.py run_worker`) runs queued jobs. For a
 connection in automatic mode it calls the adapter:
