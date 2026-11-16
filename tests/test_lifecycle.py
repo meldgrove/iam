@@ -302,7 +302,7 @@ def test_account_linked_to_someone_else_is_a_conflict(person, fake_store, fake_c
     run_all()
     job = workflow.jobs.get()
     assert job.status == Job.Status.FAILED
-    assert "linked to" in job.last_error
+    assert "belongs to" in job.last_error
     assert Account.objects.get(external_id=external_id).person == other
 
 
@@ -354,3 +354,70 @@ def test_manual_tasks_name_the_groups_to_remove(person, fake_connection, groups)
     start_workflow(person, Workflow.Kind.ONBOARDING)
     task = Task.objects.get(kind=Task.Kind.CHANGE)
     assert "Remove from these, if a member: Operations." in task.instructions
+
+
+def test_a_replaced_running_job_never_runs_again(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    old = claim_next_job()
+    offboarding = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    new = offboarding.jobs.get()
+    assert claim_next_job() is None, "waits while the old job for the same app runs"
+    fake_store.fail_with = TransientError("timeout")
+    run_job(old)
+    old.refresh_from_db()
+    assert old.status == Job.Status.CANCELLED
+    fake_store.fail_with = None
+    run_all()
+    new.refresh_from_db()
+    assert new.status == Job.Status.SUCCEEDED
+    assert claim_next_job() is None
+
+
+def test_someone_elses_account_is_never_changed(person, fake_store, profile):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    namesake = Person.objects.create(
+        first_name="Ada",
+        last_name="Namesake",
+        username="ada",
+        access_profile=profile,
+        status=Person.Status.ACTIVE,
+    )
+    job = start_workflow(namesake, Workflow.Kind.OFFBOARDING).jobs.get()
+    run_all()
+    job.refresh_from_db()
+    assert job.status == Job.Status.FAILED and "belongs to Ada Lovelace" in job.last_error
+    assert all(data["active"] for data in fake_store.accounts.values())
+    assert "active:" not in " ".join(fake_store.calls)
+
+
+def test_initial_password_survives_a_failed_group_step(person, fake_store, monkeypatch):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    sent = []
+    monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(body) or True)
+    fake_store.fail_group_with = TransientError("Fake app answered 503.")
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    job = Job.objects.get()
+    assert job.status == Job.Status.QUEUED and len(sent) == 1
+    assert "Initial-Pass-123" in sent[0]
+    Job.objects.filter(pk=job.pk).update(next_attempt_at=timezone.now())
+    run_all()
+    job.refresh_from_db()
+    assert job.status == Job.Status.SUCCEEDED and len(sent) == 1
+
+
+def test_groups_dropped_from_the_policy_are_removed(person, fake_store, profile):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    account = Account.objects.get(person=person)
+    assert account.applied_groups == ["g-eng", "g-staff"]
+    fake_store.accounts[account.external_id]["groups"].add("unmanaged")
+    profile.grants.get().groups.clear()
+    start_workflow(person, Workflow.Kind.ACCESS_UPDATE)
+    run_all()
+    assert fake_store.accounts[account.external_id]["groups"] == {"g-eng", "unmanaged"}
+    account.refresh_from_db()
+    assert account.applied_groups == ["g-eng"]

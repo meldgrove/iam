@@ -147,7 +147,9 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
     settings = AppSettings.load()
     jobs = []
     for connection in provisioning_connections(include_disabled=offboarding):
-        managed = sorted(managed_group_ids(connection))
+        account = accounts.get(connection.pk)
+        applied = set(account.applied_groups or []) if account else set()
+        managed = sorted(managed_group_ids(connection) | applied)
         grant = desired.get(connection.pk)
         if grant is not None:
             job = Job(
@@ -159,7 +161,6 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
                 managed_groups=managed,
             )
         else:
-            account = accounts.get(connection.pk)
             has_account = account is not None and account.status in (
                 Account.Status.ACTIVE,
                 Account.Status.UNKNOWN,

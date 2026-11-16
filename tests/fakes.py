@@ -20,6 +20,7 @@ class FakeStore:
         self.accounts: dict[str, dict] = {}
         self.groups = {"g-staff": "Staff", "g-eng": "Engineering", "g-ops": "Operations"}
         self.fail_with: Exception | None = None
+        self.fail_group_with: Exception | None = None
         self.calls: list[str] = []
         self.ids = itertools.count(1)
 
@@ -88,6 +89,9 @@ class FakeAdapter(Adapter):
         return self._external(account.external_id)
 
     def add_to_group(self, account, group_id):
+        if STORE.fail_group_with is not None:
+            error, STORE.fail_group_with = STORE.fail_group_with, None
+            raise error
         STORE.accounts[account.external_id]["groups"].add(group_id)
 
     def remove_from_group(self, account, group_id):

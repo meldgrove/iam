@@ -16,11 +16,18 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from . import audit
 from .adapters import AdapterKind
-from .adapters.base import AccountSpec, AdapterError, DisableResult, EnsureResult
+from .adapters.base import (
+    AccountSpec,
+    AdapterError,
+    DisableResult,
+    EnsureResult,
+    PartialProvisioning,
+)
 from .crypto import SecretUnreadable
 from .lifecycle import cancel_job, refresh_workflow
 from .models import (
@@ -74,10 +81,19 @@ def group_labels(job: Job) -> list[str]:
 
 def claim_next_job() -> Job | None:
     now = timezone.now()
+    # A job waits while another job for the same person and app runs, so an
+    # older change can never land after a newer one.
+    busy = Job.objects.filter(
+        status=Job.Status.RUNNING,
+        person_id=OuterRef("person_id"),
+        connection_id=OuterRef("connection_id"),
+    )
     with transaction.atomic():
         job = (
             Job.objects.select_for_update(skip_locked=True)
             .filter(status=Job.Status.QUEUED, next_attempt_at__lte=now)
+            .exclude(workflow__status=Workflow.Status.CANCELLED)
+            .exclude(Exists(busy))
             .order_by("next_attempt_at", "pk")
             .first()
         )
@@ -99,6 +115,10 @@ def recover_stale_jobs() -> int:
         with transaction.atomic():
             job = Job.objects.select_for_update().get(pk=job.pk)
             if job.status != Job.Status.RUNNING:
+                continue
+            if job.workflow.status == Workflow.Status.CANCELLED:
+                cancel_job(job, note="The worker stopped; the workflow was replaced meanwhile.")
+                count += 1
                 continue
             job.status = Job.Status.QUEUED
             job.locked_until = None
@@ -126,6 +146,25 @@ def run_job(job: Job) -> Job:
     external_id = account.external_id if account else ""
     try:
         adapter = connection.build_adapter()
+        # Check whose account the app is about to change before changing it.
+        found = adapter.find_account(spec, external_id)
+        if found is not None and found.external_id:
+            owner = (
+                Account.objects.filter(connection=connection, external_id=found.external_id)
+                .exclude(person=None)
+                .exclude(person=person)
+                .select_related("person")
+                .first()
+            )
+            if owner is not None:
+                return fail_job(
+                    job,
+                    f"The {connection.name} account {found.username or found.external_id} "
+                    f"belongs to {owner.person}. Nothing was changed. Check the work email "
+                    "and username.",
+                    retryable=False,
+                )
+            external_id = found.external_id
         if job.action == Job.Action.ENSURE_ACCOUNT:
             result = adapter.ensure_account(
                 spec,
@@ -137,6 +176,12 @@ def run_job(job: Job) -> Job:
             result = adapter.disable_account(
                 spec, external_id=external_id, managed_groups=set(job.managed_groups)
             )
+    except PartialProvisioning as exc:
+        # The account exists now; its password must reach the person even
+        # though the job runs again for the rest.
+        if exc.result.initial_password:
+            deliver_initial_password(job, exc.result.initial_password)
+        return fail_job(job, str(exc), retryable=exc.retryable)
     except AdapterError as exc:
         return fail_job(job, str(exc), retryable=exc.retryable)
     except SecretUnreadable as exc:
@@ -213,6 +258,7 @@ def _record_account(job: Job, result: EnsureResult | DisableResult) -> None:
     if external is None:
         if existing is not None:
             existing.status = Account.Status.MISSING
+            existing.applied_groups = []
             existing.observed_at = timezone.now()
             existing.save()
         return
@@ -241,8 +287,12 @@ def _record_account(job: Job, result: EnsureResult | DisableResult) -> None:
     if external.groups is not None:
         account.observed_groups = sorted(external.groups)
     account.observed_at = timezone.now()
-    if isinstance(result, EnsureResult) and result.created:
-        account.created_by_app = True
+    if isinstance(result, EnsureResult):
+        account.created_by_app = account.created_by_app or result.created
+        account.applied_groups = sorted(set(job.groups))
+    else:
+        removed = set(result.groups_removed)
+        account.applied_groups = [g for g in account.applied_groups or [] if g not in removed]
     try:
         with transaction.atomic():
             account.save()
@@ -288,6 +338,10 @@ def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
     with transaction.atomic():
         job = Job.objects.select_for_update().get(pk=job.pk)
         if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
+            return job
+        if job.workflow.status == Workflow.Status.CANCELLED:
+            # A newer workflow replaced this one while the job ran.
+            cancel_job(job, note=f"Replaced by a newer workflow after: {message[:500]}")
             return job
         job.last_error = message[:2000]
         job.locked_until = None
@@ -461,6 +515,7 @@ def _record_manual_change(job: Job) -> None:
         if job.action == Job.Action.DISABLE_ACCOUNT
         else Account.Status.ACTIVE
     )
+    account.applied_groups = sorted(job.groups) if job.action == Job.Action.ENSURE_ACCOUNT else []
     if job.action == Job.Action.ENSURE_ACCOUNT:
         account.observed_groups = sorted(job.groups)
     account.observed_at = timezone.now()

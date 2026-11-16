@@ -88,6 +88,21 @@ class ConfigurationError(AdapterError):
     """The connection's settings or credentials are wrong or incomplete."""
 
 
+class PartialProvisioning(AdapterError):
+    """The account was created, then a later step (groups) failed. Carries the
+    result, so the engine can still hand over the initial password."""
+
+    def __init__(self, cause: Exception, result):
+        message = (
+            str(cause)
+            if isinstance(cause, AdapterError)
+            else f"Unexpected error ({type(cause).__name__}) after creating the account."
+        )
+        super().__init__(message)
+        self.retryable = getattr(cause, "retryable", False)
+        self.result = result
+
+
 @dataclass
 class ExternalAccount:
     external_id: str
@@ -335,13 +350,18 @@ class Adapter:
                 result.account = account
                 result.reactivated = True
         if self.supports_groups:
-            current = self.account_groups(account)
-            for group_id in sorted(groups - current):
-                self.add_to_group(account, group_id)
-                result.groups_added.append(group_id)
-            for group_id in sorted((current & managed_groups) - groups):
-                self.remove_from_group(account, group_id)
-                result.groups_removed.append(group_id)
+            try:
+                current = self.account_groups(account)
+                for group_id in sorted(groups - current):
+                    self.add_to_group(account, group_id)
+                    result.groups_added.append(group_id)
+                for group_id in sorted((current & managed_groups) - groups):
+                    self.remove_from_group(account, group_id)
+                    result.groups_removed.append(group_id)
+            except Exception as exc:
+                if result.created:
+                    raise PartialProvisioning(exc, result) from exc
+                raise
             account.groups = frozenset((current | groups) - set(result.groups_removed))
         return result
 

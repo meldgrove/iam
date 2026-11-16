@@ -406,6 +406,9 @@ class Account(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.UNKNOWN)
     # Group external IDs seen at the last observation; null when not observed.
     observed_groups = models.JSONField(null=True, blank=True)
+    # Groups this app put the account in. They stay managed for this account
+    # after a profile or team stops using them, so an update can remove them.
+    applied_groups = models.JSONField(default=list, blank=True)
     observed_at = models.DateTimeField(null=True, blank=True)
     created_by_app = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
