@@ -1,0 +1,61 @@
+{% extends "iam/base.html" %}{% load iam_tags %}
+{% block title %}{{ person }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{{ person }} {% badge person.status person.get_status_display %}</h1>
+  <p class="sub">{{ person.get_person_type_display }}{% if person.job_title %} · {{ person.job_title }}{% endif %}{% if person.team %} · <a href="{% url 'team_detail' person.team.pk %}">{{ person.team }}</a>{% endif %}</p></div>
+  {% if user.is_approver %}
+  <div class="actions">
+    <a class="btn" href="{% url 'person_edit' person.pk %}">Edit</a>
+    {% if can_onboard %}<form class="inline" method="post" action="{% url 'person_start' person.pk 'onboarding' %}">{% csrf_token %}<button class="btn primary" type="submit">Start onboarding</button></form>{% endif %}
+    {% if can_update %}<form class="inline" method="post" action="{% url 'person_start' person.pk 'access_update' %}">{% csrf_token %}<button class="btn" type="submit">Apply access</button></form>{% endif %}
+    {% if can_offboard %}<form class="inline" method="post" action="{% url 'person_start' person.pk 'offboarding' %}">{% csrf_token %}<button class="btn danger" type="submit">Start offboarding</button></form>{% endif %}
+    {% if can_archive %}<form class="inline" method="post" action="{% url 'person_archive' person.pk %}">{% csrf_token %}<button class="btn" type="submit">Archive</button></form>{% endif %}
+  </div>
+  {% endif %}
+</div>
+<div class="grid two">
+  <div class="card"><h2>Profile</h2>
+    <dl class="facts">
+      <dt>Work email</dt><dd>{{ person.work_email|default:"—" }}</dd>
+      <dt>Login name</dt><dd class="mono">{{ person.login_name|default:"—" }}</dd>
+      <dt>Personal email</dt><dd>{{ person.personal_email|default:"—" }}</dd>
+      <dt>Manager</dt><dd>{% if person.manager %}<a href="{% url 'person_detail' person.manager.pk %}">{{ person.manager }}</a>{% else %}—{% endif %}</dd>
+      <dt>Access profile</dt><dd>{% if person.access_profile %}<a href="{% url 'profile_detail' person.access_profile.pk %}">{{ person.access_profile }}</a>{% else %}<span class="badge warn">none</span>{% endif %}</dd>
+      <dt>Start date</dt><dd>{{ person.start_date|date:"d.m.Y"|default:"—" }}</dd>
+      <dt>Last day</dt><dd>{{ person.end_date|date:"d.m.Y"|default:"—" }}</dd>
+      <dt>Source</dt><dd>{% if person.source_connection %}{{ person.source_connection }} <span class="muted small mono">{{ person.source_id }}</span>{% else %}Added in this app{% endif %}</dd>
+    </dl>
+    {% if person.notes %}<p class="small muted" style="margin-top:.75rem">{{ person.notes|linebreaksbr }}</p>{% endif %}
+  </div>
+  <div class="card"><h2>Open work</h2>
+    {% include "iam/includes/jobs_table.html" with jobs=open_jobs %}
+  </div>
+</div>
+<div class="card"><h2>Access</h2>
+  <p class="small muted">What the access profile and team grant, next to the accounts the app last saw.</p>
+  {% if access_rows %}
+  <table>
+    <thead><tr><th>App</th><th>Should have</th><th>Account</th><th>Status</th><th>Last seen</th></tr></thead>
+    <tbody>
+    {% for row in access_rows %}
+    <tr>
+      <td>{{ row.connection }}</td>
+      <td>{% if row.grant %}Account{% if row.groups %}<div class="small muted">{% for g in row.groups %}{{ g.label }} <span title="{{ g.reasons|join:', ' }}">({{ g.reasons|join:", " }})</span>{% if not forloop.last %}, {% endif %}{% endfor %}</div>{% endif %}{% else %}<span class="muted">No access</span>{% endif %}</td>
+      <td class="small mono">{% if row.account %}{{ row.account.username|default:row.account.email|default:"—" }}{% else %}—{% endif %}</td>
+      <td>{% if row.account %}{% badge row.account.status row.account.get_status_display %}{% else %}<span class="muted small">none known</span>{% endif %}</td>
+      <td class="small muted">{% if row.account.observed_at %}{{ row.account.observed_at|date:"d.m.Y H:i" }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">No access granted and no accounts known.</p>{% endif %}
+</div>
+<div class="grid two">
+  <div class="card"><h2>Workflows</h2>
+    {% if workflows %}<table><tbody>{% for w in workflows %}<tr><td><a href="{% url 'workflow_detail' w.pk %}">{{ w.get_kind_display }}</a>{% if w.reason %}<div class="small muted">{{ w.reason }}</div>{% endif %}</td><td class="small muted">{{ w.created_at|date:"d.m.Y H:i" }}</td><td>{% badge w.status w.get_status_display %}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">None yet.</p>{% endif %}
+  </div>
+  <div class="card"><h2>Tasks</h2>{% include "iam/includes/tasks_table.html" with tasks=tasks %}</div>
+</div>
+<div class="card"><h2>History</h2>{% include "iam/includes/events.html" with events=events %}</div>
+{% endblock %}

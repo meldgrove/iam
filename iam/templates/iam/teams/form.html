@@ -1,0 +1,11 @@
+{% extends "iam/base.html" %}
+{% block title %}{% if team %}Edit {{ team }}{% else %}Add team{% endif %}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>{% if team %}Edit {{ team }}{% else %}Add team{% endif %}</h1></div></div>
+<form method="post" class="card">{% csrf_token %}
+  <div class="form-grid">{% for field in form %}{% include "iam/includes/field.html" with wide=True %}{% endfor %}</div>
+  <h2 style="margin-top:1.2rem">Team groups</h2>
+  {% include "iam/includes/group_picker.html" %}
+  <div class="form-actions"><button class="btn primary" type="submit">Save</button><a class="btn" href="{% if team %}{% url 'team_detail' team.pk %}{% else %}{% url 'team_list' %}{% endif %}">Cancel</a></div>
+</form>
+{% endblock %}

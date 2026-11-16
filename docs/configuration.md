@@ -1,0 +1,59 @@
+# Configuration
+
+Everything an admin changes while the app runs lives in the admin section:
+connections and their credentials (Admin › Connections), app users and roles
+(Admin › Users and roles), lifecycle rules and notifications (Admin ›
+Settings). Environment variables hold only what the process needs before it
+can read the database, and the sign-in settings.
+
+## Required in production
+
+| Variable | Meaning |
+| --- | --- |
+| `DJANGO_SECRET_KEY` | Random value, at least 50 characters. Signs sessions. |
+| `ENCRYPTION_KEY` | Fernet key that encrypts connection secrets. Create one with `python manage.py generate_key`. Several comma-separated keys: the first encrypts, all decrypt (rotation below). Losing it makes the saved connection secrets unreadable. |
+| `DATABASE_URL` | PostgreSQL, e.g. `postgresql://iam:password@postgres:5432/iam`. |
+| `ALLOWED_HOSTS` | Public hostname(s), comma-separated. |
+| `CSRF_TRUSTED_ORIGINS` | Public origin, e.g. `https://iam.example.invalid`. |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The sign-in client ([authentication.md](authentication.md)). |
+| `OIDC_ISSUER` **or** `KEYCLOAK_URL` + `KEYCLOAK_REALM` | The sign-in provider. |
+
+## Optional
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `OIDC_PROVIDER_NAME` | `Keycloak` or `single sign-on` | Text of the sign-in button. |
+| `OIDC_SCOPES` | `openid email profile` | Add `groups` if the provider needs a scope for the group claim. |
+| `OIDC_SIGN_ALGO` | `RS256` | ID token signature algorithm. |
+| `OIDC_GROUPS_CLAIM` | `groups` | Claim with group names or paths. |
+| `OIDC_ADMIN_GROUPS`, `OIDC_APPROVER_GROUPS`, `OIDC_VIEWER_GROUPS` | empty | Comma-separated groups that grant a role at sign-in ([authentication.md](authentication.md)). |
+| `BOOTSTRAP_ADMIN_EMAILS` | empty | Verified addresses that may claim the first admin while no active admin exists. |
+| `OIDC_AUTHORIZATION_ENDPOINT`, `OIDC_TOKEN_ENDPOINT`, `OIDC_USERINFO_ENDPOINT`, `OIDC_JWKS_ENDPOINT` | from discovery | Only for providers without a discovery document. |
+| `SESSION_HOURS` | `12` | How long a sign-in lasts. |
+| `TRUST_PROXY_HEADERS` | `0` (`1` in `compose.yaml`) | Trust `X-Forwarded-Proto` from the reverse proxy. Enable only behind a proxy that sets it. |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` (`*` in `compose.yaml`) | Proxies gunicorn trusts for forwarded headers. |
+| `SECURE_SSL_REDIRECT` | `1` | Redirect HTTP to HTTPS (health checks under `/-/` are exempt). |
+| `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `1` | Send HSTS for subdomains too. |
+| `HEALTHCHECK_TOKEN` | empty | Shows details on `/-/readyz` for requests with `X-Health-Token`. |
+| `TZ` | `UTC` | Time zone for dates, start and end days, and the schedule. |
+| `WEB_WORKERS`, `WEB_THREADS` | `2`, `4` | gunicorn processes and threads. |
+| `WORKER_POLL_SECONDS` | `5` | How often an idle worker looks for jobs. |
+| `WORKER_HEARTBEAT_MAX_AGE_SECONDS` | `300` | After this, the dashboard and `/-/readyz` report the worker as stale. |
+| `JOB_LEASE_SECONDS` | `300` | A running job whose worker stopped runs again after this. |
+| `PROVIDER_TIMEOUT_SECONDS` | `20` | Timeout of each call to a connected app. |
+| `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | empty | Error reporting without personal data. The release defaults to `meldgrove-iam@<version>`. |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0` | Performance tracing share. |
+
+## Development only
+
+| Variable | Meaning |
+| --- | --- |
+| `DJANGO_DEBUG=1` with `DEPLOYMENT_ENV=development` | Development mode. Without `ENCRYPTION_KEY`, a key is derived from the development secret key. |
+| `DEV_LOGIN=1` | Sign in as any app user without a provider (`/login/dev/`). Ignored unless `DJANGO_DEBUG=1`. |
+
+## Rotating the encryption key
+
+1. Create a new key: `python manage.py generate_key`.
+2. Set `ENCRYPTION_KEY=<new>,<old>` and redeploy.
+3. Run `python manage.py rotate_secrets` once.
+4. Set `ENCRYPTION_KEY=<new>` and redeploy.

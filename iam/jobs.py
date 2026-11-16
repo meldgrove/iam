@@ -1,0 +1,640 @@
+"""Running jobs: one account change at one connection.
+
+The worker claims queued jobs one at a time. A connection that may change
+accounts gets the adapter call; any other connection gets a manual task. A
+failure that clears on its own (timeouts, rate limits, server errors) runs
+again with growing pauses; any other failure, or the last retry, hands the
+job to a person as a failure task. Nothing here stores passwords: a new
+account's initial password is emailed once to the personal address and
+forgotten.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import timedelta
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef
+from django.utils import timezone
+
+from . import audit
+from .adapters import AdapterKind
+from .adapters.base import (
+    AccountSpec,
+    AdapterError,
+    DisableResult,
+    EnsureResult,
+    PartialProvisioning,
+)
+from .crypto import SecretUnreadable
+from .lifecycle import cancel_job, refresh_workflow
+from .models import (
+    Account,
+    AppSettings,
+    Connection,
+    Job,
+    Person,
+    ProviderGroup,
+    Task,
+    User,
+    Workflow,
+)
+
+logger = logging.getLogger(__name__)
+
+MAX_ATTEMPTS = 6
+
+
+def backoff(attempts: int) -> timedelta:
+    return timedelta(minutes=min(2 ** max(attempts - 1, 0), 60))
+
+
+def account_spec(person: Person) -> AccountSpec:
+    return AccountSpec(
+        first_name=person.first_name,
+        last_name=person.last_name,
+        username=person.login_name,
+        email=person.work_email or "",
+        personal_email=person.personal_email,
+        job_title=person.job_title,
+        person_type=person.person_type,
+        team=person.team.name if person.team_id else "",
+        manager_email=(person.manager.work_email or "") if person.manager_id else "",
+        start_date=person.start_date,
+        end_date=person.end_date,
+    )
+
+
+def managed_groups(job: Job) -> set[str]:
+    """The groups the job may remove: the policy's managed groups when it was
+    planned, plus the groups the app has put the account in since. Jobs for
+    the same person and app run one after another, so this includes what a
+    job that was still running at planning time applied."""
+    account = Account.objects.filter(
+        connection_id=job.connection_id, person_id=job.person_id
+    ).first()
+    applied = set(account.applied_groups or []) if account else set()
+    return set(job.managed_groups) | applied
+
+
+def group_labels(job: Job) -> list[str]:
+    labels = dict(
+        ProviderGroup.objects.filter(
+            connection=job.connection, external_id__in=job.groups
+        ).values_list("external_id", "name")
+    )
+    return [labels.get(gid, gid) for gid in job.groups]
+
+
+# -- claiming --------------------------------------------------------------
+
+
+def claim_next_job() -> Job | None:
+    now = timezone.now()
+    # A job waits while another job for the same person and app runs, so an
+    # older change can never land after a newer one.
+    busy = Job.objects.filter(
+        status=Job.Status.RUNNING,
+        person_id=OuterRef("person_id"),
+        connection_id=OuterRef("connection_id"),
+    )
+    with transaction.atomic():
+        job = (
+            Job.objects.select_for_update(skip_locked=True)
+            .filter(status=Job.Status.QUEUED, next_attempt_at__lte=now)
+            .exclude(workflow__status=Workflow.Status.CANCELLED)
+            .exclude(Exists(busy))
+            .order_by("next_attempt_at", "pk")
+            .first()
+        )
+        if job is None:
+            return None
+        job.status = Job.Status.RUNNING
+        job.attempts += 1
+        job.locked_until = now + timedelta(seconds=settings.JOB_LEASE_SECONDS)
+        job.save(update_fields=["status", "attempts", "locked_until"])
+    return job
+
+
+def recover_stale_jobs() -> int:
+    """Jobs whose worker stopped mid-run go back to the queue. The adapter
+    operations are idempotent, so running one again is safe."""
+    count = 0
+    stale = Job.objects.filter(status=Job.Status.RUNNING, locked_until__lt=timezone.now())
+    for job in stale:
+        with transaction.atomic():
+            job = Job.objects.select_for_update().get(pk=job.pk)
+            if job.status != Job.Status.RUNNING:
+                continue
+            if job.workflow.status == Workflow.Status.CANCELLED:
+                cancel_job(job, note="The worker stopped; the workflow was replaced meanwhile.")
+                count += 1
+                continue
+            job.status = Job.Status.QUEUED
+            job.locked_until = None
+            job.next_attempt_at = timezone.now()
+            job.last_error = "The worker stopped while running this job; it runs again."
+            job.save(update_fields=["status", "locked_until", "next_attempt_at", "last_error"])
+            count += 1
+    return count
+
+
+# -- running ----------------------------------------------------------------
+
+
+def run_job(job: Job) -> Job:
+    connection = Connection.objects.get(pk=job.connection_id)
+    person = Person.objects.select_related("team", "manager").get(pk=job.person_id)
+    if not connection.writes_automatically or not _can_write(connection):
+        with transaction.atomic():
+            task = hand_to_person(job)
+            refresh_workflow(job.workflow)
+            notify_after_commit([task] if task else [])
+        return job
+    spec = account_spec(person)
+    account = Account.objects.filter(connection=connection, person=person).first()
+    external_id = account.external_id if account else ""
+    try:
+        adapter = connection.build_adapter()
+        # Check whose account the app is about to change before changing it.
+        found = adapter.find_account(spec, external_id)
+        if found is not None and found.external_id:
+            owner = (
+                Account.objects.filter(connection=connection, external_id=found.external_id)
+                .exclude(person=None)
+                .exclude(person=person)
+                .select_related("person")
+                .first()
+            )
+            if owner is not None:
+                return fail_job(
+                    job,
+                    f"The {connection.name} account {found.username or found.external_id} "
+                    f"belongs to {owner.person}. Nothing was changed. Check the work email "
+                    "and username.",
+                    retryable=False,
+                )
+            external_id = found.external_id
+        if job.action == Job.Action.ENSURE_ACCOUNT:
+            result = adapter.ensure_account(
+                spec,
+                external_id=external_id,
+                groups=set(job.groups),
+                managed_groups=managed_groups(job),
+            )
+        else:
+            result = adapter.disable_account(
+                spec, external_id=external_id, managed_groups=managed_groups(job)
+            )
+    except PartialProvisioning as exc:
+        # The account exists now; its password must reach the person even
+        # though the job runs again for the rest.
+        if exc.result.initial_password:
+            deliver_initial_password(job, exc.result.initial_password)
+        return fail_job(job, str(exc), retryable=exc.retryable)
+    except AdapterError as exc:
+        return fail_job(job, str(exc), retryable=exc.retryable)
+    except SecretUnreadable as exc:
+        return fail_job(job, str(exc), retryable=False)
+    except Exception as exc:  # noqa: BLE001 - every failure must reach a person
+        logger.exception("Job %s failed unexpectedly", job.pk)
+        _report_to_sentry(exc)
+        return fail_job(
+            job,
+            f"Unexpected error ({type(exc).__name__}). The details are in the worker log.",
+            retryable=False,
+        )
+    return succeed_job(job, result)
+
+
+def _can_write(connection: Connection) -> bool:
+    cls = connection.adapter_class
+    return bool(cls and cls.kind == AdapterKind.PROVISIONING and cls.supports_write)
+
+
+def _report_to_sentry(exc: Exception) -> None:
+    if settings.SENTRY_DSN:
+        import sentry_sdk
+
+        sentry_sdk.capture_exception(exc)
+
+
+def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
+    password = getattr(result, "initial_password", None)
+    conflict = ""
+    with transaction.atomic():
+        job = Job.objects.select_for_update().get(pk=job.pk)
+        if job.status != Job.Status.RUNNING:
+            return job
+        try:
+            with transaction.atomic():
+                _record_account(job, result)
+        except AccountConflict as exc:
+            conflict = str(exc)
+        else:
+            job.status = Job.Status.SUCCEEDED
+            job.finished_at = timezone.now()
+            job.locked_until = None
+            job.last_error = ""
+            job.result = _result_summary(result)
+            job.save(
+                update_fields=["status", "finished_at", "locked_until", "last_error", "result"]
+            )
+            job.tasks.filter(status=Task.Status.OPEN, kind=Task.Kind.FAILURE).update(
+                status=Task.Status.DONE, completed_at=timezone.now(), note="Resolved by a retry."
+            )
+            audit.record(
+                f"job.{job.action}",
+                _success_summary(job, result),
+                person=job.person,
+                target=job,
+                details=job.result,
+            )
+            refresh_workflow(job.workflow)
+    if conflict:
+        return fail_job(job, conflict, retryable=False)
+    if password:
+        deliver_initial_password(job, password)
+    return job
+
+
+class AccountConflict(Exception):
+    pass
+
+
+def _record_account(job: Job, result: EnsureResult | DisableResult) -> None:
+    external = result.account
+    existing = Account.objects.filter(connection=job.connection, person=job.person).first()
+    if external is None:
+        if existing is not None:
+            existing.status = Account.Status.MISSING
+            existing.applied_groups = []
+            existing.observed_at = timezone.now()
+            existing.save()
+        return
+    if external.external_id:
+        other = (
+            Account.objects.filter(connection=job.connection, external_id=external.external_id)
+            .exclude(pk=existing.pk if existing else None)
+            .first()
+        )
+        if other is not None:
+            if other.person_id and other.person_id != job.person_id:
+                raise AccountConflict(
+                    f"The {job.connection.name} account {external.username or external.external_id} "
+                    f"is linked to {other.person}. Check the work email and username."
+                )
+            if existing is not None:
+                existing.delete()
+            existing = other
+    account = existing or Account(connection=job.connection)
+    account.person = job.person
+    account.external_id = external.external_id or account.external_id
+    account.username = external.username or account.username
+    account.email = external.email or account.email
+    account.display_name = external.display_name or account.display_name
+    account.status = Account.Status.ACTIVE if external.active else Account.Status.DISABLED
+    if external.groups is not None:
+        account.observed_groups = sorted(external.groups)
+    account.observed_at = timezone.now()
+    if isinstance(result, EnsureResult):
+        account.created_by_app = account.created_by_app or result.created
+        account.applied_groups = sorted(set(job.groups))
+    else:
+        removed = set(result.groups_removed)
+        account.applied_groups = [g for g in account.applied_groups or [] if g not in removed]
+    try:
+        with transaction.atomic():
+            account.save()
+    except IntegrityError as exc:
+        raise AccountConflict(
+            f"The {job.connection.name} account could not be linked to {job.person}."
+        ) from exc
+
+
+def _result_summary(result: EnsureResult | DisableResult) -> dict:
+    summary = {
+        "groups_removed": list(result.groups_removed),
+        "notes": list(result.notes),
+    }
+    if isinstance(result, EnsureResult):
+        summary.update(
+            created=result.created,
+            reactivated=result.reactivated,
+            groups_added=list(result.groups_added),
+            password_generated=bool(result.initial_password),
+        )
+    else:
+        summary.update(changed=result.changed, found=result.account is not None)
+    if result.account is not None:
+        summary["account"] = (
+            result.account.username or result.account.email or result.account.external_id
+        )
+    return summary
+
+
+def _success_summary(job: Job, result) -> str:
+    name = f"{job.connection.name} account of {job.person.full_name}"
+    if isinstance(result, EnsureResult):
+        verb = "Created" if result.created else "Reactivated" if result.reactivated else "Checked"
+        return f"{verb} the {name}"
+    if result.account is None:
+        return f"No {name} to disable"
+    return f"Disabled the {name}" if result.changed else f"The {name} was already disabled"
+
+
+def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
+    task = None
+    with transaction.atomic():
+        job = Job.objects.select_for_update().get(pk=job.pk)
+        if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
+            return job
+        if job.workflow.status == Workflow.Status.CANCELLED:
+            # A newer workflow replaced this one while the job ran.
+            cancel_job(job, note=f"Replaced by a newer workflow after: {message[:500]}")
+            return job
+        job.last_error = message[:2000]
+        job.locked_until = None
+        if retryable and job.attempts < MAX_ATTEMPTS:
+            job.status = Job.Status.QUEUED
+            job.next_attempt_at = timezone.now() + backoff(job.attempts)
+            job.save(update_fields=["status", "last_error", "locked_until", "next_attempt_at"])
+            return job
+        job.status = Job.Status.FAILED
+        job.save(update_fields=["status", "last_error", "locked_until"])
+        task = _open_task(
+            job,
+            Task.Kind.FAILURE,
+            f"Fix: {job.get_action_display().lower()} at {job.connection.name} for {job.person.full_name}",
+            "\n\n".join(
+                [
+                    f"The app stopped after {job.attempts} attempt(s): {message}",
+                    "Fix the cause and press Retry on the job, or make the change by hand "
+                    "and complete this task.",
+                    _manual_steps(job),
+                ]
+            ),
+        )
+        audit.record(
+            "job.failed",
+            f"{job.get_action_display()} at {job.connection.name} for {job.person.full_name} failed",
+            person=job.person,
+            target=job,
+            details={"error": message[:500], "attempts": job.attempts},
+        )
+        refresh_workflow(job.workflow)
+        notify_after_commit([task] if task else [])
+    return job
+
+
+def _manual_steps(job: Job) -> str:
+    try:
+        adapter = job.connection.build_adapter()
+        steps = adapter.manual_instructions(job.action, account_spec(job.person), group_labels(job))
+    except Exception:  # noqa: BLE001 - instructions are best effort
+        verb = "Disable" if job.action == Job.Action.DISABLE_ACCOUNT else "Create or update"
+        steps = f"{verb} the {job.connection.name} account of {job.person.full_name}."
+    remove = sorted(managed_groups(job) - set(job.groups))
+    if job.action == Job.Action.ENSURE_ACCOUNT and remove:
+        labels = dict(
+            ProviderGroup.objects.filter(
+                connection=job.connection, external_id__in=remove
+            ).values_list("external_id", "name")
+        )
+        names = ", ".join(labels.get(gid, gid) for gid in remove)
+        steps += f"\nRemove from these, if a member: {names}."
+    return steps
+
+
+def _open_task(job: Job, kind: str, title: str, instructions: str) -> Task | None:
+    existing = job.tasks.filter(status=Task.Status.OPEN, kind=kind).first()
+    if existing is not None:
+        existing.instructions = instructions
+        existing.save(update_fields=["instructions"])
+        return None
+    return Task.objects.create(
+        kind=kind,
+        title=title[:300],
+        instructions=instructions,
+        person=job.person,
+        job=job,
+        connection=job.connection,
+    )
+
+
+def hand_to_person(job: Job) -> Task | None:
+    """Turn a job at a connection without automation into a manual task."""
+    job.status = Job.Status.MANUAL
+    job.locked_until = None
+    job.save(update_fields=["status", "locked_until"])
+    verb = "Remove" if job.action == Job.Action.DISABLE_ACCOUNT else "Give"
+    preposition = "from" if job.action == Job.Action.DISABLE_ACCOUNT else "access to"
+    title = f"{verb} {job.person.full_name} {preposition} {job.connection.name}"
+    reason = ""
+    if not job.connection.enabled:
+        reason = "The connection is turned off, so the app makes no changes there."
+    elif job.connection.mode == Connection.Mode.READ_ONLY:
+        reason = "The connection is read only, so the app makes no changes there."
+    instructions = "\n\n".join(filter(None, [reason, _manual_steps(job)]))
+    return _open_task(job, Task.Kind.CHANGE, title, instructions)
+
+
+# -- operator actions ----------------------------------------------------------
+
+
+class ActionError(Exception):
+    pass
+
+
+def retry_job(job: Job, *, actor: User) -> None:
+    with transaction.atomic():
+        job = Job.objects.select_for_update().get(pk=job.pk)
+        if job.status not in (Job.Status.FAILED, Job.Status.MANUAL):
+            raise ActionError("Only failed jobs and jobs with a manual task can run again.")
+        if job.workflow.status == Workflow.Status.CANCELLED:
+            raise ActionError("The workflow was replaced or cancelled; start a new one instead.")
+        job.status = Job.Status.QUEUED
+        job.attempts = 0
+        job.next_attempt_at = timezone.now()
+        job.save(update_fields=["status", "attempts", "next_attempt_at"])
+        job.tasks.filter(status=Task.Status.OPEN).update(
+            status=Task.Status.CANCELLED,
+            completed_at=timezone.now(),
+            completed_by=actor,
+            note="The job runs again.",
+        )
+        audit.record("job.retry", f"Retried: {job}", actor=actor, person=job.person, target=job)
+        refresh_workflow(job.workflow)
+
+
+def approve_job(job: Job, *, actor: User) -> None:
+    with transaction.atomic():
+        job = Job.objects.select_for_update().get(pk=job.pk)
+        if job.status != Job.Status.HELD:
+            raise ActionError("This job is not waiting for approval.")
+        job.status = Job.Status.QUEUED
+        job.next_attempt_at = timezone.now()
+        job.last_error = ""
+        job.save(update_fields=["status", "next_attempt_at", "last_error"])
+        audit.record("job.approved", f"Approved: {job}", actor=actor, person=job.person, target=job)
+        refresh_workflow(job.workflow)
+
+
+def reject_job(job: Job, *, actor: User) -> None:
+    with transaction.atomic():
+        job = Job.objects.select_for_update().get(pk=job.pk)
+        if job.status != Job.Status.HELD:
+            raise ActionError("This job is not waiting for approval.")
+        cancel_job(job, actor=actor, note="Rejected by an admin.")
+        audit.record("job.rejected", f"Rejected: {job}", actor=actor, person=job.person, target=job)
+        refresh_workflow(job.workflow)
+
+
+def complete_task(task: Task, *, actor: User, note: str = "") -> None:
+    with transaction.atomic():
+        task = Task.objects.select_for_update().get(pk=task.pk)
+        if task.status != Task.Status.OPEN:
+            raise ActionError("This task is already closed.")
+        task.status = Task.Status.DONE
+        task.completed_at = timezone.now()
+        task.completed_by = actor
+        task.note = note[:2000]
+        task.save(update_fields=["status", "completed_at", "completed_by", "note"])
+        job = task.job
+        if job is not None and task.kind in (Task.Kind.CHANGE, Task.Kind.FAILURE) and job.is_open:
+            job.status = Job.Status.SUCCEEDED
+            job.finished_at = timezone.now()
+            job.result = {**job.result, "manual": True, "completed_by": actor.email}
+            job.save(update_fields=["status", "finished_at", "result"])
+            _record_manual_change(job)
+            refresh_workflow(job.workflow)
+        audit.record(
+            "task.done",
+            f"Completed task: {task.title}",
+            actor=actor,
+            person=task.person,
+            target=task,
+            details={"note": note[:500]} if note else {},
+        )
+
+
+def _record_manual_change(job: Job) -> None:
+    account, _ = Account.objects.get_or_create(connection=job.connection, person=job.person)
+    account.status = (
+        Account.Status.DISABLED
+        if job.action == Job.Action.DISABLE_ACCOUNT
+        else Account.Status.ACTIVE
+    )
+    account.applied_groups = sorted(job.groups) if job.action == Job.Action.ENSURE_ACCOUNT else []
+    if job.action == Job.Action.ENSURE_ACCOUNT:
+        account.observed_groups = sorted(job.groups)
+    account.observed_at = timezone.now()
+    account.save()
+
+
+def cancel_task(task: Task, *, actor: User, note: str = "") -> None:
+    with transaction.atomic():
+        task = Task.objects.select_for_update().get(pk=task.pk)
+        if task.status != Task.Status.OPEN:
+            raise ActionError("This task is already closed.")
+        if task.job is not None and task.job.is_open:
+            cancel_job(task.job, actor=actor, note=note or "Task cancelled.")
+            refresh_workflow(task.job.workflow)
+        else:
+            task.status = Task.Status.CANCELLED
+            task.completed_at = timezone.now()
+            task.completed_by = actor
+            task.note = note[:2000]
+            task.save(update_fields=["status", "completed_at", "completed_by", "note"])
+        audit.record(
+            "task.cancelled",
+            f"Cancelled task: {task.title}",
+            actor=actor,
+            person=task.person,
+            target=task,
+            details={"note": note[:500]} if note else {},
+        )
+
+
+# -- email ---------------------------------------------------------------------
+
+
+def email_connection() -> Connection | None:
+    for connection in Connection.objects.filter(enabled=True).order_by("pk"):
+        if connection.kind == AdapterKind.EMAIL:
+            return connection
+    return None
+
+
+def send_email(to: list[str], subject: str, body: str) -> bool:
+    connection = email_connection()
+    if connection is None or not to:
+        return False
+    try:
+        connection.build_adapter().send(to=to, subject=subject, body=body)
+    except Exception as exc:  # noqa: BLE001 - email is best effort
+        logger.warning("Email to %d recipient(s) failed: %s", len(to), type(exc).__name__)
+        return False
+    return True
+
+
+def deliver_initial_password(job: Job, password: str) -> None:
+    person = job.person
+    organization = AppSettings.load().organization_name
+    sent = bool(person.personal_email) and send_email(
+        [person.personal_email],
+        f"Your {job.connection.name} account at {organization}",
+        "\n".join(
+            [
+                f"Hello {person.first_name},",
+                "",
+                f"Your {job.connection.name} account is ready.",
+                f"Sign-in: {person.work_email or person.login_name}",
+                f"Initial password: {password}",
+                "",
+                "You will be asked to choose a new password when you first sign in.",
+            ]
+        ),
+    )
+    if sent:
+        audit.record(
+            "credentials.sent",
+            f"Emailed the initial {job.connection.name} password of {person.full_name} "
+            "to the personal address",
+            person=person,
+            target=job,
+        )
+        return
+    task = Task.objects.create(
+        kind=Task.Kind.CREDENTIALS,
+        title=f"Hand over {job.connection.name} sign-in details to {person.full_name}",
+        instructions=(
+            f"The app created the {job.connection.name} account but could not email the "
+            "initial password (no email connection or no personal email address). The "
+            f"password was not stored. Set a new temporary password in {job.connection.name} "
+            "and give it to the person in a safe way."
+        ),
+        person=person,
+        job=job,
+        connection=job.connection,
+    )
+    notify_after_commit([task])
+
+
+def notify_after_commit(tasks: list[Task]) -> None:
+    tasks = [task for task in tasks if task is not None]
+    if not tasks:
+        return
+    transaction.on_commit(lambda: notify_tasks(tasks))
+
+
+def notify_tasks(tasks: list[Task]) -> None:
+    recipients = AppSettings.load().notification_recipients()
+    if not recipients:
+        return
+    lines = ["New tasks in Meldgrove IAM:", ""]
+    for task in tasks:
+        lines.append(f"- {task.title}")
+    send_email(recipients, f"{len(tasks)} new task(s) in Meldgrove IAM", "\n".join(lines))

@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Checks, tests and production image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: iam
+          POSTGRES_USER: iam
+          POSTGRES_PASSWORD: iam
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U iam" --health-interval 5s --health-retries 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check public repository contents
+        run: python3 scripts/check_public_repository.py
+
+      - name: Build test image
+        run: docker build --target test --tag meldgrove-iam:test .
+
+      - name: Lint, migrations check and tests on SQLite
+        run: docker run --rm meldgrove-iam:test
+
+      - name: Tests on PostgreSQL
+        run: >-
+          docker run --rm --network host
+          -e TEST_DATABASE_URL=postgresql://iam:iam@localhost:5432/iam
+          meldgrove-iam:test pytest
+
+      - name: Build production image
+        run: docker build --target runtime --tag meldgrove-iam:ci .
+
+      - name: Check production settings
+        run: >-
+          docker run --rm
+          -e DJANGO_SECRET_KEY=ci-only-secret-key-ci-only-secret-key-ci-only-secret-key
+          -e ENCRYPTION_KEY=$(python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
+          -e ALLOWED_HOSTS=iam.example.invalid
+          -e DATABASE_URL=sqlite:////tmp/check.sqlite3
+          meldgrove-iam:ci python manage.py check --deploy --fail-level WARNING
+
+  end-to-end:
+    name: End-to-end with Keycloak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start PostgreSQL, Keycloak and Mailpit
+        run: docker compose -f compose.dev.yaml up --detach --wait
+
+      - name: Build production image
+        run: docker build --target runtime --tag meldgrove-iam:ci .
+
+      - name: Start web and worker
+        run: |
+          env_args=(
+            -e DJANGO_DEBUG=1 -e DEPLOYMENT_ENV=development
+            -e DATABASE_URL=postgresql://iam:iam@localhost:55438/iam
+            -e KEYCLOAK_URL=http://localhost:8098 -e KEYCLOAK_REALM=iam
+            -e OIDC_CLIENT_ID=iam -e OIDC_CLIENT_SECRET=iam-dev-client-secret
+            -e OIDC_ADMIN_GROUPS=/iam/admins -e WORKER_POLL_SECONDS=1
+          )
+          docker run --rm --network host "${env_args[@]}" meldgrove-iam:ci python manage.py migrate --noinput
+          docker run -d --name web --network host "${env_args[@]}" meldgrove-iam:ci
+          docker run -d --name worker --network host "${env_args[@]}" meldgrove-iam:ci python manage.py run_worker
+          for i in $(seq 1 30); do curl -fsS http://localhost:8000/-/healthz && break; sleep 1; done
+
+      - name: Install Playwright and Chromium
+        working-directory: tests/browser
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run the end-to-end check
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/browser
+        run: node tests/browser/e2e.cjs
+
+      - name: Keep screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: end-to-end-screenshots
+          path: ${{ runner.temp }}/browser/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker logs web || true
+          docker logs worker || true
+          docker compose -f compose.dev.yaml logs --no-color keycloak | tail -100
