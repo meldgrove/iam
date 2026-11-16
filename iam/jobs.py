@@ -67,6 +67,18 @@ def account_spec(person: Person) -> AccountSpec:
     )
 
 
+def managed_groups(job: Job) -> set[str]:
+    """The groups the job may remove: the policy's managed groups when it was
+    planned, plus the groups the app has put the account in since. Jobs for
+    the same person and app run one after another, so this includes what a
+    job that was still running at planning time applied."""
+    account = Account.objects.filter(
+        connection_id=job.connection_id, person_id=job.person_id
+    ).first()
+    applied = set(account.applied_groups or []) if account else set()
+    return set(job.managed_groups) | applied
+
+
 def group_labels(job: Job) -> list[str]:
     labels = dict(
         ProviderGroup.objects.filter(
@@ -170,11 +182,11 @@ def run_job(job: Job) -> Job:
                 spec,
                 external_id=external_id,
                 groups=set(job.groups),
-                managed_groups=set(job.managed_groups),
+                managed_groups=managed_groups(job),
             )
         else:
             result = adapter.disable_account(
-                spec, external_id=external_id, managed_groups=set(job.managed_groups)
+                spec, external_id=external_id, managed_groups=managed_groups(job)
             )
     except PartialProvisioning as exc:
         # The account exists now; its password must reach the person even
@@ -384,7 +396,7 @@ def _manual_steps(job: Job) -> str:
     except Exception:  # noqa: BLE001 - instructions are best effort
         verb = "Disable" if job.action == Job.Action.DISABLE_ACCOUNT else "Create or update"
         steps = f"{verb} the {job.connection.name} account of {job.person.full_name}."
-    remove = sorted(set(job.managed_groups) - set(job.groups))
+    remove = sorted(managed_groups(job) - set(job.groups))
     if job.action == Job.Action.ENSURE_ACCOUNT and remove:
         labels = dict(
             ProviderGroup.objects.filter(

@@ -421,3 +421,18 @@ def test_groups_dropped_from_the_policy_are_removed(person, fake_store, profile)
     assert fake_store.accounts[account.external_id]["groups"] == {"g-eng", "unmanaged"}
     account.refresh_from_db()
     assert account.applied_groups == ["g-eng"]
+
+
+def test_groups_applied_by_a_still_running_job_are_removed_later(person, fake_store, profile):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    running = claim_next_job()
+    profile.grants.get().groups.clear()
+    replacement = start_workflow(person, Workflow.Kind.ACCESS_UPDATE).jobs.get()
+    assert "g-staff" not in replacement.managed_groups
+    run_job(running)
+    run_all()
+    replacement.refresh_from_db()
+    assert replacement.status == Job.Status.SUCCEEDED
+    account = Account.objects.get(person=person)
+    assert fake_store.accounts[account.external_id]["groups"] == {"g-eng"}
+    assert account.applied_groups == ["g-eng"]
