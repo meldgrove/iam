@@ -590,3 +590,63 @@ def test_groups_applied_by_a_still_running_job_are_removed_later(person, fake_st
     account = Account.objects.get(person=person)
     assert fake_store.accounts[account.external_id]["groups"] == {"g-eng"}
     assert account.applied_groups == ["g-eng"]
+
+
+def test_applying_access_during_onboarding_still_ends_active(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    workflow = start_workflow(person, Workflow.Kind.ACCESS_UPDATE)
+    assert workflow.kind == Workflow.Kind.ONBOARDING
+    run_all()
+    person.refresh_from_db()
+    assert person.status == Person.Status.ACTIVE
+
+
+def test_cancelling_a_workflow_keeps_the_result_of_its_running_job(
+    person, fake_store, admin_user, monkeypatch
+):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    sent = []
+    monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(body) or True)
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    job = claim_next_job()
+    cancel_workflow(workflow, actor=admin_user)
+    run_job(job)
+    job.refresh_from_db()
+    workflow.refresh_from_db()
+    assert job.status == Job.Status.SUCCEEDED
+    assert workflow.status == Workflow.Status.CANCELLED
+    assert Account.objects.get(person=person).status == Account.Status.ACTIVE
+    assert len(sent) == 1 and "Initial-Pass-123" in sent[0]
+
+
+def test_a_job_cancelled_while_it_ran_still_records_its_change(person, fake_store, monkeypatch):
+    from iam.lifecycle import cancel_job
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    sent = []
+    monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(body) or True)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    job = claim_next_job()
+    cancel_job(Job.objects.get(pk=job.pk), note="Cancelled elsewhere.")
+    run_job(job)
+    assert Account.objects.get(person=person).status == Account.Status.ACTIVE
+    assert len(sent) == 1 and "Initial-Pass-123" in sent[0]
+
+
+def test_job_locks_never_cover_joined_rows(person, admin_user):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Only PostgreSQL locks rows.")
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    with CaptureQueriesContext(connection) as queries:
+        claim_next_job()
+        start_workflow(person, Workflow.Kind.ONBOARDING)
+        cancel_workflow(Workflow.objects.latest("pk"), actor=admin_user)
+    locking = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"] and " JOIN " in q["sql"]]
+    assert locking, workflow
+    assert all('FOR UPDATE OF "iam_job"' in sql for sql in locking), locking

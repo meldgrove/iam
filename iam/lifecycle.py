@@ -68,6 +68,10 @@ def start_workflow(
                 f"{Workflow.Kind(kind).label} cannot start while {person.full_name} is "
                 f"{person.get_status_display().lower()}."
             )
+        if kind == Workflow.Kind.ACCESS_UPDATE and person.status == Person.Status.ONBOARDING:
+            # Applying access during onboarding restarts the onboarding with
+            # the new access, so the person still becomes active at its end.
+            kind = Workflow.Kind.ONBOARDING
         if kind == Workflow.Kind.ONBOARDING and person.access_profile_id is None:
             raise LifecycleError("Choose an access profile before onboarding.")
         superseded = _supersede_open_workflows(person, actor)
@@ -114,15 +118,22 @@ def _supersede_open_workflows(person: Person, actor) -> list[int]:
     for workflow in person.workflows.filter(
         status__in=[Workflow.Status.RUNNING, Workflow.Status.WAITING, Workflow.Status.FAILED]
     ):
-        for job in workflow.jobs.exclude(
-            status__in=[Job.Status.SUCCEEDED, Job.Status.CANCELLED, Job.Status.RUNNING]
-        ):
+        for job in _jobs_to_cancel(workflow):
             cancel_job(job, note="Replaced by a newer workflow.")
         workflow.status = Workflow.Status.CANCELLED
         workflow.finished_at = timezone.now()
         workflow.save(update_fields=["status", "finished_at"])
         ids.append(workflow.pk)
     return ids
+
+
+def _jobs_to_cancel(workflow: Workflow):
+    """A running job finishes: its change may already have happened in the
+    connected app. The lock keeps the worker from claiming a job meanwhile;
+    it covers only the job rows, not the connections the ordering joins."""
+    return workflow.jobs.select_for_update(of=("self",)).exclude(
+        status__in=[Job.Status.SUCCEEDED, Job.Status.CANCELLED, Job.Status.RUNNING]
+    )
 
 
 def _deactivate_app_user(person: Person, actor) -> None:
@@ -293,7 +304,7 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
         workflow = Workflow.objects.select_for_update().get(pk=workflow.pk)
         if not workflow.is_open:
             raise LifecycleError("This workflow is already finished.")
-        for job in workflow.jobs.exclude(status__in=[Job.Status.SUCCEEDED, Job.Status.CANCELLED]):
+        for job in _jobs_to_cancel(workflow):
             cancel_job(job, actor=actor, note="Workflow cancelled.")
         workflow.status = Workflow.Status.CANCELLED
         workflow.finished_at = timezone.now()

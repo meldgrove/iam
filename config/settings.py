@@ -11,22 +11,26 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def env(name: str, default: str = "") -> str:
+    """An empty variable counts as unset: compose.yaml passes optional
+    variables as empty strings, which must not replace the defaults."""
+    return os.getenv(name) or default
+
+
 def env_list(name: str, default: str = "") -> list[str]:
-    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+    return [item.strip() for item in env(name, default).split(",") if item.strip()]
 
 
 # Set in release images (Dockerfile); empty in images built from source.
-APP_VERSION = os.getenv("APP_VERSION", "")
-DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
-DEPLOYMENT_ENV = os.getenv("DEPLOYMENT_ENV", "development" if DEBUG else "production")
+APP_VERSION = env("APP_VERSION", "")
+DEBUG = env("DJANGO_DEBUG", "0") == "1"
+DEPLOYMENT_ENV = env("DEPLOYMENT_ENV", "development" if DEBUG else "production")
 if DEPLOYMENT_ENV not in {"development", "staging", "production"} or DEBUG != (
     DEPLOYMENT_ENV == "development"
 ):
     raise ImproperlyConfigured("Only DEPLOYMENT_ENV=development may enable DJANGO_DEBUG.")
 
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY", "development-only-do-not-use-in-production" if DEBUG else ""
-)
+SECRET_KEY = env("DJANGO_SECRET_KEY", "development-only-do-not-use-in-production" if DEBUG else "")
 # Fernet keys that encrypt connection secrets. The first key encrypts; all keys
 # decrypt, so a new key can be put in front of the old one to rotate.
 ENCRYPTION_KEYS = env_list("ENCRYPTION_KEY")
@@ -74,7 +78,7 @@ TEMPLATES = [
 
 DATABASES = {
     "default": dj_database_url.parse(
-        os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'var/development.sqlite3'}"),
+        env("DATABASE_URL", f"sqlite:///{BASE_DIR / 'var/development.sqlite3'}"),
         conn_max_age=60,
     )
 }
@@ -85,29 +89,29 @@ AUTH_USER_MODEL = "iam.User"
 # (docs/authentication.md). Authorization stays in the app: a person signs in
 # only with an active app user, created in Admin > Users or granted by a group
 # claim (OIDC_*_GROUPS).
-KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "").rstrip("/")
-KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "")
+KEYCLOAK_URL = env("KEYCLOAK_URL", "").rstrip("/")
+KEYCLOAK_REALM = env("KEYCLOAK_REALM", "")
 if KEYCLOAK_URL and KEYCLOAK_REALM:
     OIDC_ISSUER = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}"
     OIDC_PROVIDER_KIND = "keycloak"
 else:
-    OIDC_ISSUER = os.getenv("OIDC_ISSUER", "").rstrip("/")
+    OIDC_ISSUER = env("OIDC_ISSUER", "").rstrip("/")
     OIDC_PROVIDER_KIND = "keycloak" if "/realms/" in OIDC_ISSUER else "oidc"
-OIDC_PROVIDER_NAME = os.getenv(
+OIDC_PROVIDER_NAME = env(
     "OIDC_PROVIDER_NAME", "Keycloak" if OIDC_PROVIDER_KIND == "keycloak" else "single sign-on"
 )
-OIDC_RP_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "")
-OIDC_RP_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
+OIDC_RP_CLIENT_ID = env("OIDC_CLIENT_ID", "")
+OIDC_RP_CLIENT_SECRET = env("OIDC_CLIENT_SECRET", "")
 OIDC_ENABLED = bool(OIDC_ISSUER and OIDC_RP_CLIENT_ID)
-OIDC_RP_SIGN_ALGO = os.getenv("OIDC_SIGN_ALGO", "RS256")
-OIDC_RP_SCOPES = os.getenv("OIDC_SCOPES", "openid email profile")
+OIDC_RP_SIGN_ALGO = env("OIDC_SIGN_ALGO", "RS256")
+OIDC_RP_SCOPES = env("OIDC_SCOPES", "openid email profile")
 OIDC_USE_PKCE = True
 OIDC_PKCE_CODE_CHALLENGE_METHOD = "S256"
 OIDC_STORE_ACCESS_TOKEN = False
 # The ID token is the logout hint; without it the provider keeps its session.
 OIDC_STORE_ID_TOKEN = True
 OIDC_TIMEOUT = (3, 10)
-OIDC_GROUPS_CLAIM = os.getenv("OIDC_GROUPS_CLAIM", "groups")
+OIDC_GROUPS_CLAIM = env("OIDC_GROUPS_CLAIM", "groups")
 OIDC_ADMIN_GROUPS = env_list("OIDC_ADMIN_GROUPS")
 OIDC_APPROVER_GROUPS = env_list("OIDC_APPROVER_GROUPS")
 OIDC_VIEWER_GROUPS = env_list("OIDC_VIEWER_GROUPS")
@@ -116,16 +120,16 @@ OIDC_VIEWER_GROUPS = env_list("OIDC_VIEWER_GROUPS")
 BOOTSTRAP_ADMIN_EMAILS = [email.lower() for email in env_list("BOOTSTRAP_ADMIN_EMAILS")]
 # The discovery document is fetched lazily so a provider outage never stops
 # the app from starting; these override discovery when a provider has none.
-OIDC_OP_AUTHORIZATION_ENDPOINT = os.getenv("OIDC_AUTHORIZATION_ENDPOINT", "")
-OIDC_OP_TOKEN_ENDPOINT = os.getenv("OIDC_TOKEN_ENDPOINT", "")
-OIDC_OP_USER_ENDPOINT = os.getenv("OIDC_USERINFO_ENDPOINT", "")
-OIDC_OP_JWKS_ENDPOINT = os.getenv("OIDC_JWKS_ENDPOINT", "")
+OIDC_OP_AUTHORIZATION_ENDPOINT = env("OIDC_AUTHORIZATION_ENDPOINT", "")
+OIDC_OP_TOKEN_ENDPOINT = env("OIDC_TOKEN_ENDPOINT", "")
+OIDC_OP_USER_ENDPOINT = env("OIDC_USERINFO_ENDPOINT", "")
+OIDC_OP_JWKS_ENDPOINT = env("OIDC_JWKS_ENDPOINT", "")
 OIDC_OP_LOGOUT_URL_METHOD = "iam.auth.provider_logout_url"
 OIDC_CALLBACK_CLASS = "iam.auth.CallbackView"
 OIDC_AUTHENTICATE_CLASS = "iam.auth.AuthenticationRequestView"
 AUTHENTICATION_BACKENDS = ["iam.auth.OIDCBackend"]
 # Local development without an identity provider (docs/development.md).
-DEV_LOGIN = DEBUG and os.getenv("DEV_LOGIN", "0") == "1"
+DEV_LOGIN = DEBUG and env("DEV_LOGIN", "0") == "1"
 if DEV_LOGIN:
     AUTHENTICATION_BACKENDS.append("iam.auth.DevLoginBackend")
 LOGIN_URL = "login"
@@ -134,7 +138,7 @@ LOGIN_REDIRECT_URL_FAILURE = "/login/denied/"
 LOGOUT_REDIRECT_URL = "/login/"
 
 LANGUAGE_CODE = "en"
-TIME_ZONE = os.getenv("TZ", "UTC")
+TIME_ZONE = env("TZ", "UTC")
 USE_I18N = False
 USE_TZ = True
 STATIC_URL = "/static/"
@@ -152,35 +156,35 @@ STORAGES = {
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
-SESSION_COOKIE_AGE = int(os.getenv("SESSION_HOURS", "12")) * 3600
+SESSION_COOKIE_AGE = int(env("SESSION_HOURS", "12")) * 3600
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
-SECURE_SSL_REDIRECT = not DEBUG and os.getenv("SECURE_SSL_REDIRECT", "1") == "1"
+SECURE_SSL_REDIRECT = not DEBUG and env("SECURE_SSL_REDIRECT", "1") == "1"
 SECURE_REDIRECT_EXEMPT = [r"^-/"]
 SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS", "1") == "1"
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env("SECURE_HSTS_INCLUDE_SUBDOMAINS", "1") == "1"
 # Preloading is a decision for the domain's owner, not for this app.
 SILENCED_SYSTEM_CHECKS = ["security.W021"]
 # Enable only behind a reverse proxy that replaces this header.
-if os.getenv("TRUST_PROXY_HEADERS", "0") == "1":
+if env("TRUST_PROXY_HEADERS", "0") == "1":
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 X_FRAME_OPTIONS = "DENY"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 256 * 1024
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
 
 # The worker (manage.py run_worker) runs provisioning jobs and the schedule.
-WORKER_POLL_SECONDS = float(os.getenv("WORKER_POLL_SECONDS", "5"))
-WORKER_HEARTBEAT_MAX_AGE_SECONDS = int(os.getenv("WORKER_HEARTBEAT_MAX_AGE_SECONDS", "300"))
-JOB_LEASE_SECONDS = int(os.getenv("JOB_LEASE_SECONDS", "300"))
-HEALTHCHECK_TOKEN = os.getenv("HEALTHCHECK_TOKEN", "")
+WORKER_POLL_SECONDS = float(env("WORKER_POLL_SECONDS", "5"))
+WORKER_HEARTBEAT_MAX_AGE_SECONDS = int(env("WORKER_HEARTBEAT_MAX_AGE_SECONDS", "300"))
+JOB_LEASE_SECONDS = int(env("JOB_LEASE_SECONDS", "300"))
+HEALTHCHECK_TOKEN = env("HEALTHCHECK_TOKEN", "")
 # Outbound calls to connected apps.
-PROVIDER_TIMEOUT_SECONDS = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "20"))
+PROVIDER_TIMEOUT_SECONDS = float(env("PROVIDER_TIMEOUT_SECONDS", "20"))
 
-SENTRY_DSN = os.getenv("SENTRY_DSN", "")
-SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", DEPLOYMENT_ENV)
-SENTRY_RELEASE = os.getenv("SENTRY_RELEASE", f"iam@{APP_VERSION}" if APP_VERSION else "")
+SENTRY_DSN = env("SENTRY_DSN", "")
+SENTRY_ENVIRONMENT = env("SENTRY_ENVIRONMENT", DEPLOYMENT_ENV)
+SENTRY_RELEASE = env("SENTRY_RELEASE", f"iam@{APP_VERSION}" if APP_VERSION else "")
 
 LOGGING = {
     "version": 1,
@@ -216,5 +220,5 @@ if SENTRY_DSN:
         release=SENTRY_RELEASE or None,
         integrations=[DjangoIntegration()],
         send_default_pii=False,
-        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0")),
+        traces_sample_rate=float(env("SENTRY_TRACES_SAMPLE_RATE", "0")),
     )

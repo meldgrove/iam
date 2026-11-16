@@ -103,7 +103,8 @@ def claim_next_job() -> Job | None:
     )
     with transaction.atomic():
         job = (
-            Job.objects.select_for_update(skip_locked=True)
+            # Locks only the job row, not the workflow the filter joins.
+            Job.objects.select_for_update(skip_locked=True, of=("self",))
             .filter(status=Job.Status.QUEUED, next_attempt_at__lte=now)
             .exclude(workflow__status=Workflow.Status.CANCELLED)
             .exclude(Exists(busy))
@@ -266,8 +267,9 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
     group_task = None
     with transaction.atomic():
         job = Job.objects.select_for_update().get(pk=job.pk)
-        if job.status != Job.Status.RUNNING:
-            return job
+        # The change happened in the connected app, so the account and the
+        # initial password count even when the job was cancelled, or handed
+        # back to the queue after its lease ran out, while it ran.
         try:
             with transaction.atomic():
                 _record_account(job, result)
