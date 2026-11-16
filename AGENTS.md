@@ -11,7 +11,8 @@ processes: `migrate`, `web` (gunicorn) and `worker` (`manage.py run_worker`).
   messages. Connection settings are configured in the admin UI, not in
   environment variables.
 - The engine: `iam/policy.py` (desired access), `iam/lifecycle.py`
-  (workflows), `iam/jobs.py` (running jobs, tasks), `iam/sync.py` (reads),
+  (starting and cancelling workflows), `iam/jobs.py` (running jobs; the only
+  place that changes job, task and workflow status), `iam/sync.py` (reads),
   `iam/schedule.py`.
 - Every change by a person or the worker writes an audit event without secret
   values.

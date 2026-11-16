@@ -8,6 +8,7 @@ from iam.jobs import (
     MAX_ATTEMPTS,
     ActionError,
     approve_job,
+    cancel_task,
     claim_next_job,
     complete_task,
     recover_stale_jobs,
@@ -202,6 +203,22 @@ def test_manual_connections_create_tasks_and_completion_records_the_change(
     assert workflow.status == Workflow.Status.COMPLETED
     assert person.status == Person.Status.ACTIVE
     assert Account.objects.get(person=person).status == Account.Status.ACTIVE
+
+
+def test_cancelling_a_manual_task_drops_the_change(person, fake_connection, approver_user):
+    fake_connection.mode = Connection.Mode.MANUAL
+    fake_connection.save()
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    task = Task.objects.get(job__workflow=workflow, kind=Task.Kind.CHANGE)
+    cancel_task(task, actor=approver_user, note="Not needed")
+    task.refresh_from_db()
+    workflow.refresh_from_db()
+    assert task.status == Task.Status.CANCELLED and task.completed_by == approver_user
+    assert workflow.jobs.get().status == Job.Status.CANCELLED
+    assert workflow.status == Workflow.Status.COMPLETED
+    assert not Account.objects.filter(person=person).exists()
+    with pytest.raises(ActionError):
+        cancel_task(task, actor=approver_user)
 
 
 def test_disabled_connections_never_change_silently(person, fake_connection, fake_store):
@@ -626,7 +643,7 @@ def test_cancelling_a_workflow_keeps_the_result_of_its_running_job(
 
 
 def test_a_job_cancelled_while_it_ran_still_records_its_change(person, fake_store, monkeypatch):
-    from iam.lifecycle import cancel_job
+    from iam.jobs import cancel_job
     from tests.fakes import FakeAdapter
 
     FakeAdapter.password = "Initial-Pass-123"

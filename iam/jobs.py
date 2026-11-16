@@ -1,4 +1,12 @@
-"""Running jobs: one account change at one connection.
+"""Jobs and their tasks: one account change at one connection.
+
+This is the only module that changes the status of a job, a task or a
+workflow. Lifecycle plans a workflow's jobs and hands them over with
+start_jobs, or stops them with stop_workflow; the worker claims and runs
+them; people retry, approve, reject, complete or cancel them. Every change
+ends the same way: the workflow's status is worked out again from its jobs
+(refresh_workflow), which also finishes the person's status, and people
+hear about new tasks once the change commits.
 
 The worker claims queued jobs one at a time. A connection that may change
 accounts gets the adapter call; any other connection gets a manual task. A
@@ -30,7 +38,6 @@ from .adapters.base import (
     EnsureResult,
 )
 from .crypto import SecretUnreadable
-from .lifecycle import cancel_job, refresh_workflow
 from .models import (
     Account,
     AppSettings,
@@ -89,6 +96,134 @@ def group_labels(job: Job) -> list[str]:
     return [labels.get(gid, gid) for gid in job.groups]
 
 
+# -- starting and stopping -----------------------------------------------------
+
+
+def start_jobs(workflow: Workflow, jobs: list[Job], *, actor: User | None = None) -> list[int]:
+    """Take over the jobs a new workflow planned: cancel the group tasks they
+    replace, and hand jobs at connections without automation to a person.
+    Returns the cancelled group tasks. The caller refreshes the workflow once
+    it has recorded the start."""
+    cancelled = _cancel_replaced_group_tasks(workflow.person_id, jobs, actor)
+    tasks = [
+        _hand_to_person(job)
+        for job in jobs
+        if job.status == Job.Status.QUEUED and not job.connection.writes_automatically
+    ]
+    notify_after_commit(tasks)
+    return cancelled
+
+
+def _cancel_replaced_group_tasks(person_id: int, jobs: list[Job], actor) -> list[int]:
+    """Groups an earlier job left unfinished, at the connections the new
+    workflow plans again. Elsewhere the task stays open: nothing else will
+    finish those groups."""
+    tasks = Task.objects.filter(
+        person_id=person_id,
+        kind=Task.Kind.FAILURE,
+        status=Task.Status.OPEN,
+        job__status=Job.Status.SUCCEEDED,
+        job__connection__in=[job.connection_id for job in jobs],
+    )
+    ids = list(tasks.values_list("pk", flat=True))
+    _close_tasks(
+        Task.objects.filter(pk__in=ids),
+        Task.Status.CANCELLED,
+        actor=actor,
+        note="Replaced by a newer workflow.",
+    )
+    return ids
+
+
+def stop_workflow(workflow: Workflow, *, actor: User | None = None, note: str) -> None:
+    """Cancel the workflow and its unfinished jobs. A running job finishes:
+    its change may already have happened in the connected app. The lock
+    keeps the worker from claiming a job meanwhile; it covers only the job
+    rows, not the connections the ordering joins."""
+    unfinished = workflow.jobs.select_for_update(of=("self",)).exclude(
+        status__in=[Job.Status.SUCCEEDED, Job.Status.CANCELLED, Job.Status.RUNNING]
+    )
+    for job in unfinished:
+        cancel_job(job, actor=actor, note=note)
+    workflow.status = Workflow.Status.CANCELLED
+    workflow.finished_at = timezone.now()
+    workflow.save(update_fields=["status", "finished_at"])
+
+
+def cancel_job(job: Job, *, actor: User | None = None, note: str = "") -> None:
+    job.status = Job.Status.CANCELLED
+    job.finished_at = timezone.now()
+    job.locked_until = None
+    job.save(update_fields=["status", "finished_at", "locked_until"])
+    _close_tasks(
+        job.tasks.filter(status=Task.Status.OPEN), Task.Status.CANCELLED, actor=actor, note=note
+    )
+
+
+def refresh_workflow(workflow: Workflow) -> Workflow:
+    """Derive the workflow's status from its jobs and finish the person's
+    status change when everything is done."""
+    if workflow.status == Workflow.Status.CANCELLED:
+        return workflow
+    statuses = set(workflow.jobs.values_list("status", flat=True))
+    if statuses <= {Job.Status.SUCCEEDED, Job.Status.CANCELLED}:
+        status = Workflow.Status.COMPLETED
+    elif Job.Status.FAILED in statuses:
+        status = Workflow.Status.FAILED
+    elif statuses & {Job.Status.QUEUED, Job.Status.RUNNING}:
+        status = Workflow.Status.RUNNING
+    else:
+        status = Workflow.Status.WAITING
+    if status == workflow.status:
+        return workflow
+    workflow.status = status
+    workflow.finished_at = timezone.now() if status == Workflow.Status.COMPLETED else None
+    workflow.save(update_fields=["status", "finished_at"])
+    if status == Workflow.Status.COMPLETED:
+        _finish_person_status(workflow)
+    return workflow
+
+
+def _finish_person_status(workflow: Workflow) -> None:
+    person = Person.objects.select_for_update().get(pk=workflow.person_id)
+    latest = (
+        person.workflows.exclude(status=Workflow.Status.CANCELLED)
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    if latest is None or latest.pk != workflow.pk:
+        return
+    if workflow.kind == Workflow.Kind.ONBOARDING and person.status == Person.Status.ONBOARDING:
+        person.status = Person.Status.ACTIVE
+    elif workflow.kind == Workflow.Kind.OFFBOARDING and person.status == Person.Status.OFFBOARDING:
+        person.status = Person.Status.OFFBOARDED
+    else:
+        return
+    person.save(update_fields=["status", "updated_at"])
+    audit.record(
+        "person.status",
+        f"{person.full_name} is now {person.get_status_display().lower()}",
+        person=person,
+        target=workflow,
+    )
+
+
+def _settle(job: Job, *new_tasks: Task | None) -> None:
+    """End every change to a job: work out its workflow's status again, and
+    tell people about new tasks once the change commits."""
+    refresh_workflow(job.workflow)
+    notify_after_commit(list(new_tasks))
+
+
+def _replaced(job: Job) -> bool:
+    """Whether a newer workflow replaced the job's (or it was cancelled)."""
+    return job.workflow.status == Workflow.Status.CANCELLED
+
+
+def _close_tasks(tasks, status: str, *, actor: User | None = None, note: str = "") -> None:
+    tasks.update(status=status, completed_at=timezone.now(), completed_by=actor, note=note[:2000])
+
+
 # -- claiming --------------------------------------------------------------
 
 
@@ -130,8 +265,9 @@ def recover_stale_jobs() -> int:
             job = Job.objects.select_for_update().get(pk=job.pk)
             if job.status != Job.Status.RUNNING:
                 continue
-            if job.workflow.status == Workflow.Status.CANCELLED:
+            if _replaced(job):
                 cancel_job(job, note="The worker stopped; the workflow was replaced meanwhile.")
+                _settle(job)
                 count += 1
                 continue
             job.status = Job.Status.QUEUED
@@ -151,9 +287,7 @@ def run_job(job: Job) -> Job:
     person = Person.objects.select_related("team", "manager").get(pk=job.person_id)
     if not connection.writes_automatically or not _can_write(connection):
         with transaction.atomic():
-            task = hand_to_person(job)
-            refresh_workflow(job.workflow)
-            notify_after_commit([task] if task else [])
+            _settle(job, _hand_to_person(job))
         return job
     spec = account_spec(person)
     account = Account.objects.filter(connection=connection, person=person).first()
@@ -284,8 +418,10 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
             job.save(
                 update_fields=["status", "finished_at", "locked_until", "last_error", "result"]
             )
-            job.tasks.filter(status=Task.Status.OPEN, kind=Task.Kind.FAILURE).update(
-                status=Task.Status.DONE, completed_at=timezone.now(), note="Resolved by a retry."
+            _close_tasks(
+                job.tasks.filter(status=Task.Status.OPEN, kind=Task.Kind.FAILURE),
+                Task.Status.DONE,
+                note="Resolved by a retry.",
             )
             if result.group_error is not None and _workflow_is_current(job):
                 group_task = _open_group_task(job, result.group_error)
@@ -296,8 +432,7 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
                 target=job,
                 details=job.result,
             )
-            refresh_workflow(job.workflow)
-            notify_after_commit([group_task] if group_task else [])
+            _settle(job, group_task)
     if conflict:
         return fail_job(job, conflict, retryable=False)
     if password:
@@ -403,9 +538,10 @@ def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
         job = Job.objects.select_for_update().get(pk=job.pk)
         if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
             return job
-        if job.workflow.status == Workflow.Status.CANCELLED:
+        if _replaced(job):
             # A newer workflow replaced this one while the job ran.
             cancel_job(job, note=f"Replaced by a newer workflow after: {message[:500]}")
+            _settle(job)
             return job
         job.last_error = message[:2000]
         job.locked_until = None
@@ -436,8 +572,7 @@ def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
             target=job,
             details={"error": message[:500], "attempts": job.attempts},
         )
-        refresh_workflow(job.workflow)
-        notify_after_commit([task] if task else [])
+        _settle(job, task)
     return job
 
 
@@ -519,7 +654,7 @@ def _open_task(job: Job, kind: str, title: str, instructions: str) -> Task | Non
     )
 
 
-def hand_to_person(job: Job) -> Task | None:
+def _hand_to_person(job: Job) -> Task | None:
     """Turn a job at a connection without automation into a manual task."""
     job.status = Job.Status.MANUAL
     job.locked_until = None
@@ -548,20 +683,20 @@ def retry_job(job: Job, *, actor: User) -> None:
         job = Job.objects.select_for_update().get(pk=job.pk)
         if job.status not in (Job.Status.FAILED, Job.Status.MANUAL):
             raise ActionError("Only failed jobs and jobs with a manual task can run again.")
-        if job.workflow.status == Workflow.Status.CANCELLED:
+        if _replaced(job):
             raise ActionError("The workflow was replaced or cancelled; start a new one instead.")
         job.status = Job.Status.QUEUED
         job.attempts = 0
         job.next_attempt_at = timezone.now()
         job.save(update_fields=["status", "attempts", "next_attempt_at"])
-        job.tasks.filter(status=Task.Status.OPEN).update(
-            status=Task.Status.CANCELLED,
-            completed_at=timezone.now(),
-            completed_by=actor,
+        _close_tasks(
+            job.tasks.filter(status=Task.Status.OPEN),
+            Task.Status.CANCELLED,
+            actor=actor,
             note="The job runs again.",
         )
         audit.record("job.retry", f"Retried: {job}", actor=actor, person=job.person, target=job)
-        refresh_workflow(job.workflow)
+        _settle(job)
 
 
 def approve_job(job: Job, *, actor: User) -> None:
@@ -574,7 +709,7 @@ def approve_job(job: Job, *, actor: User) -> None:
         job.last_error = ""
         job.save(update_fields=["status", "next_attempt_at", "last_error"])
         audit.record("job.approved", f"Approved: {job}", actor=actor, person=job.person, target=job)
-        refresh_workflow(job.workflow)
+        _settle(job)
 
 
 def reject_job(job: Job, *, actor: User) -> None:
@@ -584,7 +719,7 @@ def reject_job(job: Job, *, actor: User) -> None:
             raise ActionError("This job is not waiting for approval.")
         cancel_job(job, actor=actor, note="Rejected by an admin.")
         audit.record("job.rejected", f"Rejected: {job}", actor=actor, person=job.person, target=job)
-        refresh_workflow(job.workflow)
+        _settle(job)
 
 
 def complete_task(task: Task, *, actor: User, note: str = "") -> None:
@@ -592,11 +727,7 @@ def complete_task(task: Task, *, actor: User, note: str = "") -> None:
         task = Task.objects.select_for_update().get(pk=task.pk)
         if task.status != Task.Status.OPEN:
             raise ActionError("This task is already closed.")
-        task.status = Task.Status.DONE
-        task.completed_at = timezone.now()
-        task.completed_by = actor
-        task.note = note[:2000]
-        task.save(update_fields=["status", "completed_at", "completed_by", "note"])
+        _close_tasks(Task.objects.filter(pk=task.pk), Task.Status.DONE, actor=actor, note=note)
         job = task.job
         if job is not None and task.kind in (Task.Kind.CHANGE, Task.Kind.FAILURE) and job.is_open:
             job.status = Job.Status.SUCCEEDED
@@ -604,7 +735,7 @@ def complete_task(task: Task, *, actor: User, note: str = "") -> None:
             job.result = {**job.result, "manual": True, "completed_by": actor.email}
             job.save(update_fields=["status", "finished_at", "result"])
             _record_manual_change(job)
-            refresh_workflow(job.workflow)
+            _settle(job)
         audit.record(
             "task.done",
             f"Completed task: {task.title}",
@@ -636,13 +767,11 @@ def cancel_task(task: Task, *, actor: User, note: str = "") -> None:
             raise ActionError("This task is already closed.")
         if task.job is not None and task.job.is_open:
             cancel_job(task.job, actor=actor, note=note or "Task cancelled.")
-            refresh_workflow(task.job.workflow)
+            _settle(task.job)
         else:
-            task.status = Task.Status.CANCELLED
-            task.completed_at = timezone.now()
-            task.completed_by = actor
-            task.note = note[:2000]
-            task.save(update_fields=["status", "completed_at", "completed_by", "note"])
+            _close_tasks(
+                Task.objects.filter(pk=task.pk), Task.Status.CANCELLED, actor=actor, note=note
+            )
         audit.record(
             "task.cancelled",
             f"Cancelled task: {task.title}",

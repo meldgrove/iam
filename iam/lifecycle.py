@@ -2,8 +2,12 @@
 
 Starting a workflow captures the person's desired access and plans one job
 per connection: make sure the account exists with the right groups, or
-disable it. The worker runs the jobs (iam.jobs); connections that cannot or
-may not change accounts get a manual task instead.
+disable it. From there iam.jobs owns the jobs, their tasks and the
+workflow's status: the worker runs the jobs, connections that cannot or may
+not change accounts get a manual task instead, and the person's status
+finishes when the workflow completes. This module plans jobs as queued, or
+held for an admin's approval, and never changes the status of a job, a task
+or a workflow after that.
 """
 
 from __future__ import annotations
@@ -14,7 +18,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import audit
-from .models import Account, AppSettings, Job, Person, Task, User, Workflow
+from .jobs import refresh_workflow, start_jobs, stop_workflow
+from .models import Account, AppSettings, Job, Person, User, Workflow
 from .policy import (
     desired_access,
     entitled_access,
@@ -75,8 +80,6 @@ def start_workflow(
     automatic: bool = False,
     reason: str = "",
 ) -> Workflow:
-    from .jobs import hand_to_person, notify_after_commit
-
     with transaction.atomic():
         person = Person.objects.select_for_update().get(pk=person.pk)
         if not can_start(person, kind):
@@ -105,7 +108,7 @@ def start_workflow(
             created_by=actor,
         )
         jobs = _plan_jobs(workflow, person)
-        cancelled_tasks = _cancel_group_tasks(person, actor, jobs)
+        cancelled_tasks = start_jobs(workflow, jobs, actor=actor)
         audit.record(
             f"workflow.{kind}",
             f"Started {workflow.get_kind_display().lower()} of {person.full_name}"
@@ -120,34 +123,17 @@ def start_workflow(
                 "cancelled_group_tasks": cancelled_tasks,
             },
         )
-        tasks = []
-        for job in jobs:
-            if job.status == Job.Status.QUEUED and not job.connection.writes_automatically:
-                tasks.append(hand_to_person(job))
+        # After the audit event: a workflow without jobs completes at once.
         refresh_workflow(workflow)
-        notify_after_commit([task for task in tasks if task is not None])
     return workflow
 
 
 def _supersede_open_workflows(person: Person, actor) -> list[int]:
     ids = []
     for workflow in person.workflows.filter(status__in=Workflow.OPEN_STATUSES):
-        for job in _jobs_to_cancel(workflow):
-            cancel_job(job, note="Replaced by a newer workflow.")
-        workflow.status = Workflow.Status.CANCELLED
-        workflow.finished_at = timezone.now()
-        workflow.save(update_fields=["status", "finished_at"])
+        stop_workflow(workflow, note="Replaced by a newer workflow.")
         ids.append(workflow.pk)
     return ids
-
-
-def _jobs_to_cancel(workflow: Workflow):
-    """A running job finishes: its change may already have happened in the
-    connected app. The lock keeps the worker from claiming a job meanwhile;
-    it covers only the job rows, not the connections the ordering joins."""
-    return workflow.jobs.select_for_update(of=("self",)).exclude(
-        status__in=[Job.Status.SUCCEEDED, Job.Status.CANCELLED, Job.Status.RUNNING]
-    )
 
 
 def _deactivate_app_user(person: Person, actor) -> None:
@@ -211,28 +197,6 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
     return jobs
 
 
-def _cancel_group_tasks(person: Person, actor, jobs: list[Job]) -> list[int]:
-    """Groups an earlier job left unfinished, at the connections the new
-    workflow plans again. Elsewhere the task stays open: nothing else will
-    finish those groups."""
-    ids = list(
-        Task.objects.filter(
-            person=person,
-            kind=Task.Kind.FAILURE,
-            status=Task.Status.OPEN,
-            job__status=Job.Status.SUCCEEDED,
-            job__connection__in=[job.connection_id for job in jobs],
-        ).values_list("pk", flat=True)
-    )
-    Task.objects.filter(pk__in=ids).update(
-        status=Task.Status.CANCELLED,
-        completed_at=timezone.now(),
-        completed_by=actor,
-        note="Replaced by a newer workflow.",
-    )
-    return ids
-
-
 def _over_removal_limit(connection, settings: AppSettings) -> bool:
     since = timezone.now() - timedelta(hours=24)
     recent = (
@@ -248,67 +212,6 @@ def _over_removal_limit(connection, settings: AppSettings) -> bool:
     return recent + 1 > settings.removal_limit_per_day
 
 
-def refresh_workflow(workflow: Workflow) -> Workflow:
-    """Derive the workflow's status from its jobs and finish the person's
-    status change when everything is done."""
-    if workflow.status == Workflow.Status.CANCELLED:
-        return workflow
-    statuses = set(workflow.jobs.values_list("status", flat=True))
-    if statuses <= {Job.Status.SUCCEEDED, Job.Status.CANCELLED}:
-        status = Workflow.Status.COMPLETED
-    elif Job.Status.FAILED in statuses:
-        status = Workflow.Status.FAILED
-    elif statuses & {Job.Status.QUEUED, Job.Status.RUNNING}:
-        status = Workflow.Status.RUNNING
-    else:
-        status = Workflow.Status.WAITING
-    if status == workflow.status:
-        return workflow
-    workflow.status = status
-    workflow.finished_at = timezone.now() if status == Workflow.Status.COMPLETED else None
-    workflow.save(update_fields=["status", "finished_at"])
-    if status == Workflow.Status.COMPLETED:
-        _finish_person_status(workflow)
-    return workflow
-
-
-def _finish_person_status(workflow: Workflow) -> None:
-    person = Person.objects.select_for_update().get(pk=workflow.person_id)
-    latest = (
-        person.workflows.exclude(status=Workflow.Status.CANCELLED)
-        .order_by("-created_at", "-pk")
-        .first()
-    )
-    if latest is None or latest.pk != workflow.pk:
-        return
-    if workflow.kind == Workflow.Kind.ONBOARDING and person.status == Person.Status.ONBOARDING:
-        person.status = Person.Status.ACTIVE
-    elif workflow.kind == Workflow.Kind.OFFBOARDING and person.status == Person.Status.OFFBOARDING:
-        person.status = Person.Status.OFFBOARDED
-    else:
-        return
-    person.save(update_fields=["status", "updated_at"])
-    audit.record(
-        "person.status",
-        f"{person.full_name} is now {person.get_status_display().lower()}",
-        person=person,
-        target=workflow,
-    )
-
-
-def cancel_job(job: Job, *, actor=None, note: str = "") -> None:
-    job.status = Job.Status.CANCELLED
-    job.finished_at = timezone.now()
-    job.locked_until = None
-    job.save(update_fields=["status", "finished_at", "locked_until"])
-    job.tasks.filter(status=Task.Status.OPEN).update(
-        status=Task.Status.CANCELLED,
-        completed_at=timezone.now(),
-        completed_by=actor,
-        note=note,
-    )
-
-
 def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
     if workflow.kind == Workflow.Kind.OFFBOARDING:
         raise LifecycleError(
@@ -318,11 +221,7 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
         workflow = Workflow.objects.select_for_update().get(pk=workflow.pk)
         if not workflow.is_open:
             raise LifecycleError("This workflow is already finished.")
-        for job in _jobs_to_cancel(workflow):
-            cancel_job(job, actor=actor, note="Workflow cancelled.")
-        workflow.status = Workflow.Status.CANCELLED
-        workflow.finished_at = timezone.now()
-        workflow.save(update_fields=["status", "finished_at"])
+        stop_workflow(workflow, actor=actor, note="Workflow cancelled.")
         person = workflow.person
         if workflow.kind == Workflow.Kind.ONBOARDING and person.status == Person.Status.ONBOARDING:
             person.status = Person.Status.PLANNED
