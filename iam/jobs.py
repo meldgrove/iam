@@ -258,7 +258,7 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
             job.tasks.filter(status=Task.Status.OPEN, kind=Task.Kind.FAILURE).update(
                 status=Task.Status.DONE, completed_at=timezone.now(), note="Resolved by a retry."
             )
-            if result.group_error is not None:
+            if result.group_error is not None and _workflow_is_current(job):
                 group_task = _open_group_task(job, result.group_error)
             audit.record(
                 f"job.{job.action}",
@@ -410,6 +410,18 @@ def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
         refresh_workflow(job.workflow)
         notify_after_commit([task] if task else [])
     return job
+
+
+def _workflow_is_current(job: Job) -> bool:
+    """Whether no newer workflow replaced the job's. Takes the person lock
+    that starting a workflow takes: a newer one either replaced this one
+    already, or starts after this commits and cancels its group task."""
+    Person.objects.select_for_update().get(pk=job.person_id)
+    return (
+        Workflow.objects.filter(pk=job.workflow_id)
+        .exclude(status=Workflow.Status.CANCELLED)
+        .exists()
+    )
 
 
 def _open_group_task(job: Job, error: Exception) -> Task | None:

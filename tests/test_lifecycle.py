@@ -474,6 +474,21 @@ def test_a_newer_workflow_replaces_an_unfinished_group_task(person, fake_store):
     assert not Task.objects.filter(status=Task.Status.OPEN).exists()
 
 
+def test_a_replaced_running_job_opens_no_group_task(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    running = claim_next_job()
+    offboarding = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    fake_store.fail_group_read_with = AdapterError(GROUPS_UNREADABLE)
+    run_job(running)
+    fake_store.fail_group_read_with = None
+    run_all()
+    offboarding.refresh_from_db()
+    person.refresh_from_db()
+    assert offboarding.status == Workflow.Status.COMPLETED
+    assert person.status == Person.Status.OFFBOARDED
+    assert not Task.objects.filter(status=Task.Status.OPEN).exists()
+
+
 def test_passing_group_errors_retry_before_they_become_a_task(person, fake_store):
     fake_store.fail_group_read_with = TransientError("Fake app answered 503.")
     workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
