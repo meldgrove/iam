@@ -28,10 +28,11 @@ class LifecycleError(Exception):
     """A workflow cannot start; the message explains why."""
 
 
+# The person's statuses each workflow may start from. During onboarding, an
+# access update restarts the onboarding (see start_workflow).
 ALLOWED_FROM = {
     Workflow.Kind.ONBOARDING: {
         Person.Status.PLANNED,
-        Person.Status.ONBOARDING,
         Person.Status.OFFBOARDED,
         Person.Status.ARCHIVED,
     },
@@ -50,6 +51,21 @@ STATUS_DURING = {
     Workflow.Kind.OFFBOARDING: Person.Status.OFFBOARDING,
 }
 
+ARCHIVABLE = {Person.Status.PLANNED, Person.Status.OFFBOARDED}
+
+
+def can_start(person: Person, kind: str) -> bool:
+    """Whether a workflow of this kind may start for the person now."""
+    return person.status in ALLOWED_FROM[kind]
+
+
+def can_archive(person: Person) -> bool:
+    return person.status in ARCHIVABLE and not _has_open_workflow(person)
+
+
+def _has_open_workflow(person: Person) -> bool:
+    return person.workflows.filter(status__in=Workflow.OPEN_STATUSES).exists()
+
 
 def start_workflow(
     person: Person,
@@ -63,7 +79,7 @@ def start_workflow(
 
     with transaction.atomic():
         person = Person.objects.select_for_update().get(pk=person.pk)
-        if person.status not in ALLOWED_FROM[kind]:
+        if not can_start(person, kind):
             raise LifecycleError(
                 f"{Workflow.Kind(kind).label} cannot start while {person.full_name} is "
                 f"{person.get_status_display().lower()}."
@@ -115,9 +131,7 @@ def start_workflow(
 
 def _supersede_open_workflows(person: Person, actor) -> list[int]:
     ids = []
-    for workflow in person.workflows.filter(
-        status__in=[Workflow.Status.RUNNING, Workflow.Status.WAITING, Workflow.Status.FAILED]
-    ):
+    for workflow in person.workflows.filter(status__in=Workflow.OPEN_STATUSES):
         for job in _jobs_to_cancel(workflow):
             cancel_job(job, note="Replaced by a newer workflow.")
         workflow.status = Workflow.Status.CANCELLED
@@ -323,11 +337,9 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
 
 
 def archive_person(person: Person, *, actor: User) -> None:
-    if person.status not in (Person.Status.OFFBOARDED, Person.Status.PLANNED):
+    if person.status not in ARCHIVABLE:
         raise LifecycleError("Only planned or offboarded people can be archived.")
-    if person.workflows.filter(
-        status__in=[Workflow.Status.RUNNING, Workflow.Status.WAITING, Workflow.Status.FAILED]
-    ).exists():
+    if _has_open_workflow(person):
         raise LifecycleError("Finish or cancel the open workflow first.")
     person.status = Person.Status.ARCHIVED
     person.save(update_fields=["status", "updated_at"])

@@ -448,6 +448,8 @@ class Workflow(models.Model):
         FAILED = "failed", "Needs attention"
         CANCELLED = "cancelled", "Cancelled"
 
+    OPEN_STATUSES = (Status.RUNNING, Status.WAITING, Status.FAILED)
+
     person = models.ForeignKey(Person, on_delete=models.CASCADE, related_name="workflows")
     kind = models.CharField(max_length=20, choices=Kind.choices)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
@@ -469,7 +471,7 @@ class Workflow(models.Model):
 
     @property
     def is_open(self) -> bool:
-        return self.status in {self.Status.RUNNING, self.Status.WAITING, self.Status.FAILED}
+        return self.status in self.OPEN_STATUSES
 
 
 class Job(models.Model):

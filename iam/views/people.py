@@ -4,7 +4,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .. import audit
-from ..lifecycle import LifecycleError, archive_person, start_workflow
+from ..lifecycle import LifecycleError, archive_person, can_archive, can_start, start_workflow
 from ..models import Connection, Job, Person, Team, Workflow
 from ..permissions import approver_required, viewer_required
 from ..policy import entitled_access
@@ -81,17 +81,10 @@ def person_detail(request, pk):
             ),
             "tasks": person.tasks.select_related("connection")[:20],
             "events": person.audit_events.all()[:30],
-            "can_onboard": person.status
-            in {Person.Status.PLANNED, Person.Status.OFFBOARDED, Person.Status.ARCHIVED},
-            "can_update": person.status in {Person.Status.ONBOARDING, Person.Status.ACTIVE},
-            "can_offboard": person.status
-            in {
-                Person.Status.PLANNED,
-                Person.Status.ONBOARDING,
-                Person.Status.ACTIVE,
-                Person.Status.OFFBOARDING,
-            },
-            "can_archive": person.status in {Person.Status.PLANNED, Person.Status.OFFBOARDED},
+            "can_onboard": can_start(person, Workflow.Kind.ONBOARDING),
+            "can_update": can_start(person, Workflow.Kind.ACCESS_UPDATE),
+            "can_offboard": can_start(person, Workflow.Kind.OFFBOARDING),
+            "can_archive": can_archive(person),
         },
     )
 

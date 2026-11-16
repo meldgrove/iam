@@ -1,7 +1,7 @@
 import pytest
 from django.urls import reverse
 
-from iam.lifecycle import start_workflow
+from iam.lifecycle import ALLOWED_FROM, start_workflow
 from iam.models import (
     AccessProfile,
     AuditEvent,
@@ -164,6 +164,32 @@ def test_start_workflow_from_the_person_page(client_for, approver_user, person, 
     assert workflow.created_by == approver_user
     response = client.post(reverse("person_start", args=[person.pk, "access_update"]), follow=True)
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("status", Person.Status.values)
+def test_the_person_page_offers_what_lifecycle_allows(client_for, approver_user, person, status):
+    Person.objects.filter(pk=person.pk).update(status=status)
+    page = (
+        client_for(approver_user).get(reverse("person_detail", args=[person.pk])).content.decode()
+    )
+    for kind in Workflow.Kind.values:
+        offered = f'action="{reverse("person_start", args=[person.pk, kind])}"' in page
+        assert offered == (status in ALLOWED_FROM[kind]), kind
+    archive = f'action="{reverse("person_archive", args=[person.pk])}"' in page
+    assert archive == (status in {Person.Status.PLANNED, Person.Status.OFFBOARDED})
+
+
+def test_offboarded_people_can_be_offboarded_again_from_their_page(
+    client_for, approver_user, person, fake_store
+):
+    # Fixing drift: an offboarded person still has an active account somewhere.
+    Person.objects.filter(pk=person.pk).update(status=Person.Status.OFFBOARDED)
+    client = client_for(approver_user)
+    start = reverse("person_start", args=[person.pk, "offboarding"])
+    page = client.get(reverse("person_detail", args=[person.pk])).content.decode()
+    assert f'action="{start}"' in page
+    client.post(start)
+    assert Workflow.objects.get(kind=Workflow.Kind.OFFBOARDING).is_open
 
 
 def test_complete_task_from_its_page(client_for, approver_user, world):
