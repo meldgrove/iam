@@ -12,7 +12,9 @@ they may do: a person signs in only when an active app user exists for them.
 | Admin | Also manage access profiles and teams, approve held removals, and use the admin section: connections, users and roles, settings. |
 
 An app user can be linked to a person. Starting that person's offboarding
-turns the app user off at once.
+turns the app user off at once. Because of that, only someone with the same
+or a higher role can start it: an approver cannot offboard an admin of this
+app. The schedule still offboards everyone the day after their last day.
 
 ## Any OpenID Connect provider
 
