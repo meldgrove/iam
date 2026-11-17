@@ -23,6 +23,15 @@ from .base import (
 )
 
 
+def _temporary(exc: Exception) -> bool:
+    """A 4xx answer: try again later. That includes a sign-in (454), sender
+    (451) or recipients (450) the server cannot accept just now."""
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        codes = [answer[0] for answer in exc.recipients.values()]
+        return bool(codes) and all(400 <= code < 500 for code in codes)
+    return isinstance(exc, smtplib.SMTPResponseException) and 400 <= exc.smtp_code < 500
+
+
 def _check_header(value: str, what: str) -> str:
     if "\r" in value or "\n" in value:
         raise AdapterError(f"The {what} contains a line break; the email was not sent.")
@@ -105,6 +114,8 @@ class SmtpAdapter(Adapter):
     def _translate(self, exc: Exception, what: str) -> Exception:
         """Map smtplib and socket errors to adapter errors. smtplib's
         exceptions are OSErrors, so the SMTP checks come first."""
+        if _temporary(exc):
+            return TransientError(f"The SMTP server asked to try again later ({what}).")
         if isinstance(exc, smtplib.SMTPAuthenticationError):
             return ConfigurationError(
                 "The SMTP server refused the username or password. Check the connection's "
@@ -123,8 +134,6 @@ class SmtpAdapter(Adapter):
         if isinstance(exc, smtplib.SMTPServerDisconnected | smtplib.SMTPConnectError):
             return TransientError(f"Could not reach the SMTP server ({what}).")
         if isinstance(exc, smtplib.SMTPResponseException):
-            if 400 <= exc.smtp_code < 500:
-                return TransientError(f"The SMTP server asked to try again later ({what}).")
             return AdapterError(f"The SMTP server rejected the request ({what}).")
         if isinstance(exc, smtplib.SMTPException):
             return AdapterError(f"The SMTP server rejected the request ({what}).")

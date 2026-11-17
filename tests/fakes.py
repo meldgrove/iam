@@ -40,6 +40,7 @@ class FakeAdapter(Adapter):
         Field("sync_interval_minutes", "Compare every", kind="int", default=0),
     )
     password = None
+    credentials_problem = ""
 
     def _maybe_fail(self, call):
         STORE.calls.append(call)
@@ -82,7 +83,10 @@ class FakeAdapter(Adapter):
         }
         STORE.calls.append(f"create:{spec.username}")
         return EnsureResult(
-            account=self._external(account_id), created=True, initial_password=self.password
+            account=self._external(account_id),
+            created=True,
+            initial_password=self.password,
+            credentials_problem=self.credentials_problem,
         )
 
     def set_active(self, account, active):

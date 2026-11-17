@@ -23,7 +23,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .adapters.base import DisableResult, EnsureResult, ExternalAccount
-from .models import Account, Connection, Job, Person
+from .models import Account, Connection, Job, Person, ProviderGroup
 
 
 class AccountConflict(Exception):
@@ -46,10 +46,21 @@ def removable_groups(connection_id: int, person_id: int, managed: Iterable[str])
     """The groups a change may remove from the person's account: the managed
     groups, plus the groups this app has put the account in. Jobs for the
     same person and app run one after another, so this includes what a job
-    that was still running at planning time applied."""
+    that was still running at planning time applied. Groups marked missing
+    are left alone: an import that read nothing marks every group missing."""
     account = Account.objects.filter(connection_id=connection_id, person_id=person_id).first()
     applied = set(account.applied_groups or []) if account else set()
-    return set(managed) | applied
+    return (set(managed) | applied) - missing_groups(connection_id)
+
+
+def missing_groups(connection_id: int) -> set[str]:
+    """Groups the app no longer lists. Their memberships stay as they are
+    until an import sees them again."""
+    return set(
+        ProviderGroup.objects.filter(connection_id=connection_id, missing=True).values_list(
+            "external_id", flat=True
+        )
+    )
 
 
 def record_job_result(job: Job, result: EnsureResult | DisableResult) -> None:
@@ -85,7 +96,9 @@ def record_job_result(job: Job, result: EnsureResult | DisableResult) -> None:
     if isinstance(result, EnsureResult):
         account.created_by_app = account.created_by_app or result.created
         if result.group_error is None:
-            account.applied_groups = sorted(set(job.groups))
+            # Missing groups were left alone, so they stay in the ledger.
+            kept = set(account.applied_groups or []) & missing_groups(job.connection_id)
+            account.applied_groups = sorted(set(job.groups) | kept)
         else:
             # Unfinished: keep every group the app may have to remove later.
             applied = set(account.applied_groups or []) | set(job.groups)

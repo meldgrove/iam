@@ -140,6 +140,9 @@ class EnsureResult:
     groups_removed: list[str] = field(default_factory=list)
     # Generated for a new account and delivered by email; never stored.
     initial_password: str | None = None
+    # Why the adapter could not arrange the first sign-in of a new account;
+    # the engine asks a person to do it.
+    credentials_problem: str = ""
     notes: list[str] = field(default_factory=list)
     # Why the groups were left unfinished. The account step still counts:
     # a group never holds up onboarding.

@@ -209,3 +209,18 @@ def test_connection_test_requires_host_and_from_address(fake_smtp):
     with pytest.raises(ConfigurationError):
         SmtpAdapter({"host": "smtp.example.invalid"}).test_connection()
     assert fake_smtp.instances == []
+
+
+@pytest.mark.parametrize(
+    "step, failure",
+    [
+        ("login", smtplib.SMTPAuthenticationError(454, b"temporary authentication failure")),
+        ("send", smtplib.SMTPSenderRefused(451, b"try later", "it@example.invalid")),
+        ("send", smtplib.SMTPRecipientsRefused({"a@example.invalid": (450, b"mailbox busy")})),
+    ],
+)
+def test_temporary_refusals_are_transient(fake_smtp, step, failure):
+    fake_smtp.fail_on = {step: failure}
+
+    with pytest.raises(TransientError):
+        SmtpAdapter(CONFIG).send(to=["a@example.invalid"], subject="Hi", body="Body")

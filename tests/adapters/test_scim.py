@@ -324,3 +324,36 @@ def test_the_email_finds_a_user_with_another_user_name(mock_transport):
 
     found = adapter(mock_transport(handler)).find_account(spec())
     assert found.external_id == "u3"
+
+
+def test_a_listing_that_is_no_list_response_is_an_error(mock_transport):
+    def handler(request):
+        return httpx.Response(200, text="<html>Maintenance</html>")
+
+    with pytest.raises(AdapterError, match="unreadable"):
+        list(adapter(mock_transport(handler)).list_accounts())
+    with pytest.raises(AdapterError, match="unreadable"):
+        adapter(mock_transport(handler)).list_groups()
+
+
+def test_group_memberships_are_read_from_every_page(mock_transport):
+    def handler(request):
+        assert request.url.params["filter"] == 'members.value eq "u1"'
+        start = int(request.url.params["startIndex"])
+        page = [{"id": f"g{i}"} for i in range(start, min(start + 100, 151))]
+        return httpx.Response(200, json=listing(*page, total=150))
+
+    from iam.adapters.base import ExternalAccount
+
+    groups = adapter(mock_transport(handler)).account_groups(ExternalAccount("u1"))
+    assert len(groups) == 150 and "g150" in groups
+
+
+def test_unreadable_group_memberships_are_an_error(mock_transport):
+    from iam.adapters.base import ExternalAccount
+
+    def handler(request):
+        return httpx.Response(400, json={"detail": "unsupported filter"})
+
+    with pytest.raises(AdapterError, match="cannot list a user's groups"):
+        adapter(mock_transport(handler)).account_groups(ExternalAccount("u1"))

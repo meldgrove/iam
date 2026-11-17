@@ -323,3 +323,26 @@ def test_creating_an_address_that_is_an_alias_is_refused(mock_transport):
             spec(), groups={"g1"}, managed_groups={"g1"}
         )
     assert directory.memberships == {}
+
+
+def test_rate_limits_answered_with_403_are_transient(mock_transport):
+    error = {"error": {"code": 403, "errors": [{"reason": "userRateLimitExceeded"}]}}
+    transport = mock_transport(lambda r: httpx.Response(403, json=error))
+    with pytest.raises(TransientError):
+        make_adapter(transport).find_account(spec(), "u1")
+
+
+def test_a_create_whose_answer_was_lost_keeps_the_password(mock_transport):
+    directory = Directory()
+
+    def handler(request):
+        if request.method == "POST" and request.url.path.endswith("/users"):
+            directory(request)
+            raise httpx.ReadTimeout("slow", request=request)
+        return directory(request)
+
+    result = make_adapter(mock_transport(handler)).ensure_account(
+        spec(), groups=set(), managed_groups=set()
+    )
+    assert result.created and result.initial_password
+    assert directory.created[0]["password"] == result.initial_password

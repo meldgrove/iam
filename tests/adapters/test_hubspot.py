@@ -228,3 +228,13 @@ def test_list_accounts_and_teams(mock_transport):
     assert [a.external_id for a in hubspot.list_accounts()] == ["11", "12"]
     groups = hubspot.list_groups()
     assert [(g.external_id, g.name) for g in groups] == [("7", "Sales")]
+
+
+def test_a_listing_that_is_not_json_is_an_error(mock_transport):
+    def handler(request):
+        return httpx.Response(200, text="<html>Maintenance</html>")
+
+    with pytest.raises(AdapterError, match="unreadable"):
+        list(adapter(mock_transport(handler)).list_accounts())
+    with pytest.raises(AdapterError, match="unreadable"):
+        adapter(mock_transport(handler)).list_groups()

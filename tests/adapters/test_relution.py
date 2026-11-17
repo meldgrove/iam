@@ -268,3 +268,20 @@ def test_manual_instructions_never_suggest_delete(adapter):
     text = adapter.manual_instructions("disable_account", SPEC, [])
     assert "deactivate" in text
     assert "Do not delete" in text
+
+
+def test_offboarding_deactivates_a_locked_user(fake, adapter):
+    fake.add_user("u-1", "ada@example.invalid", locked=True)
+    result = adapter.disable_account(SPEC, external_id="u-1", managed_groups=set())
+    assert result.changed
+    assert fake.users["u-1"]["activated"] is False
+
+
+def test_roles_are_not_group_memberships(fake, adapter):
+    fake.add_user("u-1", "ada@example.invalid", roles=[{"uuid": "role-admin"}])
+    fake.members["u-1"] = {"g-2"}
+    result = adapter.ensure_account(
+        SPEC, external_id="u-1", groups={"g-1"}, managed_groups={"g-1", "g-2"}
+    )
+    assert fake.members["u-1"] == {"g-1"}
+    assert result.groups_removed == ["g-2"]

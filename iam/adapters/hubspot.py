@@ -136,6 +136,18 @@ class HubSpotAdapter(Adapter):
             return {}
         return data if isinstance(data, dict) else {}
 
+    def _results(self, response: httpx.Response, what: str) -> tuple[list[dict], dict]:
+        """The results of a listing and the whole answer. Anything else is an
+        error: read as empty, it would mark every account and team missing."""
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise AdapterError(f"HubSpot sent an unreadable answer ({what}).") from exc
+        results = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(results, list):
+            raise AdapterError(f"HubSpot sent an unexpected answer ({what}).")
+        return [r for r in results if isinstance(r, dict)], data
+
     def _require_users_route(self) -> None:
         """A retired API version also answers 404. Only a working users route
         shows that the user is the one missing."""
@@ -269,10 +281,11 @@ class HubSpotAdapter(Adapter):
             params = {"limit": str(PAGE_SIZE)}
             if after:
                 params["after"] = after
-            data = self._json(self._send("GET", USERS_PATH, "list users", params=params))
-            for user in data.get("results") or []:
-                if isinstance(user, dict):
-                    yield self._account(user)
+            users, data = self._results(
+                self._send("GET", USERS_PATH, "list users", params=params), "list users"
+            )
+            for user in users:
+                yield self._account(user)
             after = ((data.get("paging") or {}).get("next") or {}).get("after")
             if not after:
                 return
@@ -280,11 +293,11 @@ class HubSpotAdapter(Adapter):
     # -- teams ----------------------------------------------------------------------
 
     def list_groups(self) -> list[ExternalGroup]:
-        data = self._json(self._send("GET", TEAMS_PATH, "list teams"))
+        teams, _ = self._results(self._send("GET", TEAMS_PATH, "list teams"), "list teams")
         return [
             ExternalGroup(external_id=str(team["id"]), name=team.get("name") or str(team["id"]))
-            for team in data.get("results") or []
-            if isinstance(team, dict) and team.get("id") not in (None, "")
+            for team in teams
+            if team.get("id") not in (None, "")
         ]
 
     def _set_teams(self, account: ExternalAccount, primary: str, secondary: list[str]) -> None:

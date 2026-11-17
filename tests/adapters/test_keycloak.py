@@ -25,6 +25,7 @@ class FakeKeycloak:
         self.failures: dict[tuple[str, str], int] = {}
         self.calls: list[tuple[str, str, dict, object]] = []
         self.inline_subgroups = False
+        self.default_groups: set[str] = set()
         self._next = 0
 
     # -- setup helpers --
@@ -96,6 +97,7 @@ class FakeKeycloak:
                 **{"firstName": body["firstName"], "lastName": body["lastName"]},
             )
             self.users[user_id]["enabled"] = body["enabled"]
+            self.memberships[user_id] |= self.default_groups
             return httpx.Response(201, headers={"Location": f"{BASE}{ADMIN}/users/{user_id}"})
         if parts[:1] == ["users"] and len(parts) >= 2:
             user_id = parts[1]
@@ -272,8 +274,8 @@ def test_ensure_account_creates_user_sends_setup_email_and_adds_groups(keycloak,
     assert call[3] == ["UPDATE_PASSWORD"]
     assert any("setup email" in note for note in result.notes)
     assert result.initial_password is None
-    # A new user has no groups: they are not read back.
-    assert not keycloak.calls_to("GET", f"/users/{user_id}/groups")
+    # Keycloak may add default groups to a new user, so they are read.
+    assert keycloak.calls_to("GET", f"/users/{user_id}/groups")
     assert keycloak.token_calls == 1
 
 
@@ -480,3 +482,48 @@ def test_a_username_of_someone_with_another_email_is_never_changed(keycloak, moc
         adapter_for(keycloak, mock_transport).disable_account(spec(), managed_groups=set())
     assert not keycloak.calls_to("PUT", f"/users/{other}")
     assert keycloak.memberships[other] == set()
+
+
+def test_a_managed_default_group_leaves_a_new_user(keycloak, mock_transport):
+    keycloak.default_groups = {"g-sales"}
+    result = adapter_for(keycloak, mock_transport).ensure_account(
+        spec(), groups={"g-wiki"}, managed_groups={"g-wiki", "g-sales"}
+    )
+    assert keycloak.memberships[result.account.external_id] == {"g-wiki"}
+    assert result.groups_removed == ["g-sales"]
+
+
+def test_a_failed_logout_runs_again_with_the_job(keycloak, mock_transport):
+    user_id = keycloak.add_user("ada", "ada@example.invalid")
+    keycloak.failures[("POST", f"{ADMIN}/users/{user_id}/logout")] = 503
+    with pytest.raises(TransientError):
+        adapter_for(keycloak, mock_transport).disable_account(spec(), managed_groups=set())
+    assert keycloak.users[user_id]["enabled"] is False
+    del keycloak.failures[("POST", f"{ADMIN}/users/{user_id}/logout")]
+    result = adapter_for(keycloak, mock_transport).disable_account(spec(), managed_groups=set())
+    assert not result.changed
+    assert len(keycloak.calls_to("POST", f"/users/{user_id}/logout")) == 2
+
+
+def test_a_setup_email_that_times_out_becomes_a_credentials_problem(keycloak, mock_transport):
+    def handler(request):
+        if request.url.path.endswith("/execute-actions-email"):
+            raise httpx.ReadTimeout("slow", request=request)
+        return keycloak(request)
+
+    adapter = KeycloakAdapter(
+        {"base_url": BASE, "realm": REALM, "client_id": "iam", "client_secret": "s"},
+        transport=mock_transport(handler),
+    )
+    result = adapter.ensure_account(spec(), groups=set(), managed_groups=set())
+    assert result.created
+    assert "could not send the setup email (no answer)" in result.credentials_problem
+
+
+def test_a_refused_temporary_password_becomes_a_credentials_problem(keycloak, mock_transport):
+    keycloak.failures[("PUT", f"{ADMIN}/users/user-1/reset-password")] = 400
+    result = adapter_for(
+        keycloak, mock_transport, send_setup_email=False, set_temporary_password=True
+    ).ensure_account(spec(), groups=set(), managed_groups=set())
+    assert result.initial_password is None
+    assert "did not set a temporary password (400)" in result.credentials_problem
