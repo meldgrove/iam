@@ -143,7 +143,8 @@ def record_listing(connection: Connection, listed: Iterable[ExternalAccount]) ->
         # (and the groups it applied) meanwhile.
         by_id = {
             a.external_id: a
-            for a in connection.accounts.exclude(external_id="").select_for_update()
+            # Only the account rows: the ordering joins the connection.
+            for a in connection.accounts.exclude(external_id="").select_for_update(of=("self",))
         }
         for external in listed:
             # A listing paged by offset can list an account twice.

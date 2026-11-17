@@ -429,3 +429,21 @@ def test_the_hr_import_keeps_a_status_a_workflow_sets_meanwhile(person):
     thread.join()
     person.refresh_from_db()
     assert person.last_name == "King" and person.status == Person.Status.OFFBOARDING
+
+
+def test_a_comparison_locks_only_account_rows(fake_connection, fake_store, person):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    needs_postgresql()
+    Account.objects.create(connection=fake_connection, external_id="x1", username="ada")
+    fake_store.accounts["x1"] = {
+        "username": "ada",
+        "email": "ada@example.invalid",
+        "active": True,
+        "groups": set(),
+    }
+    with CaptureQueriesContext(connection) as queries:
+        compare_accounts(fake_connection)
+    locking = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"]]
+    assert locking and all('FOR UPDATE OF "iam_account"' in sql for sql in locking), locking
