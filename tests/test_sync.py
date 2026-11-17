@@ -470,3 +470,65 @@ def test_a_comparison_links_an_account_while_a_job_holds_the_person(fake_connect
         record_listing(fake_connection, listed)
     thread.join()
     assert Account.objects.get(external_id="x1").person_id == person.pk
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_comparison_and_a_job_replace_a_placeholder_without_deadlock(
+    fake_connection, person, monkeypatch
+):
+    """A manual change left a placeholder row; a job and a comparison both
+    replace it with the listed account at the same time."""
+    import threading
+
+    from django.db import connections, transaction
+
+    from iam import accounts
+    from iam.adapters.base import EnsureResult, ExternalAccount
+    from iam.lifecycle import start_workflow
+
+    needs_postgresql()
+    Account.objects.create(connection=fake_connection, person=person)  # the placeholder
+    Account.objects.create(connection=fake_connection, external_id="x1", username="ada")
+    job = start_workflow(person, Workflow.Kind.ONBOARDING).jobs.get()
+    compared, job_replaced = threading.Event(), threading.Event()
+    replace, match_person = accounts._replace, accounts._match_person
+
+    def replace_then_tell(old, new):
+        replace(old, new)
+        if threading.current_thread().name == "job":
+            job_replaced.set()
+
+    def match_after_the_job(connection, external):
+        # The comparison holds its account locks; let the job go first.
+        compared.set()
+        job_replaced.wait(1.5)
+        return match_person(connection, external)
+
+    monkeypatch.setattr(accounts, "_replace", replace_then_tell)
+    monkeypatch.setattr(accounts, "_match_person", match_after_the_job)
+    errors = []
+
+    def run(name, work):
+        try:
+            with transaction.atomic():
+                work()
+        except Exception as exc:  # noqa: BLE001 - the test reports it
+            errors.append((name, exc))
+        finally:
+            connections.close_all()
+
+    listed = [ExternalAccount(external_id="x1", username="ada", email="ada@example.invalid")]
+    comparison = threading.Thread(
+        target=run, args=("comparison", lambda: accounts.record_listing(fake_connection, listed))
+    )
+    result = EnsureResult(account=ExternalAccount(external_id="x1", username="ada"))
+    worker = threading.Thread(
+        target=run, args=("job", lambda: accounts.record_job_result(job, result)), name="job"
+    )
+    comparison.start()
+    assert compared.wait(5)
+    worker.start()
+    comparison.join()
+    worker.join()
+    assert errors == []
+    assert list(Account.objects.values_list("external_id", "person")) == [("x1", person.pk)]
