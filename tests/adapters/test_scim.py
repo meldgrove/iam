@@ -357,3 +357,11 @@ def test_unreadable_group_memberships_are_an_error(mock_transport):
 
     with pytest.raises(AdapterError, match="cannot list a user's groups"):
         adapter(mock_transport(handler)).account_groups(ExternalAccount("u1"))
+
+
+def test_a_listing_with_entries_that_are_no_objects_is_an_error(mock_transport):
+    def handler(request):
+        return httpx.Response(200, json={"Resources": [None], "totalResults": 1})
+
+    with pytest.raises(AdapterError, match="unexpected"):
+        list(adapter(mock_transport(handler)).list_accounts())

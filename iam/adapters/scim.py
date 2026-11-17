@@ -158,9 +158,9 @@ class ScimAdapter(Adapter):
         resources = data.get("Resources") if isinstance(data, dict) else None
         if resources is None and isinstance(data, dict) and data.get("totalResults") == 0:
             resources = []  # RFC 7644 lets an empty list leave Resources out
-        if not isinstance(resources, list):
+        if not isinstance(resources, list) or not all(isinstance(r, dict) for r in resources):
             raise AdapterError(f"{self.name} sent an unexpected answer ({what}).")
-        return [r for r in resources if isinstance(r, dict)], data.get("totalResults")
+        return resources, data.get("totalResults")
 
     # -- mapping ------------------------------------------------------------
 

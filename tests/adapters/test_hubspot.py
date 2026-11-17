@@ -238,3 +238,13 @@ def test_a_listing_that_is_not_json_is_an_error(mock_transport):
         list(adapter(mock_transport(handler)).list_accounts())
     with pytest.raises(AdapterError, match="unreadable"):
         adapter(mock_transport(handler)).list_groups()
+
+
+def test_a_listing_with_entries_that_are_no_objects_is_an_error(mock_transport):
+    def handler(request):
+        return httpx.Response(200, json={"results": [None]})
+
+    with pytest.raises(AdapterError, match="unexpected"):
+        list(adapter(mock_transport(handler)).list_accounts())
+    with pytest.raises(AdapterError, match="unexpected"):
+        adapter(mock_transport(handler)).list_groups()

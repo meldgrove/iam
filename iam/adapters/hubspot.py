@@ -144,9 +144,9 @@ class HubSpotAdapter(Adapter):
         except ValueError as exc:
             raise AdapterError(f"HubSpot sent an unreadable answer ({what}).") from exc
         results = data.get("results") if isinstance(data, dict) else None
-        if not isinstance(results, list):
+        if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
             raise AdapterError(f"HubSpot sent an unexpected answer ({what}).")
-        return [r for r in results if isinstance(r, dict)], data
+        return results, data
 
     def _require_users_route(self) -> None:
         """A retired API version also answers 404. Only a working users route
