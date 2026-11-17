@@ -242,3 +242,60 @@ def test_worker_runs_jobs_and_beats(person, fake_store):
     call_command("run_worker", "--once")
     assert Job.objects.get().status == Job.Status.SUCCEEDED
     assert WorkerHeartbeat.objects.filter(name="worker").exists()
+
+
+def test_one_failing_person_does_not_stop_the_schedule(person, monkeypatch):
+    import iam.schedule
+
+    other = Person.objects.create(
+        first_name="Grace",
+        last_name="Hopper",
+        work_email="grace@example.invalid",
+        access_profile=person.access_profile,
+        start_date=timezone.localdate(),
+    )
+    Person.objects.filter(pk=person.pk).update(start_date=timezone.localdate())
+    original = iam.schedule.start_workflow
+
+    def fail_for_ada(p, *args, **kwargs):
+        if p.pk == person.pk:
+            raise RuntimeError("database hiccup")
+        return original(p, *args, **kwargs)
+
+    monkeypatch.setattr(iam.schedule, "start_workflow", fail_for_ada)
+    started = start_due_onboarding()
+    assert [w.person_id for w in started] == [other.pk]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_failing_schedule_does_not_stop_the_jobs(person, fake_store, monkeypatch):
+    from iam.lifecycle import start_workflow
+
+    def broken():
+        raise RuntimeError("schedule broke")
+
+    monkeypatch.setattr("iam.management.commands.run_worker.run_schedule", broken)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    call_command("run_worker", "--once")
+    assert Job.objects.get().status == Job.Status.SUCCEEDED
+
+
+@pytest.mark.django_db(transaction=True)
+def test_one_worker_at_a_time_runs_the_schedule(person):
+    from django.db import connection, connections
+
+    from iam.schedule import SCHEDULE_LOCK_ID, run_schedule
+
+    if connection.vendor != "postgresql":
+        pytest.skip("SQLite runs one worker.")
+    Person.objects.filter(pk=person.pk).update(start_date=timezone.localdate())
+    other = connections.create_connection("default")
+    try:
+        with other.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_lock(%s)", [SCHEDULE_LOCK_ID])
+        assert run_schedule() == {}
+        person.refresh_from_db()
+        assert person.status == Person.Status.PLANNED
+    finally:
+        other.close()
+    assert run_schedule()["onboarding"] == 1

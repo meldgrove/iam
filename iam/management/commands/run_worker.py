@@ -1,8 +1,9 @@
 """The worker: runs queued jobs and, once a minute, the schedule.
 
 One worker is enough for most organizations; more can run side by side,
-because each job is claimed with a row lock. Stop it with SIGTERM: it
-finishes the job it is running first."""
+because each job is claimed with a row lock and one worker at a time runs
+the schedule. Stop it with SIGTERM: it finishes the job it is running
+first."""
 
 import logging
 import signal
@@ -36,13 +37,17 @@ class Command(BaseCommand):
         logger.info("Worker started")
         while not self.stopping:
             close_old_connections()
+            # A failing schedule must not hold up the jobs, and the other way round.
             try:
                 recover_stale_jobs()
                 if once or time.monotonic() - last_schedule >= SCHEDULE_SECONDS:
-                    summary = run_schedule()
                     last_schedule = time.monotonic()
+                    summary = run_schedule()
                     if any(summary.values()):
                         logger.info("Schedule: %s", summary)
+            except Exception:  # noqa: BLE001 - the loop must survive database hiccups
+                logger.exception("Worker schedule failed")
+            try:
                 ran = self.run_jobs()
                 WorkerHeartbeat.objects.update_or_create(
                     name="worker", defaults={"beat_at": timezone.now()}

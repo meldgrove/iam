@@ -110,9 +110,12 @@ Once a minute the worker:
 1. starts onboarding for planned people with an access profile whose start
    date is within the lead time (Admin › Settings);
 2. starts offboarding for people whose last day has passed;
-3. runs the people imports and account comparisons that are due.
+3. runs the people imports and account comparisons that are due;
+4. completes open workflows whose jobs are all done.
 
-Both automatic starts can be turned off in Admin › Settings.
+Both automatic starts can be turned off in Admin › Settings. With several
+workers, one at a time runs the schedule (a PostgreSQL advisory lock), and
+a job's result counts only from the worker that holds its current claim.
 
 ## Audit log
 
