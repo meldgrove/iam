@@ -299,3 +299,50 @@ def test_one_worker_at_a_time_runs_the_schedule(person):
     finally:
         other.close()
     assert run_schedule()["onboarding"] == 1
+
+
+def test_drift_reports_planned_people_with_active_accounts(fake_connection, fake_store, person):
+    fake_store.accounts["x1"] = {
+        "username": "ada",
+        "email": "ada@example.invalid",
+        "active": True,
+        "groups": set(),
+    }
+    run = compare_accounts(fake_connection)
+    assert run.summary["unexpected_access"] == [
+        {"id": person.pk, "name": "Ada Lovelace", "status": "planned"}
+    ]
+
+
+def test_schedule_offboards_a_planned_person_with_an_app_user(person):
+    from iam.models import User
+
+    user = User.objects.create_user(email="ada@example.invalid", person=person)
+    Person.objects.filter(pk=person.pk).update(end_date=timezone.localdate() - timedelta(days=1))
+    assert len(start_due_offboarding()) == 1
+    user.refresh_from_db()
+    assert not user.is_active
+
+
+def test_a_new_start_date_from_the_hr_import_lifts_a_paused_onboarding(fake_store, person):
+    from iam.sync import _import_record
+
+    Person.objects.filter(pk=person.pk).update(onboarding_paused=True, source_id="p1")
+    person.refresh_from_db()
+    connection = Connection.objects.create(adapter="personio", name="Personio")
+    Person.objects.filter(pk=person.pk).update(source_connection=connection)
+    record = HRRecord(
+        external_id="p1",
+        first_name="Ada",
+        last_name="Lovelace",
+        work_email="ada@example.invalid",
+        start_date=date(2027, 1, 4),
+    )
+    _import_record(
+        connection,
+        record,
+        {"work_email_differs": [], "updated": [], "inactive_without_end_date": []},
+        None,
+    )
+    person.refresh_from_db()
+    assert not person.onboarding_paused and person.start_date == date(2027, 1, 4)

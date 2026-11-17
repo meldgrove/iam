@@ -70,8 +70,8 @@ A comparison reads accounts and changes nothing in the app. In this app it:
   person has no other linked account there;
 - marks accounts the app no longer lists as "not found";
 - reports drift: active people without an active account, accounts that are
-  active although the person has no access (including offboarded people), and
-  active accounts linked to nobody.
+  active although the person has no access (including planned and offboarded
+  people), and active accounts linked to nobody.
 
 Fixing drift is a decision: start an access update or offboarding from the
 person's page.

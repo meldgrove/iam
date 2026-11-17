@@ -150,9 +150,14 @@ def cancel_job(job: Job, *, actor: User | None = None, note: str = "") -> None:
     job.finished_at = timezone.now()
     job.locked_until = None
     job.save(update_fields=["status", "finished_at", "locked_until"])
-    _close_tasks(
-        job.tasks.filter(status=Task.Status.OPEN), Task.Status.CANCELLED, actor=actor, note=note
-    )
+    _close_tasks(_work_tasks(job), Task.Status.CANCELLED, actor=actor, note=note)
+
+
+def _work_tasks(job: Job):
+    """The job's open tasks that stand for its change. Sign-in details for
+    an account the job created must still reach the person, whatever
+    happens to the job afterwards: nothing creates them again."""
+    return job.tasks.filter(status=Task.Status.OPEN).exclude(kind=Task.Kind.CREDENTIALS)
 
 
 def refresh_workflow(workflow: Workflow) -> Workflow:
@@ -672,10 +677,7 @@ def retry_job(job: Job, *, actor: User) -> None:
         job.next_attempt_at = timezone.now()
         job.save(update_fields=["status", "attempts", "next_attempt_at"])
         _close_tasks(
-            job.tasks.filter(status=Task.Status.OPEN),
-            Task.Status.CANCELLED,
-            actor=actor,
-            note="The job runs again.",
+            _work_tasks(job), Task.Status.CANCELLED, actor=actor, note="The job runs again."
         )
         audit.record("job.retry", f"Retried: {job}", actor=actor, person=job.person, target=job)
         _settle(job)
@@ -739,7 +741,8 @@ def cancel_task(task: Task, *, actor: User, note: str = "") -> None:
         task = _locked_task(task)
         if task.status != Task.Status.OPEN:
             raise ActionError("This task is already closed.")
-        if task.job is not None and task.job.is_open:
+        work = task.kind in (Task.Kind.CHANGE, Task.Kind.FAILURE)
+        if work and task.job is not None and task.job.is_open:
             cancel_job(task.job, actor=actor, note=note or "Task cancelled.")
             _settle(task.job)
         else:

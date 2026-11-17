@@ -28,9 +28,13 @@ per connection:
 
 A new workflow for the same person replaces the open one: its unfinished jobs
 are cancelled. Onboarding and access updates can be cancelled; offboarding
-cannot (retry or complete its steps instead). A job that is running when its
-workflow ends finishes, and its result (the account, an initial password)
-is kept. Offboarding turns off the person's app user at once.
+cannot (retry or complete its steps instead). A cancelled onboarding returns
+the person to planned, and the schedule does not start it again until the
+start date or the access profile changes (an approver can still start it).
+Onboarding refuses a last day that has passed: clear or change it first, or
+the schedule would offboard the person right after. A job that is running
+when its workflow ends finishes, and its result (the account, an initial
+password) is kept. Offboarding turns off the person's app user at once.
 
 **Jobs.** The worker (`manage.py run_worker`) runs queued jobs. For a
 connection in automatic mode it calls the adapter:
@@ -82,8 +86,10 @@ account (Google Workspace, or Keycloak with temporary passwords), the worker
 emails it once to the person's personal address through the email
 connection and forgets it. Without an email connection or personal address,
 a task asks a person to set a new temporary password and hand it over.
-Keycloak can instead send its own set-password email; when it cannot send it
-(or set the temporary password), a task asks a person to do that.
+That task stays open when its job is retried, cancelled or replaced: nothing
+would create it again. Keycloak can instead send its own set-password email;
+when it cannot send it (or set the temporary password), a task asks a person
+to do that.
 
 ## Reads from connections
 
@@ -97,8 +103,10 @@ None of these change anything in a connected app.
 - **Account comparison** reads all accounts, links unlinked accounts to people
   by work email or username (only on a unique match), marks accounts it no
   longer sees as missing, and reports drift: people who should have an
-  account but have none, and offboarded people with active accounts. Fixing
-  drift is an access update or offboarding an approver starts.
+  account but have none, and active accounts the person's access does not
+  grant (including planned people, e.g. after a cancelled onboarding, and
+  offboarded people). Fixing drift is an access update or offboarding an
+  approver starts.
 - **People import** (Personio) creates planned people and updates names,
   type, team, manager and dates. It never changes a work email, never
   offboards anyone by itself (the last day does that through the schedule),
@@ -111,8 +119,10 @@ The worker runs comparisons and imports on each connection's interval.
 Once a minute the worker:
 
 1. starts onboarding for planned people with an access profile whose start
-   date is within the lead time (Admin › Settings);
-2. starts offboarding for people whose last day has passed;
+   date is within the lead time (Admin › Settings), unless an approver
+   cancelled their last onboarding;
+2. starts offboarding for people whose last day has passed (planned people
+   only when they have an account or an app user);
 3. runs the people imports and account comparisons that are due;
 4. completes open workflows whose jobs are all done.
 

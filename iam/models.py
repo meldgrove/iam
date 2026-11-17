@@ -348,6 +348,9 @@ class Person(models.Model):
         help_text="The HR system this person was imported from.",
     )
     source_id = models.CharField(max_length=255, blank=True)
+    # An approver cancelled the last onboarding: the schedule does not start
+    # it again until the start date or the access profile changes.
+    onboarding_paused = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .. import audit
@@ -85,6 +86,7 @@ def person_detail(request, pk):
             "can_update": can_start(person, Workflow.Kind.ACCESS_UPDATE),
             "can_offboard": can_start(person, Workflow.Kind.OFFBOARDING),
             "can_archive": can_archive(person),
+            "today": timezone.localdate(),
         },
     )
 
@@ -115,6 +117,8 @@ def person_edit(request, pk):
     person = get_object_or_404(Person, pk=pk)
     form = PersonForm(request.POST or None, instance=person)
     if request.method == "POST" and form.is_valid():
+        if {"start_date", "access_profile"} & set(form.changed_data):
+            form.instance.onboarding_paused = False
         person = form.save()
         audit.record(
             "person.updated",

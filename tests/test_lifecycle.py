@@ -892,3 +892,78 @@ def test_sign_in_the_adapter_could_not_arrange_becomes_a_task(person, fake_store
     run_all()
     task = Task.objects.get(kind=Task.Kind.CREDENTIALS)
     assert task.instructions == "The setup email was not sent. Send it by hand."
+
+
+def test_a_cancelled_onboarding_waits_for_a_new_start_date(person, approver_user):
+    from iam.schedule import start_due_onboarding
+
+    Person.objects.filter(pk=person.pk).update(start_date=timezone.localdate())
+    [workflow] = start_due_onboarding()
+    cancel_workflow(workflow, actor=approver_user)
+    person.refresh_from_db()
+    assert person.status == Person.Status.PLANNED and person.onboarding_paused
+    assert start_due_onboarding() == []
+    # Starting it by hand is still possible, and lifts the pause.
+    start_workflow(person, Workflow.Kind.ONBOARDING, actor=approver_user)
+    person.refresh_from_db()
+    assert person.status == Person.Status.ONBOARDING and not person.onboarding_paused
+
+
+def test_onboarding_refuses_a_last_day_that_has_passed(person, approver_user):
+    Person.objects.filter(pk=person.pk).update(
+        status=Person.Status.OFFBOARDED, end_date=timezone.localdate() - timedelta(days=1)
+    )
+    person.refresh_from_db()
+    with pytest.raises(LifecycleError, match="has passed"):
+        start_workflow(person, Workflow.Kind.ONBOARDING, actor=approver_user)
+    Person.objects.filter(pk=person.pk).update(end_date=None)
+    person.refresh_from_db()
+    assert start_workflow(person, Workflow.Kind.ONBOARDING, actor=approver_user)
+
+
+def test_sign_in_details_survive_a_newer_workflow(person, fake_store, approver_user):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    # No email connection: a task hands over the details. A passing group
+    # error keeps the job queued, so the newer workflow cancels it.
+    fake_store.fail_group_with = TransientError("Fake app answered 503.")
+    start_workflow(person, Workflow.Kind.ONBOARDING, actor=approver_user)
+    run_all()
+    credentials = Task.objects.get(kind=Task.Kind.CREDENTIALS)
+    start_workflow(person, Workflow.Kind.ACCESS_UPDATE, actor=approver_user)
+    run_all()
+    credentials.refresh_from_db()
+    assert credentials.status == Task.Status.OPEN
+
+
+def test_retrying_a_job_keeps_its_sign_in_details(person, fake_store, approver_user):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    fake_store.fail_group_with = TransientError("Fake app answered 503.")
+    start_workflow(person, Workflow.Kind.ONBOARDING, actor=approver_user)
+    run_all()
+    job = Job.objects.get()
+    fake_store.fail_with = AdapterError("Fake app answered 400.")
+    Job.objects.filter(pk=job.pk).update(next_attempt_at=timezone.now())
+    run_all()
+    job.refresh_from_db()
+    assert job.status == Job.Status.FAILED
+    retry_job(job, actor=approver_user)
+    credentials = Task.objects.get(kind=Task.Kind.CREDENTIALS)
+    assert credentials.status == Task.Status.OPEN
+
+
+def test_cancelling_the_sign_in_task_keeps_the_job(person, fake_store, approver_user):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    fake_store.fail_group_with = TransientError("Fake app answered 503.")
+    start_workflow(person, Workflow.Kind.ONBOARDING, actor=approver_user)
+    run_all()
+    job = Job.objects.get()
+    assert job.status == Job.Status.QUEUED
+    cancel_task(Task.objects.get(kind=Task.Kind.CREDENTIALS), actor=approver_user)
+    job.refresh_from_db()
+    assert job.status == Job.Status.QUEUED
