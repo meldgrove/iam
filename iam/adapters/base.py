@@ -195,6 +195,10 @@ def generate_password(length: int = 20) -> str:
             return value
 
 
+# Default of `found`: the operation looks the account up itself.
+LOOK_UP = object()
+
+
 class Adapter:
     # Templates show adapter classes; never let them instantiate one.
     do_not_call_in_templates: ClassVar[bool] = True
@@ -330,11 +334,14 @@ class Adapter:
         external_id: str = "",
         groups: set[str],
         managed_groups: set[str],
+        found: ExternalAccount | None | object = LOOK_UP,
     ) -> EnsureResult:
         """Make the account exist, be active and be in exactly the wanted
         managed groups. Groups the app does not manage stay as they are. A
-        failing group step ends in `group_error`, never in an exception."""
-        account = self.find_account(spec, external_id)
+        failing group step ends in `group_error`, never in an exception.
+        `found` is the result of a `find_account` the caller already checked;
+        the operation then changes that account, not one it looks up again."""
+        account = self.find_account(spec, external_id) if found is LOOK_UP else found
         if account is None:
             result = self.create_account(spec)
             account = result.account
@@ -361,9 +368,14 @@ class Adapter:
         return result
 
     def disable_account(
-        self, spec: AccountSpec, *, external_id: str = "", managed_groups: set[str]
+        self,
+        spec: AccountSpec,
+        *,
+        external_id: str = "",
+        managed_groups: set[str],
+        found: ExternalAccount | None | object = LOOK_UP,
     ) -> DisableResult:
-        account = self.find_account(spec, external_id)
+        account = self.find_account(spec, external_id) if found is LOOK_UP else found
         if account is None:
             return DisableResult(account=None, notes=["No account found; nothing to disable."])
         result = DisableResult(account=account)

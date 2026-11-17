@@ -468,3 +468,15 @@ def test_plain_http_needs_explicit_opt_in(settings):
     else:
         raise AssertionError("plain HTTP was accepted without opt-in")
     KeycloakAdapter({**config, "allow_http": True})._check_config()
+
+
+def test_a_username_of_someone_with_another_email_is_never_changed(keycloak, mock_transport):
+    other = keycloak.add_user("ada", "ada.byron@example.invalid", enabled=False)
+    with pytest.raises(AdapterError, match="different email"):
+        adapter_for(keycloak, mock_transport).ensure_account(
+            spec(), groups={"g-wiki"}, managed_groups={"g-wiki"}
+        )
+    with pytest.raises(AdapterError, match="different email"):
+        adapter_for(keycloak, mock_transport).disable_account(spec(), managed_groups=set())
+    assert not keycloak.calls_to("PUT", f"/users/{other}")
+    assert keycloak.memberships[other] == set()

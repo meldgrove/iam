@@ -39,6 +39,13 @@ connection in automatic mode it calls the adapter:
   username or email), create it if missing, reactivate it if disabled, then
   add the wanted managed groups and remove the managed groups no longer
   wanted.
+
+  An account found without its saved ID must be the person's. A Keycloak
+  username whose user has another email, or several SCIM users with that
+  userName or email, stop the job with nothing changed. A Google address
+  that is an alias of another user is not the person's account (creating
+  it stops the job). The job then changes exactly the account whose owner
+  it checked.
 - *Disable account*: remove the managed groups (unless the adapter keeps
   them, e.g. Relution) and disable the account. No account found counts as
   done.

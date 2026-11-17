@@ -93,7 +93,8 @@ def test_find_by_user_name_filter_escapes_quotes(mock_transport):
     def handler(request):
         assert request.url.path == "/scim/v2/Users"
         assert request.url.params["filter"] == 'userName eq "o\\"brien@example.invalid"'
-        return httpx.Response(200, json=listing(user(groups=["g1", "g2"])))
+        found = user(groups=["g1", "g2"], user_name='o"brien@example.invalid')
+        return httpx.Response(200, json=listing(found))
 
     account = adapter(mock_transport(handler)).find_account(spec(email='o"brien@example.invalid'))
     assert account.external_id == "u1"
@@ -290,3 +291,36 @@ def test_list_accounts(mock_transport):
     accounts = list(adapter(transport).list_accounts())
     assert [a.external_id for a in accounts] == ["u1", "u2"]
     assert [a.active for a in accounts] == [True, False]
+
+
+def test_a_server_that_ignores_the_filter_matches_nobody(mock_transport):
+    stranger = user("u7", user_name="grace@example.invalid")
+    stranger["emails"] = [{"value": "grace@example.invalid"}]
+
+    def handler(request):
+        return httpx.Response(200, json=listing(stranger))
+
+    assert adapter(mock_transport(handler)).find_account(spec()) is None
+
+
+def test_two_users_with_the_email_are_refused(mock_transport):
+    def handler(request):
+        if request.url.params["filter"].startswith("userName"):
+            return httpx.Response(200, json=listing())
+        return httpx.Response(
+            200, json=listing(user("u1", user_name="ada"), user("u2", user_name="ada2"))
+        )
+
+    with pytest.raises(AdapterError, match="Several"):
+        adapter(mock_transport(handler)).find_account(spec())
+
+
+def test_the_email_finds_a_user_with_another_user_name(mock_transport):
+    def handler(request):
+        if request.url.params["filter"].startswith("userName"):
+            return httpx.Response(200, json=listing())
+        assert request.url.params["filter"] == 'emails.value eq "ada@example.invalid"'
+        return httpx.Response(200, json=listing(user("u3", user_name="old.name")))
+
+    found = adapter(mock_transport(handler)).find_account(spec())
+    assert found.external_id == "u3"
