@@ -502,6 +502,8 @@ class Job(models.Model):
     attempts = models.PositiveIntegerField(default=0)
     next_attempt_at = models.DateTimeField(default=timezone.now)
     locked_until = models.DateTimeField(null=True, blank=True)
+    # Set by each claim: only the worker holding the latest one settles the job.
+    claim = models.UUIDField(null=True, blank=True, editable=False)
     last_error = models.TextField(blank=True)
     result = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)

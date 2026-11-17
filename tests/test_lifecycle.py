@@ -815,3 +815,54 @@ def test_offboarding_waits_for_an_account_a_replaced_job_still_creates(
     removal.refresh_from_db()
     assert removal.status == Job.Status.SUCCEEDED
     assert Account.objects.get(person=person).status == Account.Status.DISABLED
+
+
+def test_a_late_worker_never_undoes_what_the_new_claim_settled(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    first = claim_next_job()
+    Job.objects.filter(pk=first.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
+    recover_stale_jobs()
+    second = claim_next_job()
+    run_job(second)
+    job = Job.objects.get(pk=first.pk)
+    assert job.status == Job.Status.SUCCEEDED
+    settled = (job.result, job.finished_at)
+    fake_store.fail_with = AdapterError("Fake app answered 400.")
+    run_job(first)
+    job.refresh_from_db()
+    assert job.status == Job.Status.SUCCEEDED and not Task.objects.exists()
+    fake_store.fail_with = None
+    audited = AuditEvent.objects.filter(action="job.ensure_account").count()
+    run_job(first)
+    job.refresh_from_db()
+    assert (job.result, job.finished_at) == settled
+    # The late change is still audited, as every change by the worker.
+    assert AuditEvent.objects.filter(action="job.ensure_account").count() == audited + 1
+
+
+def test_job_changes_lock_the_person_first(person, fake_connection, fake_store, admin_user):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from iam.jobs import fail_job
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Only PostgreSQL locks rows.")
+
+    def first_lock(action):
+        with CaptureQueriesContext(connection) as queries:
+            action()
+        locks = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"]]
+        return locks[0].split(" FROM ")[1].split()[0] if locks else None
+
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    job = claim_next_job()
+    assert first_lock(lambda: fail_job(job, "Fake app answered 400.", retryable=False)) == (
+        '"iam_person"'
+    )
+    assert first_lock(lambda: retry_job(job, actor=admin_user)) == '"iam_person"'
+    Connection.objects.filter(pk=fake_connection.pk).update(mode=Connection.Mode.MANUAL)
+    job = claim_next_job()
+    assert first_lock(lambda: run_job(job)) == '"iam_person"'
+    task = Task.objects.get(job=job, status=Task.Status.OPEN)
+    assert first_lock(lambda: complete_task(task, actor=admin_user)) == '"iam_person"'
