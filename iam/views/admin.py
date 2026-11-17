@@ -206,7 +206,8 @@ def _report_run(request, run):
 def connection_add_group(request, pk):
     connection = get_object_or_404(Connection, pk=pk)
     cls = connection.adapter_class
-    name = request.POST.get("name", "").strip()[:255]
+    # The external ID adds "manual:" and must fit in 255 characters.
+    name = request.POST.get("name", "").strip()[:248]
     if not cls or not cls.manual_groups or not name:
         messages.error(request, "Enter a name.")
         return redirect("connection_detail", pk=pk)

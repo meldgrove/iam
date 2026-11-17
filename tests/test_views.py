@@ -492,3 +492,12 @@ def test_a_new_start_date_lifts_a_paused_onboarding(client_for, approver_user, p
     assert response.status_code == 302
     person.refresh_from_db()
     assert not person.onboarding_paused
+
+
+def test_a_long_manual_group_name_fits_its_external_id(client_for, admin_user):
+    connection = Connection.objects.create(adapter="manual", name="Figma", enabled=True)
+    client_for(admin_user).post(
+        reverse("connection_add_group", args=[connection.pk]), {"name": "x" * 300}
+    )
+    group = connection.groups.get()
+    assert len(group.external_id) <= 255 and group.name == "x" * 248

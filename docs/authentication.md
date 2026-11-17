@@ -76,7 +76,10 @@ the full path for those. Then:
 - A first sign-in with a verified email and a matching group creates the
   app user with that role (the highest role wins).
 - Each sign-in updates the role of users whose role came from a group claim.
-  Without a matching group, such a user is turned off.
+  Without a matching group, such a user is turned off, and stays off when
+  the group comes back: an admin turns them on again in Admin › Users and
+  roles. (Offboarding or an admin may have turned them off; a group claim
+  never overrides that.) Role changes and turning off are audited.
 - Users an admin added or changed in the app keep their role; group claims
   do not change them.
 
