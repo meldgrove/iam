@@ -22,6 +22,7 @@ address and forgotten.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import timedelta
 
 from django.conf import settings
@@ -156,7 +157,13 @@ def cancel_job(job: Job, *, actor: User | None = None, note: str = "") -> None:
 
 def refresh_workflow(workflow: Workflow) -> Workflow:
     """Derive the workflow's status from its jobs and finish the person's
-    status change when everything is done."""
+    status change when everything is done. The locks make changes to its
+    jobs take turns here: two jobs that finish at once would each see the
+    other still running, and the workflow would never complete. The person
+    comes first, as when a workflow starts or is cancelled."""
+    Person.objects.select_for_update().get(pk=workflow.person_id)
+    locked = Workflow.objects.select_for_update().get(pk=workflow.pk)
+    workflow.status, workflow.finished_at = locked.status, locked.finished_at
     if workflow.status == Workflow.Status.CANCELLED:
         return workflow
     statuses = set(workflow.jobs.values_list("status", flat=True))
@@ -202,6 +209,20 @@ def _finish_person_status(workflow: Workflow) -> None:
     )
 
 
+def settle_finished_workflows() -> int:
+    """Complete open workflows whose jobs are all done. Every job change
+    already does this; it catches workflows a crash or an older version of
+    this app left open."""
+    open_jobs = Job.objects.filter(workflow=OuterRef("pk"), status__in=Job.OPEN_STATUSES)
+    stuck = Workflow.objects.filter(status__in=Workflow.OPEN_STATUSES).exclude(Exists(open_jobs))
+    count = 0
+    for pk in stuck.values_list("pk", flat=True):
+        with transaction.atomic():
+            workflow = refresh_workflow(Workflow.objects.get(pk=pk))
+            count += workflow.status == Workflow.Status.COMPLETED
+    return count
+
+
 def _settle(job: Job, *new_tasks: Task | None) -> None:
     """End every change to a job: work out its workflow's status again, and
     tell people about new tasks once the change commits."""
@@ -212,6 +233,20 @@ def _settle(job: Job, *new_tasks: Task | None) -> None:
 def _replaced(job: Job) -> bool:
     """Whether a newer workflow replaced the job's (or it was cancelled)."""
     return job.workflow.status == Workflow.Status.CANCELLED
+
+
+def _claimed_elsewhere(job: Job, claim: Job) -> bool:
+    """Whether another worker claimed the job after this claim's lease ran
+    out. That worker's claim, and nothing this one does, settles the job."""
+    return job.claim != claim.claim
+
+
+def _locked(job: Job) -> Job:
+    """The job, locked for a change. The person comes first, as when a
+    workflow starts, is cancelled or works out its status: with one order
+    everywhere, two changes never wait for each other."""
+    Person.objects.select_for_update().get(pk=job.person_id)
+    return Job.objects.select_for_update().get(pk=job.pk)
 
 
 def _close_tasks(tasks, status: str, *, actor: User | None = None, note: str = "") -> None:
@@ -245,7 +280,8 @@ def claim_next_job() -> Job | None:
         job.status = Job.Status.RUNNING
         job.attempts += 1
         job.locked_until = now + timedelta(seconds=settings.JOB_LEASE_SECONDS)
-        job.save(update_fields=["status", "attempts", "locked_until"])
+        job.claim = uuid.uuid4()
+        job.save(update_fields=["status", "attempts", "locked_until", "claim"])
     return job
 
 
@@ -256,7 +292,7 @@ def recover_stale_jobs() -> int:
     stale = Job.objects.filter(status=Job.Status.RUNNING, locked_until__lt=timezone.now())
     for job in stale:
         with transaction.atomic():
-            job = Job.objects.select_for_update().get(pk=job.pk)
+            job = _locked(job)
             if job.status != Job.Status.RUNNING:
                 continue
             if _replaced(job):
@@ -281,7 +317,16 @@ def run_job(job: Job) -> Job:
     person = Person.objects.select_related("team", "manager").get(pk=job.person_id)
     if not connection.writes_automatically or not _can_write(connection):
         with transaction.atomic():
-            _settle(job, _hand_to_person(job))
+            claim, job = job, _locked(job)
+            if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
+                return job
+            if _claimed_elsewhere(job, claim):
+                return job
+            if _replaced(job):
+                cancel_job(job, note="Replaced by a newer workflow.")
+                _settle(job)
+            else:
+                _settle(job, _hand_to_person(job))
         return job
     spec = account_spec(person)
     account = Account.objects.filter(connection=connection, person=person).first()
@@ -348,7 +393,7 @@ def record_account_step(job: Job, result: EnsureResult | DisableResult) -> str:
     """Audit an account that changed while its groups did not, before the
     job runs again. Returns why the account cannot be linked, if so."""
     with transaction.atomic():
-        job = Job.objects.select_for_update().get(pk=job.pk)
+        job = _locked(job)
         if isinstance(result, EnsureResult):
             # IAM must know a new account even if a newer workflow replaces
             # this job. A disabled account stays active in IAM until its
@@ -390,17 +435,20 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
     password = getattr(result, "initial_password", None)
     conflict = ""
     group_task = None
+    claim = job
     with transaction.atomic():
-        job = Job.objects.select_for_update().get(pk=job.pk)
+        job = _locked(job)
         # The change happened in the connected app, so the account and the
         # initial password count even when the job was cancelled, or handed
-        # back to the queue after its lease ran out, while it ran.
+        # back to the queue after its lease ran out, while it ran. A worker
+        # that claimed it again since then settles the job.
         try:
             with transaction.atomic():
                 accounts.record_job_result(job, result)
         except accounts.AccountConflict as exc:
             conflict = str(exc)
-        else:
+        current = not conflict and not _claimed_elsewhere(job, claim)
+        if current:
             job.status = Job.Status.SUCCEEDED
             job.finished_at = timezone.now()
             job.locked_until = None
@@ -416,16 +464,18 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
             )
             if result.group_error is not None and _workflow_is_current(job):
                 group_task = _open_group_task(job, result.group_error)
+        if not conflict:
             audit.record(
                 f"job.{job.action}",
                 _success_summary(job, result),
                 person=job.person,
                 target=job,
-                details=job.result,
+                details=_result_summary(result),
             )
+        if current:
             _settle(job, group_task)
     if conflict:
-        return fail_job(job, conflict, retryable=False)
+        return fail_job(claim, conflict, retryable=False)
     if password:
         deliver_initial_password(job, password)
     return job
@@ -466,9 +516,12 @@ def _success_summary(job: Job, result) -> str:
 
 def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
     task = None
+    claim = job
     with transaction.atomic():
-        job = Job.objects.select_for_update().get(pk=job.pk)
+        job = _locked(job)
         if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
+            return job
+        if _claimed_elsewhere(job, claim):
             return job
         if _replaced(job):
             # A newer workflow replaced this one while the job ran.
@@ -612,7 +665,7 @@ class ActionError(Exception):
 
 def retry_job(job: Job, *, actor: User) -> None:
     with transaction.atomic():
-        job = Job.objects.select_for_update().get(pk=job.pk)
+        job = _locked(job)
         if job.status not in (Job.Status.FAILED, Job.Status.MANUAL):
             raise ActionError("Only failed jobs and jobs with a manual task can run again.")
         if _replaced(job):
@@ -633,7 +686,7 @@ def retry_job(job: Job, *, actor: User) -> None:
 
 def approve_job(job: Job, *, actor: User) -> None:
     with transaction.atomic():
-        job = Job.objects.select_for_update().get(pk=job.pk)
+        job = _locked(job)
         if job.status != Job.Status.HELD:
             raise ActionError("This job is not waiting for approval.")
         job.status = Job.Status.QUEUED
@@ -646,7 +699,7 @@ def approve_job(job: Job, *, actor: User) -> None:
 
 def reject_job(job: Job, *, actor: User) -> None:
     with transaction.atomic():
-        job = Job.objects.select_for_update().get(pk=job.pk)
+        job = _locked(job)
         if job.status != Job.Status.HELD:
             raise ActionError("This job is not waiting for approval.")
         cancel_job(job, actor=actor, note="Rejected by an admin.")
@@ -654,9 +707,15 @@ def reject_job(job: Job, *, actor: User) -> None:
         _settle(job)
 
 
+def _locked_task(task: Task) -> Task:
+    if task.person_id is not None:
+        Person.objects.select_for_update().get(pk=task.person_id)
+    return Task.objects.select_for_update().get(pk=task.pk)
+
+
 def complete_task(task: Task, *, actor: User, note: str = "") -> None:
     with transaction.atomic():
-        task = Task.objects.select_for_update().get(pk=task.pk)
+        task = _locked_task(task)
         if task.status != Task.Status.OPEN:
             raise ActionError("This task is already closed.")
         _close_tasks(Task.objects.filter(pk=task.pk), Task.Status.DONE, actor=actor, note=note)
@@ -680,7 +739,7 @@ def complete_task(task: Task, *, actor: User, note: str = "") -> None:
 
 def cancel_task(task: Task, *, actor: User, note: str = "") -> None:
     with transaction.atomic():
-        task = Task.objects.select_for_update().get(pk=task.pk)
+        task = _locked_task(task)
         if task.status != Task.Status.OPEN:
             raise ActionError("This task is already closed.")
         if task.job is not None and task.job.is_open:

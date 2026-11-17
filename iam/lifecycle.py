@@ -176,6 +176,12 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
     # Offboarding never skips an app: turned-off connections get a manual task.
     entitled = entitled_access(person, include_disabled=True) if offboarding else {}
     accounts = {a.connection_id: a for a in person.accounts.all()}
+    # A replaced job that is still running may yet create an account there.
+    creating = set(
+        person.jobs.filter(status=Job.Status.RUNNING, action=Job.Action.ENSURE_ACCOUNT).values_list(
+            "connection_id", flat=True
+        )
+    )
     settings = AppSettings.load()
     jobs = []
     for connection in provisioning_connections(include_disabled=offboarding):
@@ -196,7 +202,7 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
                 Account.Status.ACTIVE,
                 Account.Status.UNKNOWN,
             )
-            if not has_account and connection.pk not in entitled:
+            if not has_account and connection.pk not in entitled and connection.pk not in creating:
                 continue
             job = Job(
                 workflow=workflow,
@@ -236,6 +242,7 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
             "Offboarding cannot be cancelled. Retry or complete its steps instead."
         )
     with transaction.atomic():
+        Person.objects.select_for_update().get(pk=workflow.person_id)
         workflow = Workflow.objects.select_for_update().get(pk=workflow.pk)
         if not workflow.is_open:
             raise LifecycleError("This workflow is already finished.")

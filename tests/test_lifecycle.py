@@ -697,3 +697,172 @@ def test_a_job_changes_the_account_it_checked(person, fake_store):
     start_workflow(person, Workflow.Kind.ONBOARDING)
     run_all()
     assert fake_store.calls.count("find") == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_jobs_that_finish_at_once_still_complete_the_workflow(person, profile, monkeypatch):
+    import threading
+
+    from django.db import connection, connections
+
+    from iam import jobs
+    from iam.adapters.base import EnsureResult, ExternalAccount
+    from iam.models import ProfileGrant
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Only PostgreSQL runs transactions side by side.")
+    second = Connection(adapter="fake", name="Second app", enabled=True, settings={})
+    second.set_secrets({"token": "fake-token"})
+    second.save()
+    ProfileGrant.objects.create(profile=profile, connection=second)
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    both = list(workflow.jobs.order_by("pk"))
+    Job.objects.filter(workflow=workflow).update(status=Job.Status.RUNNING)
+    # Both transactions have saved their job before either works out the workflow.
+    barrier = threading.Barrier(2, timeout=5)
+    original = jobs.refresh_workflow
+
+    def refresh_after_both_saved(workflow):
+        try:
+            barrier.wait()
+        except threading.BrokenBarrierError:
+            pass  # the lock already makes the second transaction wait
+        return original(workflow)
+
+    monkeypatch.setattr(jobs, "refresh_workflow", refresh_after_both_saved)
+
+    def finish(job):
+        try:
+            account = ExternalAccount(external_id=f"x{job.pk}", username=f"x{job.pk}")
+            jobs.succeed_job(Job.objects.get(pk=job.pk), EnsureResult(account=account))
+        finally:
+            connections.close_all()
+
+    threads = [threading.Thread(target=finish, args=(job,)) for job in both]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    workflow.refresh_from_db()
+    person.refresh_from_db()
+    assert workflow.status == Workflow.Status.COMPLETED
+    assert person.status == Person.Status.ACTIVE
+
+
+def test_the_schedule_completes_workflows_left_open(person, fake_store):
+    from iam.schedule import run_schedule
+
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    # As two job changes that committed side by side used to leave it.
+    Workflow.objects.filter(pk=workflow.pk).update(status=Workflow.Status.RUNNING)
+    Person.objects.filter(pk=person.pk).update(status=Person.Status.ONBOARDING)
+    assert run_schedule()["settled"] == 1
+    workflow.refresh_from_db()
+    person.refresh_from_db()
+    assert workflow.status == Workflow.Status.COMPLETED
+    assert person.status == Person.Status.ACTIVE
+
+
+def test_a_worker_whose_lease_ran_out_leaves_the_new_claim_alone(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    first = claim_next_job()
+    Job.objects.filter(pk=first.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
+    recover_stale_jobs()
+    second = claim_next_job()
+    assert second.pk == first.pk
+    # The first worker comes back: its failure must not requeue the second claim.
+    fake_store.fail_with = TransientError("Fake app answered 503.")
+    run_job(first)
+    job = Job.objects.get(pk=first.pk)
+    assert job.status == Job.Status.RUNNING and job.locked_until == second.locked_until
+    # Its success records the account, but the second claim settles the job.
+    fake_store.fail_with = None
+    run_job(first)
+    job.refresh_from_db()
+    assert job.status == Job.Status.RUNNING
+    assert Account.objects.get(person=person).status == Account.Status.ACTIVE
+    run_job(second)
+    job.refresh_from_db()
+    assert job.status == Job.Status.SUCCEEDED
+
+
+def test_a_replaced_job_at_a_turned_off_connection_opens_no_task(
+    person, fake_connection, fake_store
+):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    job = claim_next_job()
+    start_workflow(person, Workflow.Kind.OFFBOARDING)
+    Connection.objects.filter(pk=fake_connection.pk).update(enabled=False)
+    run_job(job)
+    job.refresh_from_db()
+    assert job.status == Job.Status.CANCELLED
+    assert not Task.objects.filter(job=job).exists()
+
+
+def test_offboarding_waits_for_an_account_a_replaced_job_still_creates(
+    person, fake_connection, fake_store, profile
+):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    creating = claim_next_job()
+    profile.grants.all().delete()
+    offboarding = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    removal = offboarding.jobs.get()
+    assert removal.action == Job.Action.DISABLE_ACCOUNT
+    assert claim_next_job() is None, "waits while the replaced job runs"
+    run_job(creating)
+    run_all()
+    removal.refresh_from_db()
+    assert removal.status == Job.Status.SUCCEEDED
+    assert Account.objects.get(person=person).status == Account.Status.DISABLED
+
+
+def test_a_late_worker_never_undoes_what_the_new_claim_settled(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    first = claim_next_job()
+    Job.objects.filter(pk=first.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
+    recover_stale_jobs()
+    second = claim_next_job()
+    run_job(second)
+    job = Job.objects.get(pk=first.pk)
+    assert job.status == Job.Status.SUCCEEDED
+    settled = (job.result, job.finished_at)
+    fake_store.fail_with = AdapterError("Fake app answered 400.")
+    run_job(first)
+    job.refresh_from_db()
+    assert job.status == Job.Status.SUCCEEDED and not Task.objects.exists()
+    fake_store.fail_with = None
+    audited = AuditEvent.objects.filter(action="job.ensure_account").count()
+    run_job(first)
+    job.refresh_from_db()
+    assert (job.result, job.finished_at) == settled
+    # The late change is still audited, as every change by the worker.
+    assert AuditEvent.objects.filter(action="job.ensure_account").count() == audited + 1
+
+
+def test_job_changes_lock_the_person_first(person, fake_connection, fake_store, admin_user):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from iam.jobs import fail_job
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Only PostgreSQL locks rows.")
+
+    def first_lock(action):
+        with CaptureQueriesContext(connection) as queries:
+            action()
+        locks = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"]]
+        return locks[0].split(" FROM ")[1].split()[0] if locks else None
+
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    job = claim_next_job()
+    assert first_lock(lambda: fail_job(job, "Fake app answered 400.", retryable=False)) == (
+        '"iam_person"'
+    )
+    assert first_lock(lambda: retry_job(job, actor=admin_user)) == '"iam_person"'
+    Connection.objects.filter(pk=fake_connection.pk).update(mode=Connection.Mode.MANUAL)
+    job = claim_next_job()
+    assert first_lock(lambda: run_job(job)) == '"iam_person"'
+    task = Task.objects.get(job=job, status=Task.Status.OPEN)
+    assert first_lock(lambda: complete_task(task, actor=admin_user)) == '"iam_person"'
