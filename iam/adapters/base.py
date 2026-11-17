@@ -55,6 +55,9 @@ class Field:
     default: Any = None
     choices: tuple[tuple[str, str], ...] = ()
     placeholder: str = ""
+    # Decides where the secrets are sent (a URL, a host, encryption on or
+    # off). Changing it needs the saved secrets entered again.
+    destination: bool = False
 
     @property
     def secret(self) -> bool:

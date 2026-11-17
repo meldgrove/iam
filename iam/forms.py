@@ -213,6 +213,33 @@ class ConnectionForm(forms.Form):
             raise ValidationError("Another connection has this name.")
         return name
 
+    def clean(self):
+        cleaned = super().clean()
+        # Security: a saved secret must not follow a changed URL or host,
+        # or an admin session could send it to any server.
+        moved = [
+            spec.label
+            for spec in self.adapter_class.fields
+            if spec.destination
+            and self.instance is not None
+            and f"cfg_{spec.name}" in cleaned
+            and self._effective(spec, cleaned[f"cfg_{spec.name}"])
+            != self._effective(spec, self.instance.settings.get(spec.name))
+        ]
+        if moved and self.saved_secrets:  # only an existing connection has saved secrets
+            for spec in self.adapter_class.fields:
+                key = f"cfg_{spec.name}"
+                if spec.name in self.saved_secrets and not cleaned.get(key) and key in cleaned:
+                    self.add_error(
+                        key, f"Enter it again: {', '.join(moved)} changed where it is sent."
+                    )
+        return cleaned
+
+    @staticmethod
+    def _effective(spec: Field, value):
+        """The value the adapter works with: an empty setting means its default."""
+        return (spec.default if value in (None, "") else value) or ""
+
     def config_fields(self):
         return [self[f"cfg_{spec.name}"] for spec in self.adapter_class.fields]
 

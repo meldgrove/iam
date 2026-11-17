@@ -133,6 +133,7 @@ class RelutionAdapter(Adapter):
             "Relution address",
             kind="url",
             required=True,
+            destination=True,
             placeholder="https://relution.example.invalid",
             help="The origin only, without a path.",
         ),

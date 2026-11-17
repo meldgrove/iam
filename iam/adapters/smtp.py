@@ -40,13 +40,20 @@ class SmtpAdapter(Adapter):
     supports_write = False
     supports_account_listing = False
     fields = (
-        Field("host", "SMTP server", required=True, placeholder="smtp.example.invalid"),
-        Field("port", "Port", kind="int", default=587),
+        Field(
+            "host",
+            "SMTP server",
+            required=True,
+            destination=True,
+            placeholder="smtp.example.invalid",
+        ),
+        Field("port", "Port", kind="int", default=587, destination=True),
         Field(
             "security",
             "Encryption",
             kind="choice",
             default="starttls",
+            destination=True,
             choices=(
                 ("starttls", "STARTTLS (usually port 587)"),
                 ("ssl", "TLS from the start (usually port 465)"),

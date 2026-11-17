@@ -42,8 +42,10 @@ A new connection starts turned off. Test it, then turn it on.
 
 Secret fields (tokens, passwords, keys) are stored encrypted with
 `ENCRYPTION_KEY` and never shown again. The form says "Saved. Leave empty to
-keep it." Enter a new value to replace one. The audit log records which
-settings changed, never their values.
+keep it." Enter a new value to replace one. When you change where a secret
+is sent (the URL or server, the port, the encryption), enter the secret
+again: a saved secret never follows to a new address. The audit log records
+which settings changed, never their values.
 
 ### Buttons on the connection page
 

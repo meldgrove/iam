@@ -35,7 +35,7 @@ class FakeAdapter(Adapter):
     name = "Fake app"
     supports_groups = True
     fields = (
-        Field("url", "URL", kind="url"),
+        Field("url", "URL", kind="url", destination=True),
         Field("token", "Token", kind="secret", required=True),
         Field("sync_interval_minutes", "Compare every", kind="int", default=0),
     )

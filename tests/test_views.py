@@ -249,6 +249,54 @@ def test_connection_secrets_are_write_only(client_for, admin_user):
     assert "realm" in changed and "client_secret" not in changed
 
 
+def test_saved_secrets_do_not_follow_a_changed_url(client_for, admin_user, fake_connection):
+    # Otherwise an admin session could send a stored secret to any server.
+    client = client_for(admin_user)
+    url = reverse("connection_edit", args=[fake_connection.pk])
+    data = {"name": "Fake app", "mode": "automatic", "cfg_sync_interval_minutes": "0"}
+    assert client.post(url, {**data, "cfg_token": ""}).status_code == 302
+    moved = {**data, "cfg_url": "https://elsewhere.example.invalid"}
+    response = client.post(url, {**moved, "cfg_token": ""})
+    assert response.status_code == 200 and b"Enter it again" in response.content
+    fake_connection.refresh_from_db()
+    assert fake_connection.settings.get("url", "") == ""
+    assert client.post(url, {**moved, "cfg_token": "new-token"}).status_code == 302
+    fake_connection.refresh_from_db()
+    assert fake_connection.settings["url"] == "https://elsewhere.example.invalid"
+    assert fake_connection.secrets() == {"token": "new-token"}
+    # Unchanged, the saved secret stays.
+    assert client.post(url, {**moved, "cfg_token": ""}).status_code == 302
+    fake_connection.refresh_from_db()
+    assert fake_connection.secrets() == {"token": "new-token"}
+
+
+def test_smtp_password_does_not_follow_a_changed_host(client_for, admin_user):
+    client = client_for(admin_user)
+    data = {
+        "name": "Mail",
+        "cfg_host": "smtp.example.invalid",
+        "cfg_port": "587",
+        "cfg_security": "starttls",
+        "cfg_username": "iam",
+        "cfg_password": "mail-password",
+        "cfg_from_address": "it@example.invalid",
+    }
+    assert client.post(reverse("connection_create", args=["smtp"]), data).status_code == 302
+    connection = Connection.objects.get(name="Mail")
+    url = reverse("connection_edit", args=[connection.pk])
+    kept = {**data, "cfg_password": ""}
+    for change in (
+        {"cfg_host": "mail.example.invalid"},
+        {"cfg_security": "none"},
+        {"cfg_port": "25"},
+    ):
+        response = client.post(url, {**kept, **change})
+        assert response.status_code == 200 and b"Enter it again" in response.content, change
+    assert client.post(url, {**kept, "cfg_from_name": "IT team"}).status_code == 302
+    connection.refresh_from_db()
+    assert connection.secrets() == {"password": "mail-password"}
+
+
 def test_unreadable_secrets_can_be_entered_again(client_for, admin_user, fake_connection, settings):
     # A lost ENCRYPTION_KEY must not turn the edit form into an error page.
     from cryptography.fernet import Fernet
