@@ -471,3 +471,24 @@ def test_scim_without_groups_offers_no_group_import(client_for, admin_user):
     assert with_groups.can_import_groups
     manual = Connection.objects.create(adapter="manual", name="Manual", settings={})
     assert manual.supports_groups and not manual.can_import_groups
+
+
+def test_a_new_start_date_lifts_a_paused_onboarding(client_for, approver_user, person):
+    Person.objects.filter(pk=person.pk).update(onboarding_paused=True)
+    page = client_for(approver_user).get(reverse("person_detail", args=[person.pk]))
+    assert b"The last onboarding was cancelled" in page.content
+    response = client_for(approver_user).post(
+        reverse("person_edit", args=[person.pk]),
+        {
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "work_email": "ada@example.invalid",
+            "person_type": "employee",
+            "team": person.team_id,
+            "access_profile": person.access_profile_id,
+            "start_date": "2027-01-04",
+        },
+    )
+    assert response.status_code == 302
+    person.refresh_from_db()
+    assert not person.onboarding_paused

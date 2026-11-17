@@ -132,11 +132,13 @@ def drift(connection: Connection) -> dict:
         active = account is not None and account.status == Account.Status.ACTIVE
         if should_have and not active and person.status == Person.Status.ACTIVE:
             missing_access.append({"id": person.pk, "name": person.full_name})
+        # Planned people keep what a cancelled onboarding created.
         if (
             active
             and not should_have
             and person.status
             in (
+                Person.Status.PLANNED,
                 Person.Status.OFFBOARDED,
                 Person.Status.ACTIVE,
             )
@@ -273,6 +275,8 @@ def _import_record(connection: Connection, record: HRRecord, summary: dict, acto
         )
     if not record.active and not record.end_date:
         summary["inactive_without_end_date"].append({"id": person.pk, "name": person.full_name})
+    if "start_date" in changed:
+        person.onboarding_paused = False
     if changed:
         person.save()
         summary["updated"].append(

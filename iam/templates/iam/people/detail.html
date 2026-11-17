@@ -14,6 +14,8 @@
   </div>
   {% endif %}
 </div>
+{% if person.onboarding_paused and person.status == 'planned' %}<div class="notice info">The last onboarding was cancelled, so the schedule does not start it again. Change the start date or the access profile, or start the onboarding by hand.</div>{% endif %}
+{% if person.end_date and person.end_date < today and can_onboard %}<div class="notice">The last day has passed. Clear or change it before onboarding, or the schedule offboards {{ person.first_name }} right after.</div>{% endif %}
 <div class="grid two">
   <div class="card"><h2>Profile</h2>
     <dl class="facts">

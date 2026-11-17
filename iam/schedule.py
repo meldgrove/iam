@@ -13,7 +13,7 @@ from django.utils import timezone
 from .adapters import AdapterKind
 from .jobs import settle_finished_workflows
 from .lifecycle import LifecycleError, start_workflow
-from .models import AppSettings, Connection, Person, Workflow
+from .models import AppSettings, Connection, Person, User, Workflow
 from .sync import can_compare_accounts, compare_accounts, import_people
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ def start_due_onboarding() -> list[Workflow]:
         start_date__isnull=False,
         start_date__lte=horizon,
         access_profile__isnull=False,
+        onboarding_paused=False,
     ).exclude(end_date__lt=today())
     for person in due:
         try:
@@ -66,7 +67,11 @@ def start_due_offboarding() -> list[Workflow]:
         end_date__lt=today(),
     )
     for person in due:
-        if person.status == Person.Status.PLANNED and not person.accounts.exists():
+        if (
+            person.status == Person.Status.PLANNED
+            and not person.accounts.exists()
+            and not User.objects.filter(person=person, is_active=True).exists()
+        ):
             continue
         try:
             started.append(

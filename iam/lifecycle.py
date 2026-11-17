@@ -60,6 +60,10 @@ STATUS_DURING = {
 ARCHIVABLE = {Person.Status.PLANNED, Person.Status.OFFBOARDED}
 
 
+def today():
+    return timezone.localdate()
+
+
 def can_start(person: Person, kind: str) -> bool:
     """Whether a workflow of this kind may start for the person now."""
     return person.status in ALLOWED_FROM[kind]
@@ -88,6 +92,12 @@ def start_workflow(
                 f"{Workflow.Kind(kind).label} cannot start while {person.full_name} is "
                 f"{person.get_status_display().lower()}."
             )
+        if kind == Workflow.Kind.ONBOARDING and person.end_date and person.end_date < today():
+            # The schedule would offboard the person right after.
+            raise LifecycleError(
+                f"The last day of {person.full_name} ({person.end_date:%d.%m.%Y}) has passed. "
+                "Clear or change it before onboarding."
+            )
         if kind == Workflow.Kind.ACCESS_UPDATE and person.status == Person.Status.ONBOARDING:
             # Applying access during onboarding restarts the onboarding with
             # the new access, so the person still becomes active at its end.
@@ -99,7 +109,8 @@ def start_workflow(
         superseded = _supersede_open_workflows(person, actor)
         if kind in STATUS_DURING:
             person.status = STATUS_DURING[kind]
-            person.save(update_fields=["status", "updated_at"])
+            person.onboarding_paused = False
+            person.save(update_fields=["status", "onboarding_paused", "updated_at"])
         if kind == Workflow.Kind.OFFBOARDING:
             _deactivate_app_user(person, actor)
         workflow = Workflow.objects.create(
@@ -249,8 +260,11 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
         stop_workflow(workflow, actor=actor, note="Workflow cancelled.")
         person = workflow.person
         if workflow.kind == Workflow.Kind.ONBOARDING and person.status == Person.Status.ONBOARDING:
+            # Cancelled stays cancelled: the schedule waits for a new start
+            # date or access profile.
             person.status = Person.Status.PLANNED
-            person.save(update_fields=["status", "updated_at"])
+            person.onboarding_paused = True
+            person.save(update_fields=["status", "onboarding_paused", "updated_at"])
         audit.record(
             "workflow.cancelled",
             f"Cancelled {workflow.get_kind_display().lower()} of {person.full_name}",
