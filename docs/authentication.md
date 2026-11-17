@@ -76,3 +76,9 @@ the path (`/iam/admins`). Then:
   Without a matching group, such a user is turned off.
 - Users an admin added or changed in the app keep their role; group claims
   do not change them.
+
+Group claims are read only at sign-in. Someone removed from a group at the
+provider, or turned off there, keeps their role in this app until their
+sign-in ends, at most `SESSION_HOURS` (12 by default). To end it at once,
+turn the user off in Admin › Users and roles. Set a lower `SESSION_HOURS`
+when that delay is too long for you.

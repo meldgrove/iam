@@ -29,7 +29,7 @@ can read the database, and the sign-in settings.
 | `OIDC_ADMIN_GROUPS`, `OIDC_APPROVER_GROUPS`, `OIDC_VIEWER_GROUPS` | empty | Comma-separated groups that grant a role at sign-in ([authentication.md](authentication.md)). |
 | `BOOTSTRAP_ADMIN_EMAILS` | empty | Verified addresses that may claim the first admin while no active admin exists. |
 | `OIDC_AUTHORIZATION_ENDPOINT`, `OIDC_TOKEN_ENDPOINT`, `OIDC_USERINFO_ENDPOINT`, `OIDC_JWKS_ENDPOINT` | from discovery | Only for providers without a discovery document. |
-| `SESSION_HOURS` | `12` | How long a sign-in lasts. |
+| `SESSION_HOURS` | `12` | How long a sign-in lasts. Also the longest time a role removed at the sign-in provider still works ([authentication.md](authentication.md)). |
 | `TRUST_PROXY_HEADERS` | `0` (`1` in `compose.yaml`) | Trust `X-Forwarded-Proto` from the reverse proxy. Enable only behind a proxy that sets it. |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` (`*` in `compose.yaml`) | Proxies gunicorn trusts for forwarded headers. |
 | `SECURE_SSL_REDIRECT` | `1` | Redirect HTTP to HTTPS (health checks under `/-/` are exempt). |
