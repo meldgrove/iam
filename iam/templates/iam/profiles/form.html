@@ -5,7 +5,7 @@
 <p class="sub">Changes apply to people when an access update, onboarding or offboarding runs.</p></div></div>
 <form method="post" class="card">{% csrf_token %}
   <div class="form-grid">{% for field in form %}{% include "iam/includes/field.html" with wide=True %}{% endfor %}</div>
-  <h2 style="margin-top:1.2rem">Accounts</h2>
+  <h2 class="gap-above-section">Accounts</h2>
   {% if not connections %}<p class="muted">No account connections yet. Add one in <a href="{% url 'connection_list' %}">Admin › Connections</a>.</p>{% endif %}
   {% for row in connections %}
   <div class="grant">
@@ -13,8 +13,8 @@
     <span class="muted small">{% if not row.connection.enabled %}turned off · {% endif %}{{ row.connection.get_mode_display|truncatewords:1 }}</span></div>
     {% if row.supports_groups %}
       {% if row.groups %}
-      <div class="checklist" style="margin-top:.5rem">{% for g in row.groups %}<label class="checkbox"><input type="checkbox" name="groups" value="{{ g.pk }}" {% if row.selected|has:g.pk %}checked{% endif %}> <span>{{ g.label }}</span></label>{% endfor %}</div>
-      {% else %}<p class="small muted" style="margin:.5rem 0 0">No {{ row.group_label|lower }} imported yet.</p>{% endif %}
+      <div class="checklist gap-above-small">{% for g in row.groups %}<label class="checkbox"><input type="checkbox" name="groups" value="{{ g.pk }}" {% if row.selected|has:g.pk %}checked{% endif %}> <span>{{ g.label }}</span></label>{% endfor %}</div>
+      {% else %}<p class="small muted gap-above-small no-gap-below">No {{ row.group_label|lower }} imported yet.</p>{% endif %}
     {% endif %}
   </div>
   {% endfor %}

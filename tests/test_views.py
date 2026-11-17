@@ -441,6 +441,21 @@ def test_readiness_reports_a_stale_worker(client, settings):
     assert client.get("/-/readyz").status_code == 200
 
 
+def test_a_team_filter_that_is_no_number_is_ignored(client_for, viewer_user, person):
+    response = client_for(viewer_user).get("/people/?team=abc")
+    assert response.status_code == 200
+
+
+def test_templates_have_no_style_attributes():
+    # The Content Security Policy (style-src 'self') blocks them silently.
+    from pathlib import Path
+
+    import iam
+
+    templates = Path(iam.__file__).parent / "templates"
+    assert not [str(p) for p in templates.rglob("*.html") if "style=" in p.read_text()]
+
+
 def test_scim_without_groups_offers_no_group_import(client_for, admin_user):
     connection = Connection.objects.create(
         adapter="scim", name="SCIM app", settings={"groups_enabled": False}

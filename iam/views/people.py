@@ -28,7 +28,7 @@ def person_list(request):
         people = people.filter(status=status)
     elif not q:
         people = people.exclude(status=Person.Status.ARCHIVED)
-    if team:
+    if team.isdigit():
         people = people.filter(team_id=team)
     return render(
         request,

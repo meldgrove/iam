@@ -26,7 +26,7 @@
       <dt>Last day</dt><dd>{{ person.end_date|date:"d.m.Y"|default:"—" }}</dd>
       <dt>Source</dt><dd>{% if person.source_connection %}{{ person.source_connection }} <span class="muted small mono">{{ person.source_id }}</span>{% else %}Added in this app{% endif %}</dd>
     </dl>
-    {% if person.notes %}<p class="small muted" style="margin-top:.75rem">{{ person.notes|linebreaksbr }}</p>{% endif %}
+    {% if person.notes %}<p class="small muted gap-above">{{ person.notes|linebreaksbr }}</p>{% endif %}
   </div>
   <div class="card"><h2>Open work</h2>
     {% include "iam/includes/jobs_table.html" with jobs=open_jobs %}

@@ -9,7 +9,7 @@
     {% if form.mode %}{% include "iam/includes/field.html" with field=form.mode %}{% endif %}
     {% include "iam/includes/field.html" with field=form.enabled wide=True %}
   </div>
-  <h2 style="margin-top:1.2rem">Settings</h2>
+  <h2 class="gap-above-section">Settings</h2>
   <p class="small muted">Secret values are stored encrypted and never shown again. See docs/connections.md for what each app needs.</p>
   <div class="form-grid">{% for field in form.config_fields %}{% if field.widget_type == "textarea" %}{% include "iam/includes/field.html" with wide=True %}{% else %}{% include "iam/includes/field.html" %}{% endif %}{% endfor %}</div>
   <div class="form-actions"><button class="btn primary" type="submit">Save</button><a class="btn" href="{% if connection %}{% url 'connection_detail' connection.pk %}{% else %}{% url 'connection_choose' %}{% endif %}">Cancel</a></div>

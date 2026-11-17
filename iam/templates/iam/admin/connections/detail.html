@@ -24,7 +24,7 @@
 </div>
 {% if connection.supports_groups %}
 <div class="card"><h2>{{ adapter.group_label }} <span class="muted small">{{ groups|length }}</span></h2>
-{% if adapter.manual_groups %}<form method="post" action="{% url 'connection_add_group' connection.pk %}" class="filters">{% csrf_token %}<input type="text" name="name" placeholder="Name" aria-label="Name" maxlength="255" style="max-width:280px"><button class="btn" type="submit">Add</button></form>{% endif %}
+{% if adapter.manual_groups %}<form method="post" action="{% url 'connection_add_group' connection.pk %}" class="filters">{% csrf_token %}<input class="input-narrow" type="text" name="name" placeholder="Name" aria-label="Name" maxlength="255"><button class="btn" type="submit">Add</button></form>{% endif %}
 {% if groups %}<table><thead><tr><th>Name</th><th>ID</th><th></th></tr></thead><tbody>{% for g in groups %}<tr><td>{{ g.label }}{% if g.missing %} <span class="badge danger">no longer listed</span>{% endif %}</td><td class="small muted mono">{{ g.external_id|truncatechars:40 }}</td><td>{% if g.manual %}<form class="inline" method="post" action="{% url 'connection_remove_group' connection.pk g.pk %}">{% csrf_token %}<button class="btn small" type="submit">Remove</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table>
 {% else %}<p class="empty">None yet.{% if not adapter.manual_groups %} Import them with the button above.{% endif %}</p>{% endif %}
 {% if connection.groups_synced_at %}<p class="small muted">Imported {{ connection.groups_synced_at|date:"d.m.Y H:i" }}.</p>{% endif %}
@@ -39,6 +39,6 @@
 {% if sync_runs %}<table><thead><tr><th>Kind</th><th>Started</th><th>Status</th><th>Summary</th></tr></thead><tbody>{% for r in sync_runs %}<tr><td>{{ r.get_kind_display }}</td><td class="small muted">{{ r.started_at|date:"d.m.Y H:i" }}{% if r.triggered_by %} · {{ r.triggered_by }}{% endif %}</td><td>{% badge r.status r.get_status_display %}</td><td class="small">{% if r.error %}{{ r.error }}{% else %}{{ r.summary|summarize }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">Nothing read yet.</p>{% endif %}
 </div>
 {% if not connection.jobs.exists and not grants %}
-<form method="post" action="{% url 'connection_delete' connection.pk %}" style="margin-top:1rem">{% csrf_token %}<button class="btn danger" type="submit">Delete connection</button></form>
+<form class="gap-above-large" method="post" action="{% url 'connection_delete' connection.pk %}">{% csrf_token %}<button class="btn danger" type="submit">Delete connection</button></form>
 {% endif %}
 {% endblock %}
