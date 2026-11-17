@@ -442,8 +442,10 @@ def test_readiness_reports_a_stale_worker(client, settings):
 
 
 def test_a_team_filter_that_is_no_number_is_ignored(client_for, viewer_user, person):
-    response = client_for(viewer_user).get("/people/?team=abc")
-    assert response.status_code == 200
+    client = client_for(viewer_user)
+    # "²" is a digit to str.isdigit() but no number to int().
+    for url in ("/people/?team=abc", "/people/?team=²", "/jobs/?connection=²"):
+        assert client.get(url).status_code == 200, url
 
 
 def test_templates_have_no_style_attributes():
