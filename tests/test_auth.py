@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from django.core.cache import cache
 from django.core.exceptions import SuspiciousOperation
@@ -118,7 +120,7 @@ def test_tokens_from_another_issuer_or_client_are_refused(monkeypatch):
     backend = auth.OIDCBackend()
     from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
-    payload = {"iss": ISSUER, "aud": "iam", "sub": "x"}
+    payload = {"iss": ISSUER, "aud": "iam", "sub": "x", "exp": time.time() + 300}
     monkeypatch.setattr(
         OIDCAuthenticationBackend, "verify_token", lambda self, token, **kw: dict(payload)
     )
@@ -131,6 +133,23 @@ def test_tokens_from_another_issuer_or_client_are_refused(monkeypatch):
     payload.update(aud="iam", iss="https://evil.example.invalid")
     with pytest.raises(SuspiciousOperation):
         backend.verify_token("t")
+    payload.update(iss=ISSUER, exp=time.time() - 30)
+    assert backend.verify_token("t"), "within the allowed clock difference"
+    for expiry in (time.time() - 3600, None, "tomorrow"):
+        payload["exp"] = expiry
+        with pytest.raises(SuspiciousOperation):
+            backend.verify_token("t")
+
+
+def test_user_info_must_be_about_the_subject_of_the_id_token(monkeypatch):
+    from mozilla_django_oidc.auth import OIDCAuthenticationBackend
+
+    info = {"sub": "subject-1", "email": "ada@example.invalid"}
+    monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", lambda self, *args: info)
+    backend = auth.OIDCBackend()
+    assert backend.get_userinfo("access", "id", {"sub": "subject-1"}) == info
+    with pytest.raises(SuspiciousOperation):
+        backend.get_userinfo("access", "id", {"sub": "someone-else"})
 
 
 def test_inactive_users_are_signed_out():

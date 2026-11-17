@@ -14,6 +14,7 @@ and cached, so the app starts even while the provider is down.
 from __future__ import annotations
 
 import logging
+import time
 from urllib.parse import urlencode
 
 import requests
@@ -32,6 +33,8 @@ from .models import Role, User
 logger = logging.getLogger(__name__)
 
 DISCOVERY_CACHE_SECONDS = 3600
+# Allowed difference between this server's clock and the provider's.
+CLOCK_SKEW_SECONDS = 60
 
 
 class ProviderUnavailable(Exception):
@@ -161,7 +164,21 @@ class OIDCBackend(OIDCAuthenticationBackend):
         audiences = audience if isinstance(audience, list) else [audience]
         if settings.OIDC_RP_CLIENT_ID not in audiences:
             raise SuspiciousOperation("ID token for another client")
+        # Security: the library does not check the expiry (OpenID Connect Core 3.1.3.7).
+        expires = payload.get("exp")
+        if isinstance(expires, bool) or not isinstance(expires, int | float):
+            raise SuspiciousOperation("ID token without an expiry")
+        if expires < time.time() - CLOCK_SKEW_SECONDS:
+            raise SuspiciousOperation("ID token has expired")
         return payload
+
+    def get_userinfo(self, access_token, id_token, payload):
+        claims = super().get_userinfo(access_token, id_token, payload)
+        # Security: the user is chosen from these claims, so they must be about
+        # the subject of the verified ID token (OpenID Connect Core 5.3.2).
+        if not isinstance(claims, dict) or claims.get("sub") != payload.get("sub"):
+            raise SuspiciousOperation("User info for another subject than the ID token")
+        return claims
 
     def verify_claims(self, claims):
         return bool(claims.get("sub"))
