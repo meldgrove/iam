@@ -719,6 +719,13 @@ def send_email(to: list[str], subject: str, body: str) -> bool:
     return True
 
 
+def mask_email(address: str) -> str:
+    """Enough of an address to notice a wrong recipient in the audit log,
+    without keeping the private address there."""
+    local, _, domain = address.partition("@")
+    return f"{local[:1]}***@{domain}"
+
+
 def deliver_initial_password(job: Job, password: str) -> None:
     person = job.person
     organization = AppSettings.load().organization_name
@@ -741,7 +748,7 @@ def deliver_initial_password(job: Job, password: str) -> None:
         audit.record(
             "credentials.sent",
             f"Emailed the initial {job.connection.name} password of {person.full_name} "
-            "to the personal address",
+            f"to the personal address {mask_email(person.personal_email)}",
             person=person,
             target=job,
         )

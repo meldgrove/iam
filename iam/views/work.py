@@ -68,7 +68,7 @@ def job_list(request):
     elif status in Job.Status.values:
         jobs = jobs.filter(status=status)
     connection = request.GET.get("connection", "")
-    if connection.isdigit():
+    if connection.isdecimal():
         jobs = jobs.filter(connection_id=connection)
     return render(
         request,

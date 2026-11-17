@@ -59,6 +59,7 @@ class KeycloakAdapter(Adapter):
             "Keycloak URL",
             kind="url",
             required=True,
+            destination=True,
             placeholder="https://sso.example.invalid",
             help="Without /realms/... Include /auth only for Keycloak versions before 17.",
         ),
@@ -67,6 +68,7 @@ class KeycloakAdapter(Adapter):
             "Allow plain HTTP",
             kind="bool",
             default=False,
+            destination=True,
             help=(
                 "Only for a Keycloak in the same private network, e.g. http://keycloak:8080 "
                 "inside one Docker network. Everything else must use HTTPS."

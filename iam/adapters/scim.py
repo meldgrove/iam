@@ -55,6 +55,7 @@ class ScimAdapter(Adapter):
             "SCIM base URL",
             kind="url",
             required=True,
+            destination=True,
             placeholder="https://app.example.invalid/scim/v2",
             help="The URL that /Users and /Groups follow.",
         ),

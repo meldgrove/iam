@@ -6,7 +6,7 @@
 {% if not has_connections %}<div class="notice info">Nothing connected yet. Add your directory first (for example Keycloak or Google Workspace), then an email connection for sign-in details and task notifications.</div>{% endif %}
 {% for label, connections in sections %}{% if connections %}
 <h2>{{ label }}</h2>
-<div class="table-wrap" style="margin-bottom:1.2rem"><table>
+<div class="table-wrap gap-below-section"><table>
 <thead><tr><th>Name</th><th>Type</th><th>Mode</th><th>State</th><th>Last check</th></tr></thead><tbody>
 {% for c in connections %}<tr>
   <td><a href="{% url 'connection_detail' c.pk %}">{{ c.name }}</a></td>

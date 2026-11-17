@@ -265,7 +265,13 @@ class PersonioAdapter(Adapter):
             help="Personio > Settings > Integrations > API credentials.",
         ),
         Field("client_secret", "Client secret", kind="secret", required=True),
-        Field("base_url", "API URL", kind="url", default="https://api.personio.de"),
+        Field(
+            "base_url",
+            "API URL",
+            kind="url",
+            default="https://api.personio.de",
+            destination=True,
+        ),
         Field(
             "work_email_domains",
             "Work email domains",

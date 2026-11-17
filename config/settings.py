@@ -220,5 +220,10 @@ if SENTRY_DSN:
         release=SENTRY_RELEASE or None,
         integrations=[DjangoIntegration()],
         send_default_pii=False,
+        # Security: frame locals and request bodies hold decrypted connection
+        # secrets and initial passwords, and Sentry's scrubber only hides
+        # keys named exactly "password", "secret" or "token".
+        include_local_variables=False,
+        max_request_body_size="never",
         traces_sample_rate=float(env("SENTRY_TRACES_SAMPLE_RATE", "0")),
     )

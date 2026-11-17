@@ -297,6 +297,26 @@ def test_initial_password_is_emailed_never_stored(person, fake_store, monkeypatc
     stored += list(AuditEvent.objects.values_list("summary", flat=True))
     stored += [str(d) for d in AuditEvent.objects.values_list("details", flat=True)]
     assert not any("Initial-Pass-123" in value for value in stored)
+    # The audit log shows where it went, without keeping the private address.
+    summary = AuditEvent.objects.get(action="credentials.sent").summary
+    assert "a***@personal.example.invalid" in summary and "ada@" not in summary
+
+
+def test_approvers_cannot_offboard_an_admin_of_this_app(person, approver_user, admin_user):
+    # Offboarding turns the app user off: an approver could lock every admin out.
+    admin_user.person = person
+    admin_user.save()
+    person.status = Person.Status.ACTIVE
+    person.save()
+    with pytest.raises(LifecycleError, match="is an admin of this app"):
+        start_workflow(person, Workflow.Kind.OFFBOARDING, actor=approver_user)
+    admin_user.refresh_from_db()
+    person.refresh_from_db()
+    assert admin_user.is_active and person.status == Person.Status.ACTIVE
+    # Another admin may, and so may the schedule after the last day.
+    start_workflow(person, Workflow.Kind.OFFBOARDING, actor=admin_user)
+    admin_user.refresh_from_db()
+    assert not admin_user.is_active
 
 
 def test_undeliverable_password_becomes_a_task(person, fake_store):

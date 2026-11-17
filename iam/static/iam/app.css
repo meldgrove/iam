@@ -196,3 +196,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   .content { padding: 1rem; }
   .topbar { padding: 0.6rem 1rem; }
 }
+
+/* Spacing that templates need in one place. The Content Security Policy
+   blocks style attributes, so it lives here. */
+.gap-above-small { margin-top: .5rem; }
+.no-gap-below { margin-bottom: 0; }
+.gap-above { margin-top: .75rem; }
+.gap-above-large { margin-top: 1rem; }
+.gap-above-section { margin-top: 1.2rem; }
+.gap-below-section { margin-bottom: 1.2rem; }
+.input-narrow { max-width: 280px; }

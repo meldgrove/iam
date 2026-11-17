@@ -12,7 +12,9 @@ they may do: a person signs in only when an active app user exists for them.
 | Admin | Also manage access profiles and teams, approve held removals, and use the admin section: connections, users and roles, settings. |
 
 An app user can be linked to a person. Starting that person's offboarding
-turns the app user off at once.
+turns the app user off at once. Because of that, only someone with the same
+or a higher role can start it: an approver cannot offboard an admin of this
+app. The schedule still offboards everyone the day after their last day.
 
 ## Any OpenID Connect provider
 
@@ -74,3 +76,9 @@ the path (`/iam/admins`). Then:
   Without a matching group, such a user is turned off.
 - Users an admin added or changed in the app keep their role; group claims
   do not change them.
+
+Group claims are read only at sign-in. Someone removed from a group at the
+provider, or turned off there, keeps their role in this app until their
+sign-in ends, at most `SESSION_HOURS` (12 by default). To end it at once,
+turn the user off in Admin › Users and roles. Set a lower `SESSION_HOURS`
+when that delay is too long for you.

@@ -1,3 +1,4 @@
+import hmac
 from datetime import timedelta
 
 from django.conf import settings
@@ -61,7 +62,10 @@ def healthz(request):
 def readyz(request):
     """Database and worker health. Details only with the health check token."""
     token = request.headers.get("X-Health-Token", "")
-    detailed = bool(settings.HEALTHCHECK_TOKEN) and token == settings.HEALTHCHECK_TOKEN
+    # Security: compare in constant time, so response times tell nothing about the token.
+    detailed = bool(settings.HEALTHCHECK_TOKEN) and hmac.compare_digest(
+        token.encode(), settings.HEALTHCHECK_TOKEN.encode()
+    )
     checks = {}
     try:
         with db_connection.cursor() as cursor:
