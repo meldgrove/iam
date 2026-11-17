@@ -202,12 +202,13 @@ IMPORTED_FIELDS = (
 
 
 def _import_record(connection: Connection, record: HRRecord, summary: dict, actor) -> None:
-    person = Person.objects.filter(
-        source_connection=connection, source_id=record.external_id
-    ).first()
+    # Locked: the import saves the whole row, which must not write back a
+    # status a workflow changed meanwhile.
+    people = Person.objects.select_for_update(no_key=True)
+    person = people.filter(source_connection=connection, source_id=record.external_id).first()
     email = (record.work_email or "").strip().lower()
     if person is None and email:
-        person = Person.objects.filter(work_email__iexact=email, source_id="").first()
+        person = people.filter(work_email__iexact=email, source_id="").first()
     values = {
         "first_name": record.first_name.strip()[:150],
         "last_name": record.last_name.strip()[:150],

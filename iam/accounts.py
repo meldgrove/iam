@@ -67,7 +67,17 @@ def record_job_result(job: Job, result: EnsureResult | DisableResult) -> None:
     """Record what a job did to the person's account. Raises AccountConflict
     when the app's account is linked to someone else."""
     external = result.account
-    existing = Account.objects.filter(connection=job.connection, person=job.person).first()
+    # Lock the rows this may change in primary-key order, as a comparison
+    # locks a connection's accounts: in one order, the two never deadlock.
+    rows = Q(person=job.person)
+    if external is not None and external.external_id:
+        rows |= Q(external_id=external.external_id)
+    locked = list(
+        Account.objects.select_for_update(of=("self",))
+        .filter(rows, connection=job.connection)
+        .order_by("pk")
+    )
+    existing = next((a for a in locked if a.person_id == job.person_id), None)
     if external is None:
         if existing is not None:
             existing.status = Account.Status.MISSING
@@ -76,10 +86,9 @@ def record_job_result(job: Job, result: EnsureResult | DisableResult) -> None:
             existing.save()
         return
     if external.external_id:
-        other = (
-            Account.objects.filter(connection=job.connection, external_id=external.external_id)
-            .exclude(pk=existing.pk if existing else None)
-            .first()
+        other = next(
+            (a for a in locked if a.external_id == external.external_id and a is not existing),
+            None,
         )
         if other is not None:
             if other.person_id and other.person_id != job.person_id:
@@ -139,9 +148,15 @@ def record_listing(connection: Connection, listed: Iterable[ExternalAccount]) ->
     seen_ids = set()
     new_links = 0
     with transaction.atomic():
-        by_id = {a.external_id: a for a in connection.accounts.exclude(external_id="")}
+        # Locked: the rows are saved whole, and a job may record its account
+        # (and the groups it applied) meanwhile. Every row, placeholders too,
+        # in primary-key order, as a job locks the rows it changes; only the
+        # account rows, not the connection the default ordering joins.
+        locked = connection.accounts.select_for_update(of=("self",)).order_by("pk")
+        by_id = {a.external_id: a for a in locked if a.external_id}
         for external in listed:
-            if not external.external_id:
+            # A listing paged by offset can list an account twice.
+            if not external.external_id or external.external_id in seen_ids:
                 continue
             seen_ids.add(external.external_id)
             account = by_id.get(external.external_id) or Account(

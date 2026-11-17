@@ -852,7 +852,7 @@ def test_job_changes_lock_the_person_first(person, fake_connection, fake_store, 
     def first_lock(action):
         with CaptureQueriesContext(connection) as queries:
             action()
-        locks = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"]]
+        locks = [q["sql"] for q in queries if " FOR " in q["sql"] and "UPDATE" in q["sql"]]
         return locks[0].split(" FROM ")[1].split()[0] if locks else None
 
     start_workflow(person, Workflow.Kind.ONBOARDING)

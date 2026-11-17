@@ -1,4 +1,5 @@
 from django.contrib import messages
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -114,9 +115,17 @@ def person_create(request):
 def person_edit(request, pk):
     from ..forms import PersonForm
 
-    person = get_object_or_404(Person, pk=pk)
-    form = PersonForm(request.POST or None, instance=person)
-    if request.method == "POST" and form.is_valid():
+    if request.method != "POST":
+        person = get_object_or_404(Person, pk=pk)
+        form = PersonForm(instance=person)
+        return render(request, "iam/people/form.html", {"form": form, "person": person})
+    with transaction.atomic():
+        # The form saves the whole row: the lock keeps it from writing back a
+        # status a workflow changed meanwhile.
+        person = get_object_or_404(Person.objects.select_for_update(no_key=True), pk=pk)
+        form = PersonForm(request.POST, instance=person)
+        if not form.is_valid():
+            return render(request, "iam/people/form.html", {"form": form, "person": person})
         if {"start_date", "access_profile"} & set(form.changed_data):
             form.instance.onboarding_paused = False
         person = form.save()
@@ -128,15 +137,14 @@ def person_edit(request, pk):
             target=person,
             details={"fields": sorted(form.changed_data)},
         )
-        access_fields = {"access_profile", "team"} & set(form.changed_data)
-        if access_fields and person.status in (Person.Status.ACTIVE, Person.Status.ONBOARDING):
-            messages.info(
-                request,
-                "Access changed. Start an access update to apply it in the connected apps.",
-            )
-        messages.success(request, f"Saved {person.full_name}.")
-        return redirect("person_detail", pk=person.pk)
-    return render(request, "iam/people/form.html", {"form": form, "person": person})
+    access_fields = {"access_profile", "team"} & set(form.changed_data)
+    if access_fields and person.status in (Person.Status.ACTIVE, Person.Status.ONBOARDING):
+        messages.info(
+            request,
+            "Access changed. Start an access update to apply it in the connected apps.",
+        )
+    messages.success(request, f"Saved {person.full_name}.")
+    return redirect("person_detail", pk=person.pk)
 
 
 @approver_required

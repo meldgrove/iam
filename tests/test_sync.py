@@ -346,3 +346,189 @@ def test_a_new_start_date_from_the_hr_import_lifts_a_paused_onboarding(fake_stor
     )
     person.refresh_from_db()
     assert not person.onboarding_paused and person.start_date == date(2027, 1, 4)
+
+
+def test_an_account_listed_twice_is_recorded_once(fake_connection):
+    from iam.accounts import record_listing
+    from iam.adapters.base import ExternalAccount
+
+    twice = ExternalAccount(external_id="x1", username="ada", email="ada@example.invalid")
+    summary = record_listing(fake_connection, [twice, twice])
+    assert summary["accounts"] == 1
+    assert Account.objects.filter(external_id="x1").count() == 1
+
+
+def change_meanwhile(change):
+    """Run `change` in another connection that holds its row locks for half a
+    second, as a job or workflow committing at the same time would."""
+    import threading
+    import time
+
+    from django.db import connections, transaction
+
+    started = threading.Event()
+
+    def run():
+        try:
+            with transaction.atomic():
+                change()
+                started.set()
+                time.sleep(0.5)
+        finally:
+            connections.close_all()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    assert started.wait(5)
+    return thread
+
+
+def needs_postgresql():
+    from django.db import connection
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Only PostgreSQL runs transactions side by side.")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_comparison_keeps_the_groups_a_job_records_meanwhile(fake_connection, person):
+    from iam.accounts import record_listing
+    from iam.adapters.base import ExternalAccount
+
+    needs_postgresql()
+    account = Account.objects.create(
+        connection=fake_connection, external_id="x1", person=person, applied_groups=["g-staff"]
+    )
+    thread = change_meanwhile(
+        lambda: Account.objects.filter(pk=account.pk).update(applied_groups=["g-eng", "g-staff"])
+    )
+    record_listing(fake_connection, [ExternalAccount(external_id="x1", username="ada")])
+    thread.join()
+    account.refresh_from_db()
+    assert account.applied_groups == ["g-eng", "g-staff"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_hr_import_keeps_a_status_a_workflow_sets_meanwhile(person):
+    from django.db import transaction
+
+    from iam.sync import _import_record
+
+    needs_postgresql()
+    connection = Connection.objects.create(adapter="personio", name="Personio")
+    Person.objects.filter(pk=person.pk).update(
+        status=Person.Status.ACTIVE, source_connection=connection, source_id="p1"
+    )
+    thread = change_meanwhile(
+        lambda: Person.objects.filter(pk=person.pk).update(status=Person.Status.OFFBOARDING)
+    )
+    record = HRRecord(external_id="p1", first_name="Ada", last_name="King")
+    summary = {"work_email_differs": [], "updated": [], "inactive_without_end_date": []}
+    with transaction.atomic():  # as import_people runs each record
+        _import_record(connection, record, summary, None)
+    thread.join()
+    person.refresh_from_db()
+    assert person.last_name == "King" and person.status == Person.Status.OFFBOARDING
+
+
+def test_a_comparison_locks_only_account_rows(fake_connection, fake_store, person):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    needs_postgresql()
+    Account.objects.create(connection=fake_connection, external_id="x1", username="ada")
+    fake_store.accounts["x1"] = {
+        "username": "ada",
+        "email": "ada@example.invalid",
+        "active": True,
+        "groups": set(),
+    }
+    with CaptureQueriesContext(connection) as queries:
+        compare_accounts(fake_connection)
+    locking = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"]]
+    assert locking and all('FOR UPDATE OF "iam_account"' in sql for sql in locking), locking
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_comparison_links_an_account_while_a_job_holds_the_person(fake_connection, person):
+    from django.db import connection, transaction
+
+    from iam.accounts import record_listing
+    from iam.adapters.base import ExternalAccount
+    from iam.jobs import _locked
+    from iam.lifecycle import start_workflow
+
+    needs_postgresql()
+    job = start_workflow(person, Workflow.Kind.ONBOARDING).jobs.get()
+    # A job holds the person, as when it records its account; the comparison
+    # links an account to that person meanwhile (a foreign-key check).
+    thread = change_meanwhile(lambda: _locked(job))
+    listed = [ExternalAccount(external_id="x1", username="ada", email="ada@example.invalid")]
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL lock_timeout = '200ms'")
+        record_listing(fake_connection, listed)
+    thread.join()
+    assert Account.objects.get(external_id="x1").person_id == person.pk
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_comparison_and_a_job_replace_a_placeholder_without_deadlock(
+    fake_connection, person, monkeypatch
+):
+    """A manual change left a placeholder row; a job and a comparison both
+    replace it with the listed account at the same time."""
+    import threading
+
+    from django.db import connections, transaction
+
+    from iam import accounts
+    from iam.adapters.base import EnsureResult, ExternalAccount
+    from iam.lifecycle import start_workflow
+
+    needs_postgresql()
+    Account.objects.create(connection=fake_connection, person=person)  # the placeholder
+    Account.objects.create(connection=fake_connection, external_id="x1", username="ada")
+    job = start_workflow(person, Workflow.Kind.ONBOARDING).jobs.get()
+    compared, job_replaced = threading.Event(), threading.Event()
+    replace, match_person = accounts._replace, accounts._match_person
+
+    def replace_then_tell(old, new):
+        replace(old, new)
+        if threading.current_thread().name == "job":
+            job_replaced.set()
+
+    def match_after_the_job(connection, external):
+        # The comparison holds its account locks; let the job go first.
+        compared.set()
+        job_replaced.wait(1.5)
+        return match_person(connection, external)
+
+    monkeypatch.setattr(accounts, "_replace", replace_then_tell)
+    monkeypatch.setattr(accounts, "_match_person", match_after_the_job)
+    errors = []
+
+    def run(name, work):
+        try:
+            with transaction.atomic():
+                work()
+        except Exception as exc:  # noqa: BLE001 - the test reports it
+            errors.append((name, exc))
+        finally:
+            connections.close_all()
+
+    listed = [ExternalAccount(external_id="x1", username="ada", email="ada@example.invalid")]
+    comparison = threading.Thread(
+        target=run, args=("comparison", lambda: accounts.record_listing(fake_connection, listed))
+    )
+    result = EnsureResult(account=ExternalAccount(external_id="x1", username="ada"))
+    worker = threading.Thread(
+        target=run, args=("job", lambda: accounts.record_job_result(job, result)), name="job"
+    )
+    comparison.start()
+    assert compared.wait(5)
+    worker.start()
+    comparison.join()
+    worker.join()
+    assert errors == []
+    assert list(Account.objects.values_list("external_id", "person")) == [("x1", person.pk)]

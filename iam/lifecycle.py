@@ -86,7 +86,7 @@ def start_workflow(
     reason: str = "",
 ) -> Workflow:
     with transaction.atomic():
-        person = Person.objects.select_for_update().get(pk=person.pk)
+        person = Person.objects.select_for_update(no_key=True).get(pk=person.pk)
         if not can_start(person, kind):
             raise LifecycleError(
                 f"{Workflow.Kind(kind).label} cannot start while {person.full_name} is "
@@ -253,7 +253,7 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
             "Offboarding cannot be cancelled. Retry or complete its steps instead."
         )
     with transaction.atomic():
-        Person.objects.select_for_update().get(pk=workflow.person_id)
+        Person.objects.select_for_update(no_key=True).get(pk=workflow.person_id)
         workflow = Workflow.objects.select_for_update().get(pk=workflow.pk)
         if not workflow.is_open:
             raise LifecycleError("This workflow is already finished.")
