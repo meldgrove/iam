@@ -139,9 +139,15 @@ def record_listing(connection: Connection, listed: Iterable[ExternalAccount]) ->
     seen_ids = set()
     new_links = 0
     with transaction.atomic():
-        by_id = {a.external_id: a for a in connection.accounts.exclude(external_id="")}
+        # Locked: the rows are saved whole, and a job may record its account
+        # (and the groups it applied) meanwhile.
+        by_id = {
+            a.external_id: a
+            for a in connection.accounts.exclude(external_id="").select_for_update()
+        }
         for external in listed:
-            if not external.external_id:
+            # A listing paged by offset can list an account twice.
+            if not external.external_id or external.external_id in seen_ids:
                 continue
             seen_ids.add(external.external_id)
             account = by_id.get(external.external_id) or Account(

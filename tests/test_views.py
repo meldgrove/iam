@@ -505,3 +505,31 @@ def test_a_long_manual_group_name_fits_its_external_id(client_for, admin_user):
     assert all(len(g.external_id) <= 255 for g in connection.groups.all())
     group = connection.groups.get(name__startswith="x")
     assert len(group.external_id) <= 255 and group.name == "x" * 255
+
+
+@pytest.mark.django_db(transaction=True)
+def test_editing_a_person_keeps_a_status_a_workflow_sets_meanwhile(
+    client_for, approver_user, person
+):
+    from tests.test_sync import change_meanwhile, needs_postgresql
+
+    needs_postgresql()
+    Person.objects.filter(pk=person.pk).update(status=Person.Status.ACTIVE)
+    thread = change_meanwhile(
+        lambda: Person.objects.filter(pk=person.pk).update(status=Person.Status.OFFBOARDING)
+    )
+    response = client_for(approver_user).post(
+        reverse("person_edit", args=[person.pk]),
+        {
+            "first_name": "Ada",
+            "last_name": "King",
+            "work_email": "ada@example.invalid",
+            "person_type": "employee",
+            "team": person.team_id,
+            "access_profile": person.access_profile_id,
+        },
+    )
+    thread.join()
+    assert response.status_code == 302
+    person.refresh_from_db()
+    assert person.last_name == "King" and person.status == Person.Status.OFFBOARDING

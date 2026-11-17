@@ -346,3 +346,86 @@ def test_a_new_start_date_from_the_hr_import_lifts_a_paused_onboarding(fake_stor
     )
     person.refresh_from_db()
     assert not person.onboarding_paused and person.start_date == date(2027, 1, 4)
+
+
+def test_an_account_listed_twice_is_recorded_once(fake_connection):
+    from iam.accounts import record_listing
+    from iam.adapters.base import ExternalAccount
+
+    twice = ExternalAccount(external_id="x1", username="ada", email="ada@example.invalid")
+    summary = record_listing(fake_connection, [twice, twice])
+    assert summary["accounts"] == 1
+    assert Account.objects.filter(external_id="x1").count() == 1
+
+
+def change_meanwhile(change):
+    """Run `change` in another connection that holds its row locks for half a
+    second, as a job or workflow committing at the same time would."""
+    import threading
+    import time
+
+    from django.db import connections, transaction
+
+    started = threading.Event()
+
+    def run():
+        try:
+            with transaction.atomic():
+                change()
+                started.set()
+                time.sleep(0.5)
+        finally:
+            connections.close_all()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    assert started.wait(5)
+    return thread
+
+
+def needs_postgresql():
+    from django.db import connection
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Only PostgreSQL runs transactions side by side.")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_comparison_keeps_the_groups_a_job_records_meanwhile(fake_connection, person):
+    from iam.accounts import record_listing
+    from iam.adapters.base import ExternalAccount
+
+    needs_postgresql()
+    account = Account.objects.create(
+        connection=fake_connection, external_id="x1", person=person, applied_groups=["g-staff"]
+    )
+    thread = change_meanwhile(
+        lambda: Account.objects.filter(pk=account.pk).update(applied_groups=["g-eng", "g-staff"])
+    )
+    record_listing(fake_connection, [ExternalAccount(external_id="x1", username="ada")])
+    thread.join()
+    account.refresh_from_db()
+    assert account.applied_groups == ["g-eng", "g-staff"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_hr_import_keeps_a_status_a_workflow_sets_meanwhile(person):
+    from django.db import transaction
+
+    from iam.sync import _import_record
+
+    needs_postgresql()
+    connection = Connection.objects.create(adapter="personio", name="Personio")
+    Person.objects.filter(pk=person.pk).update(
+        status=Person.Status.ACTIVE, source_connection=connection, source_id="p1"
+    )
+    thread = change_meanwhile(
+        lambda: Person.objects.filter(pk=person.pk).update(status=Person.Status.OFFBOARDING)
+    )
+    record = HRRecord(external_id="p1", first_name="Ada", last_name="King")
+    summary = {"work_email_differs": [], "updated": [], "inactive_without_end_date": []}
+    with transaction.atomic():  # as import_people runs each record
+        _import_record(connection, record, summary, None)
+    thread.join()
+    person.refresh_from_db()
+    assert person.last_name == "King" and person.status == Person.Status.OFFBOARDING
