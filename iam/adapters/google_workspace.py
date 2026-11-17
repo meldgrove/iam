@@ -249,10 +249,22 @@ class GoogleWorkspaceAdapter(Adapter):
             raise AdapterError(f"The work email must be in the domain {self.domain}.")
         return email
 
+    def _get_user_by_email(self, email: str) -> dict | None:
+        """The user whose primary address this is. Google also answers for an
+        alias, with the user that owns it: someone else's account."""
+        user = self._get_user(email)
+        if user is None or str(user.get("primaryEmail", "")).strip().lower() != email:
+            return None
+        return user
+
+    def _alias_owner(self, email: str) -> bool:
+        user = self._get_user(email)
+        return user is not None and str(user.get("primaryEmail", "")).strip().lower() != email
+
     def find_account(self, spec: AccountSpec, external_id: str = "") -> ExternalAccount | None:
         user = self._get_user(external_id) if external_id else None
         if user is None and spec.email:
-            user = self._get_user(spec.email.strip().lower())
+            user = self._get_user_by_email(spec.email.strip().lower())
         if user is None:
             return None
         self._last_user = user
@@ -275,6 +287,12 @@ class GoogleWorkspaceAdapter(Adapter):
         response = self._request("POST", "/users", "create a user", allow=(409,), json=body)
         if response.status_code == 409:
             existing = self.find_account(spec)
+            if existing is None and self._alias_owner(email):
+                raise AdapterError(
+                    f"{email} is an alias of another Google Workspace user. Nothing was "
+                    "changed. Remove the alias in the Google Admin console or use another "
+                    "work email."
+                )
             if existing is None:
                 raise TransientError("Google reported the user as existing but did not return it.")
             result = EnsureResult(account=existing)

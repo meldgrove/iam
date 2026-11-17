@@ -296,3 +296,30 @@ def test_list_accounts_follows_pages(mock_transport):
         ("u2", "bob@example.invalid", False, None),
     ]
     assert transport.requests[0].url.params["maxResults"] == "500"
+
+
+class AliasDirectory(Directory):
+    """ada@ is an alias of Grace's account, as after Ada's account was deleted."""
+
+    def by_key(self, key):
+        if key == "ada@example.invalid":
+            return self.users.get("grace")
+        return super().by_key(key)
+
+
+def test_an_alias_of_another_user_is_not_the_persons_account(mock_transport):
+    directory = AliasDirectory(users=[user("grace", "grace@example.invalid")])
+    google = make_adapter(mock_transport(directory))
+    assert google.find_account(spec()) is None
+    result = google.disable_account(spec(), managed_groups={"g1"})
+    assert result.account is None
+    assert directory.users["grace"]["suspended"] is False
+
+
+def test_creating_an_address_that_is_an_alias_is_refused(mock_transport):
+    directory = AliasDirectory(users=[user("grace", "grace@example.invalid")])
+    with pytest.raises(AdapterError, match="alias of another Google Workspace user"):
+        make_adapter(mock_transport(directory)).ensure_account(
+            spec(), groups={"g1"}, managed_groups={"g1"}
+        )
+    assert directory.memberships == {}

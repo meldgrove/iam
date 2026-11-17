@@ -185,18 +185,40 @@ class ScimAdapter(Adapter):
             groups=groups,
         )
 
-    def _first_user(self, filter_expression: str, *, tolerate_unsupported: bool) -> dict | None:
+    @staticmethod
+    def _values(resource: dict, attribute: str) -> set[str]:
+        if attribute == "userName":
+            return {str(resource.get("userName") or "").casefold()}
+        return {
+            str(entry.get("value") or "").casefold()
+            for entry in resource.get("emails") or []
+            if isinstance(entry, dict)
+        }
+
+    def _find_user(self, attribute: str, value: str, *, tolerate_unsupported: bool) -> dict | None:
+        """The one user whose attribute is the value. The answer is checked:
+        a server can ignore a filter and list everyone, and emails need not
+        be unique."""
         response = self._send(
             "GET",
             "/Users",
             "look up a user",
             allow=UNSUPPORTED if tolerate_unsupported else (),
-            params={"filter": filter_expression, "count": "2"},
+            params={"filter": f"{attribute} eq {_filter_value(value)}", "count": "2"},
         )
         if response.status_code in UNSUPPORTED:
             return None
-        resources = self._json(response).get("Resources") or []
-        return resources[0] if resources and isinstance(resources[0], dict) else None
+        wanted = value.casefold()
+        matches = [
+            resource
+            for resource in self._json(response).get("Resources") or []
+            if isinstance(resource, dict) and wanted in self._values(resource, attribute)
+        ]
+        if len(matches) > 1:
+            raise AdapterError(
+                f"Several {self.name} users have the {attribute} {value}. Nothing was changed."
+            )
+        return matches[0] if matches else None
 
     # -- connection -----------------------------------------------------------
 
@@ -234,15 +256,12 @@ class ScimAdapter(Adapter):
                 return self._account(self._json(response))
         user_name = self._user_name(spec)
         if user_name:
-            resource = self._first_user(
-                f"userName eq {_filter_value(user_name)}", tolerate_unsupported=False
-            )
+            resource = self._find_user("userName", user_name, tolerate_unsupported=False)
             if resource:
                 return self._account(resource)
-        if spec.email and spec.email != user_name:
-            resource = self._first_user(
-                f"emails.value eq {_filter_value(spec.email)}", tolerate_unsupported=True
-            )
+        # Also when the userName is the email: the user may have another userName.
+        if spec.email:
+            resource = self._find_user("emails.value", spec.email, tolerate_unsupported=True)
             if resource:
                 return self._account(resource)
         return None

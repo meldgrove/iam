@@ -301,16 +301,19 @@ def run_job(job: Job) -> Job:
                     retryable=False,
                 )
             external_id = found.external_id
+        # Hand over the account whose owner was checked, so the change cannot
+        # land on another account a second lookup finds.
         if job.action == Job.Action.ENSURE_ACCOUNT:
             result = adapter.ensure_account(
                 spec,
                 external_id=external_id,
                 groups=set(job.groups),
                 managed_groups=managed_groups(job),
+                found=found,
             )
         else:
             result = adapter.disable_account(
-                spec, external_id=external_id, managed_groups=managed_groups(job)
+                spec, external_id=external_id, managed_groups=managed_groups(job), found=found
             )
     except AdapterError as exc:
         return fail_job(job, str(exc), retryable=exc.retryable)

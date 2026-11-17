@@ -691,3 +691,9 @@ def test_job_locks_never_cover_joined_rows(person, admin_user):
     locking = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"] and " JOIN " in q["sql"]]
     assert locking, workflow
     assert all('FOR UPDATE OF "iam_job"' in sql for sql in locking), locking
+
+
+def test_a_job_changes_the_account_it_checked(person, fake_store):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    assert fake_store.calls.count("find") == 1
