@@ -101,11 +101,22 @@ def test_group_claims_grant_and_revoke_roles(settings):
     backend = auth.OIDCBackend()
     user = backend.create_user(claims(groups=["/staff", "/iam/admins"]))
     assert user.role == Role.ADMIN and user.role_source == User.RoleSource.PROVIDER
-    backend.update_user(user, claims(groups=["/apps/iam-viewers"]))
+    backend.update_user(user, claims(groups=["/iam-viewers"]))
+    assert user.role == Role.VIEWER
+    backend.update_user(user, claims(groups=["iam-viewers"]))
     assert user.role == Role.VIEWER
     backend.update_user(user, claims(groups=[]))
     user.refresh_from_db()
     assert not user.is_active
+
+
+def test_a_group_name_does_not_match_a_group_further_down(settings):
+    # Otherwise everyone in any "/team/admins" would become an admin of this app.
+    settings.OIDC_ADMIN_GROUPS = ["admins", "/iam/admins"]
+    for groups in (["/sales/admins"], ["/sales/iam/admins"], ["/iam/admins/eu"], ["/iam"]):
+        assert auth.role_from_groups(claims(groups=groups)) is None, groups
+    for groups in (["admins"], ["/admins"], ["/iam/admins"]):
+        assert auth.role_from_groups(claims(groups=groups)) == Role.ADMIN, groups
 
 
 def test_local_roles_are_not_changed_by_group_claims(settings):

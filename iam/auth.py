@@ -102,14 +102,16 @@ def claim_groups(claims: dict) -> set[str]:
         groups = [groups]
     if not isinstance(groups, list):
         return set()
-    names = set()
-    for group in groups:
-        if isinstance(group, str):
-            names.add(group)
-            # Keycloak sends full paths ("/iam/admins") when the mapper has
-            # "Full group path" on; accept the bare name too.
-            names.add(group.rsplit("/", 1)[-1])
-    return names
+    return {group for group in groups if isinstance(group, str)}
+
+
+def group_matches(name: str, groups: set[str]) -> bool:
+    """Whether a configured group is among the claimed groups. Keycloak sends
+    full paths ("/iam/admins") when the mapper has "Full group path" on, so a
+    name without a slash also matches that top-level group ("/admins").
+    Security: it never matches a group of that name further down, or everyone
+    in any "/team/admins" would get the role."""
+    return name in groups or ("/" not in name and f"/{name}" in groups)
 
 
 def role_from_groups(claims: dict) -> str | None:
@@ -119,7 +121,7 @@ def role_from_groups(claims: dict) -> str | None:
         (Role.APPROVER, settings.OIDC_APPROVER_GROUPS),
         (Role.VIEWER, settings.OIDC_VIEWER_GROUPS),
     ):
-        if groups & set(names):
+        if any(group_matches(name, groups) for name in names):
             return role
     return None
 

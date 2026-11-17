@@ -67,8 +67,11 @@ After that, admins add users in Admin › Users and roles.
 ## Roles from group claims
 
 Set any of `OIDC_ADMIN_GROUPS`, `OIDC_APPROVER_GROUPS`, `OIDC_VIEWER_GROUPS`
-(comma-separated). Values match a group name or, for Keycloak with full paths,
-the path (`/iam/admins`). Then:
+(comma-separated). A value must be the group exactly as the provider sends it:
+the name, or for Keycloak with full paths the path (`/iam/admins`). A name
+without a slash also matches the top-level group of that name (`admins`
+matches `/admins`), but never a group further down (`/sales/admins`): give
+the full path for those. Then:
 
 - A first sign-in with a verified email and a matching group creates the
   app user with that role (the highest role wins).
