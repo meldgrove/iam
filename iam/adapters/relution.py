@@ -169,6 +169,11 @@ class RelutionAdapter(Adapter):
         SYNC_INTERVAL_FIELD,
     )
 
+    def __init__(self, config: dict, **kwargs):
+        super().__init__(config, **kwargs)
+        # Whether each user read so far is activated, even if locked.
+        self._activated: dict[str, bool] = {}
+
     # -- HTTP ------------------------------------------------------------------
 
     def _base_url(self) -> str:
@@ -274,6 +279,7 @@ class RelutionAdapter(Adapter):
         return data
 
     def _to_account(self, user: dict) -> ExternalAccount:
+        self._activated[_entity_id(user)] = can_sign_in_later(user)
         return ExternalAccount(
             external_id=_entity_id(user),
             username=str(user.get("name") or ""),
@@ -354,7 +360,9 @@ class RelutionAdapter(Adapter):
                 account.active = False
                 return account
             raise AdapterError("The Relution user no longer exists.")
-        if user_is_active(user) != active:
+        # Deactivating writes also for a locked user: a lock is not an end.
+        needs_write = not user_is_active(user) if active else can_sign_in_later(user)
+        if needs_write:
             self._request(
                 "PUT",
                 self._user_path(account.external_id),
@@ -368,7 +376,7 @@ class RelutionAdapter(Adapter):
                 account.active = False
                 return account
             raise AdapterError("The Relution user disappeared while it was activated.")
-        if user_is_active(confirmed) != active:
+        if (user_is_active(confirmed) if active else can_sign_in_later(confirmed)) != active:
             raise AdapterError(
                 "Relution did not confirm the user as active; it may be locked in Relution."
                 if active
@@ -377,6 +385,15 @@ class RelutionAdapter(Adapter):
         updated = self._to_account(confirmed)
         updated.groups = account.groups
         return updated
+
+    def disable_account(self, spec: AccountSpec, **kwargs):
+        result = super().disable_account(spec, **kwargs)
+        account = result.account
+        if account is not None and not result.changed and self._activated.get(account.external_id):
+            # Locked users count as inactive but stay activated.
+            result.account = self.set_active(account, False)
+            result.changed = True
+        return result
 
     # -- groups ----------------------------------------------------------------
 
@@ -459,7 +476,16 @@ class RelutionAdapter(Adapter):
 
 
 def membership_ids_embedded(user: dict) -> set[str] | None:
-    """Memberships a user object carries itself; listings usually carry none."""
-    if not any(key in user for key in ("groups", "roles", "userGroups")):
+    """Memberships a user object carries itself; listings usually carry none.
+    A user's roles are permissions, not group memberships."""
+    if not any(key in user for key in ("groups", "userGroups")):
         return None
-    return membership_ids({k: user[k] for k in ("groups", "roles", "userGroups") if k in user})
+    return membership_ids({k: user[k] for k in ("groups", "userGroups") if k in user})
+
+
+def can_sign_in_later(user: dict) -> bool:
+    """Whether the user is activated, even if locked now: unlocking it would
+    let the person in again."""
+    if "activated" in user:
+        return user.get("activated") is not False
+    return user_is_active(user)

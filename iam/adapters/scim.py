@@ -147,6 +147,21 @@ class ScimAdapter(Adapter):
             return {}
         return data if isinstance(data, dict) else {}
 
+    def _listing(self, response: httpx.Response, what: str) -> tuple[list[dict], object]:
+        """The resources of a list response and its totalResults. Anything
+        else is an error: read as an empty list, a maintenance page would
+        mark every account and group missing."""
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise AdapterError(f"{self.name} sent an unreadable answer ({what}).") from exc
+        resources = data.get("Resources") if isinstance(data, dict) else None
+        if resources is None and isinstance(data, dict) and data.get("totalResults") == 0:
+            resources = []  # RFC 7644 lets an empty list leave Resources out
+        if not isinstance(resources, list) or not all(isinstance(r, dict) for r in resources):
+            raise AdapterError(f"{self.name} sent an unexpected answer ({what}).")
+        return resources, data.get("totalResults")
+
     # -- mapping ------------------------------------------------------------
 
     def _user_name(self, spec: AccountSpec) -> str:
@@ -209,11 +224,8 @@ class ScimAdapter(Adapter):
         if response.status_code in UNSUPPORTED:
             return None
         wanted = value.casefold()
-        matches = [
-            resource
-            for resource in self._json(response).get("Resources") or []
-            if isinstance(resource, dict) and wanted in self._values(resource, attribute)
-        ]
+        resources, _ = self._listing(response, "look up a user")
+        matches = [r for r in resources if wanted in self._values(r, attribute)]
         if len(matches) > 1:
             raise AdapterError(
                 f"Several {self.name} users have the {attribute} {value}. Nothing was changed."
@@ -332,20 +344,24 @@ class ScimAdapter(Adapter):
 
     # -- groups -------------------------------------------------------------------
 
-    def _paged(self, url: str, what: str, params: dict | None = None) -> Iterable[dict]:
+    def _paged(
+        self, url: str, what: str, params: dict | None = None, *, unsupported: str = ""
+    ) -> Iterable[dict]:
+        """Every page of a listing. With `unsupported`, a server that refuses
+        the request (400, 501) raises that message."""
         start = 1
         for _ in range(MAX_PAGES):
-            data = self._json(
-                self._send(
-                    "GET",
-                    url,
-                    what,
-                    params={**(params or {}), "startIndex": str(start), "count": str(PAGE_SIZE)},
-                )
+            response = self._send(
+                "GET",
+                url,
+                what,
+                allow=UNSUPPORTED if unsupported else (),
+                params={**(params or {}), "startIndex": str(start), "count": str(PAGE_SIZE)},
             )
-            resources = [r for r in data.get("Resources") or [] if isinstance(r, dict)]
+            if response.status_code in UNSUPPORTED and unsupported:
+                raise AdapterError(unsupported)
+            resources, total = self._listing(response, what)
             yield from resources
-            total = data.get("totalResults")
             start += len(resources)
             if not resources or (isinstance(total, int) and start > total):
                 return
@@ -364,23 +380,20 @@ class ScimAdapter(Adapter):
             return set(account.groups)
         if not self.supports_groups:
             return set()
-        response = self._send(
-            "GET",
+        # Unknown memberships must not read as none: nothing would be removed.
+        groups = self._paged(
             "/Groups",
             "read a user's groups",
-            allow=UNSUPPORTED,
-            params={
+            {
                 "filter": f"members.value eq {_filter_value(account.external_id)}",
                 "attributes": "displayName",
             },
+            unsupported=(
+                f"{self.name} cannot list a user's groups (no members filter). Change the "
+                "groups by hand, or turn off Manage groups for this connection."
+            ),
         )
-        if response.status_code in UNSUPPORTED:
-            return set()
-        return {
-            str(g["id"])
-            for g in self._json(response).get("Resources") or []
-            if isinstance(g, dict) and g.get("id")
-        }
+        return {str(g["id"]) for g in groups if g.get("id")}
 
     def add_to_group(self, account: ExternalAccount, group_id: str) -> None:
         self._send(

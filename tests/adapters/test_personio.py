@@ -266,3 +266,16 @@ def test_connection_test_reports_employee_count(mock_transport):
 
     assert result.ok
     assert result.message == "Connected to Personio: 1 employee."
+
+
+def test_the_configured_team_attribute_comes_first(mock_transport):
+    page = [
+        employee("1", "Ada", "Lovelace", department="Engineering", team="Operations"),
+        employee("2", "Grace", "Hopper", department=None, team="Research"),
+    ]
+    personio_adapter, _ = adapter(mock_transport, personio([page]), team_attribute="team")
+    teams = {r.external_id: r.team for r in personio_adapter.list_people()}
+    assert teams == {"1": "Operations", "2": "Research"}
+    personio_adapter, _ = adapter(mock_transport, personio([page]))
+    teams = {r.external_id: r.team for r in personio_adapter.list_people()}
+    assert teams == {"1": "Engineering", "2": "Research"}

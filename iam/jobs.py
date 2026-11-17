@@ -383,8 +383,7 @@ def run_job(job: Job) -> Job:
         conflict = record_account_step(job, result)
         if conflict:
             return fail_job(job, conflict, retryable=False)
-        if getattr(result, "initial_password", None):
-            deliver_initial_password(job, result.initial_password)
+        hand_over_sign_in(job, result)
         return fail_job(job, str(error), retryable=True)
     return succeed_job(job, result)
 
@@ -432,7 +431,6 @@ def _report_to_sentry(exc: Exception) -> None:
 
 
 def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
-    password = getattr(result, "initial_password", None)
     conflict = ""
     group_task = None
     claim = job
@@ -476,8 +474,7 @@ def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
             _settle(job, group_task)
     if conflict:
         return fail_job(claim, conflict, retryable=False)
-    if password:
-        deliver_initial_password(job, password)
+    hand_over_sign_in(job, result)
     return job
 
 
@@ -788,6 +785,30 @@ def mask_email(address: str) -> str:
     return f"{local[:1]}***@{domain}"
 
 
+def hand_over_sign_in(job: Job, result: EnsureResult | DisableResult) -> None:
+    """Get a new account's first sign-in to the person: email the initial
+    password, or ask a person to arrange what the adapter could not."""
+    if not isinstance(result, EnsureResult):
+        return
+    if result.initial_password:
+        deliver_initial_password(job, result.initial_password)
+    elif result.created and result.credentials_problem:
+        _open_credentials_task(job, result.credentials_problem)
+
+
+def _open_credentials_task(job: Job, instructions: str) -> None:
+    person = job.person
+    task = Task.objects.create(
+        kind=Task.Kind.CREDENTIALS,
+        title=f"Hand over {job.connection.name} sign-in details to {person.full_name}",
+        instructions=instructions,
+        person=person,
+        job=job,
+        connection=job.connection,
+    )
+    notify_after_commit([task])
+
+
 def deliver_initial_password(job: Job, password: str) -> None:
     person = job.person
     organization = AppSettings.load().organization_name
@@ -815,20 +836,13 @@ def deliver_initial_password(job: Job, password: str) -> None:
             target=job,
         )
         return
-    task = Task.objects.create(
-        kind=Task.Kind.CREDENTIALS,
-        title=f"Hand over {job.connection.name} sign-in details to {person.full_name}",
-        instructions=(
-            f"The app created the {job.connection.name} account but could not email the "
-            "initial password (no email connection or no personal email address). The "
-            f"password was not stored. Set a new temporary password in {job.connection.name} "
-            "and give it to the person in a safe way."
-        ),
-        person=person,
-        job=job,
-        connection=job.connection,
+    _open_credentials_task(
+        job,
+        f"The app created the {job.connection.name} account but could not email the "
+        "initial password (no email connection or no personal email address). The "
+        f"password was not stored. Set a new temporary password in {job.connection.name} "
+        "and give it to the person in a safe way.",
     )
-    notify_after_commit([task])
 
 
 def notify_after_commit(tasks: list[Task]) -> None:

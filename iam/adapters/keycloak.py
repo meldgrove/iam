@@ -447,10 +447,9 @@ class KeycloakAdapter(Adapter):
             user = self._search("username", username)
         if user is None:
             raise TransientError("Keycloak created the user but does not list it yet.")
-        account = self._remember(user)
-        account.groups = frozenset()
-        result = EnsureResult(account=account, created=True)
-        self._deliver_credentials(spec, account, result)
+        # Groups stay unread: Keycloak may have added the realm's default groups.
+        result = EnsureResult(account=self._remember(user), created=True)
+        self._deliver_credentials(spec, result.account, result)
         return result
 
     def _post_user(self, payload: dict) -> httpx.Response | None:
@@ -495,44 +494,54 @@ class KeycloakAdapter(Adapter):
     def _deliver_credentials(
         self, spec: AccountSpec, account: ExternalAccount, result: EnsureResult
     ) -> None:
-        """Arrange the first sign-in. Failures only add a note: the user exists,
-        and a retry would find it and not come back here."""
+        """Arrange the first sign-in. A failure never fails the job: the user
+        exists, and a retry would find it and not come back here. It becomes
+        `credentials_problem`, which the engine hands to a person."""
         if self.setting("send_setup_email") and spec.email:
             hours = int(self.setting("setup_email_lifespan_hours", 72) or 72)
-            response = self._send(
+            status = self._try_send(
                 "PUT",
                 self._user_path(account.external_id, "execute-actions-email"),
                 "send the setup email",
-                headers={"Authorization": f"Bearer {self._access_token()}"},
                 params={"lifespan": max(hours, 1) * 3600},
                 json=["UPDATE_PASSWORD"],
             )
-            if response.status_code < 400:
+            if 0 < status < 400:
                 result.notes.append(f"Keycloak sent the setup email to {spec.email}.")
                 return
-            result.notes.append(
-                f"Keycloak could not send the setup email ({response.status_code}). Check the "
-                "realm's email settings, then send it from the Keycloak admin console: "
+            result.credentials_problem = (
+                f"Keycloak could not send the setup email ({status or 'no answer'}). Check "
+                "the realm's email settings, then send it from the Keycloak admin console: "
                 "Users > the user > Credentials > Credential reset."
             )
+            result.notes.append(result.credentials_problem)
             return
         if self.setting("set_temporary_password"):
             password = generate_password()
-            response = self._send(
+            status = self._try_send(
                 "PUT",
                 self._user_path(account.external_id, "reset-password"),
                 "set a temporary password",
-                headers={"Authorization": f"Bearer {self._access_token()}"},
                 json={"type": "password", "value": password, "temporary": True},
             )
-            if response.status_code < 400:
+            if 0 < status < 400:
                 result.initial_password = password
                 return
-            result.notes.append(
-                f"Keycloak refused the temporary password ({response.status_code}), for "
+            result.credentials_problem = (
+                f"Keycloak did not set a temporary password ({status or 'no answer'}), for "
                 "example because of the realm's password policy. Set one in the Keycloak "
-                "admin console."
+                "admin console and give it to the person in a safe way."
             )
+            result.notes.append(result.credentials_problem)
+
+    def _try_send(self, method: str, path: str, what: str, **kwargs) -> int:
+        """The status of a call whose failure is reported, not raised; 0 when
+        Keycloak did not answer."""
+        try:
+            headers = {"Authorization": f"Bearer {self._access_token()}"}
+            return self._send(method, path, what, headers=headers, **kwargs).status_code
+        except AdapterError:
+            return 0
 
     def set_active(self, account: ExternalAccount, active: bool) -> ExternalAccount:
         what = "enable a user" if active else "disable a user"
@@ -545,14 +554,21 @@ class KeycloakAdapter(Adapter):
         user["enabled"] = active
         self._request("PUT", self._user_path(account.external_id), what, json=user)
         if not active and self.setting("logout_on_disable"):
-            self._request(
-                "POST",
-                self._user_path(account.external_id, "logout"),
-                "end the user's sessions",
-            )
+            self._logout(account.external_id)
         updated = self._remember(user)
         updated.groups = account.groups
         return updated
+
+    def _logout(self, user_id: str) -> None:
+        self._request("POST", self._user_path(user_id, "logout"), "end the user's sessions")
+
+    def disable_account(self, spec: AccountSpec, **kwargs):
+        result = super().disable_account(spec, **kwargs)
+        if result.account is not None and not result.changed and self.setting("logout_on_disable"):
+            # The user was disabled already, maybe by an earlier run whose
+            # logout failed: end the sessions again.
+            self._logout(result.account.external_id)
+        return result
 
     def account_groups(self, account: ExternalAccount) -> set[str]:
         if account.groups is not None:

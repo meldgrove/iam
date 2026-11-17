@@ -214,10 +214,19 @@ def supervisor_reference(attributes: dict) -> tuple[str, str]:
 
 
 def team_name(attributes: dict, attribute: str) -> str:
+    """The configured attribute's team name; department and team stand in
+    for each other when the configured one is empty."""
     keys = [attribute]
     if normalized_key(attribute) in {"department", "team"}:
-        keys = ["department", "team"]
-    raw = _raw(attributes, keys)
+        keys += [k for k in ("department", "team") if k != normalized_key(attribute)]
+    for key in keys:
+        name = _team_value(_raw(attributes, [key]))
+        if name:
+            return name
+    return ""
+
+
+def _team_value(raw) -> str:
     value = raw.get("value", raw) if isinstance(raw, dict) else raw
     if isinstance(value, list):
         value = value[0] if value else None

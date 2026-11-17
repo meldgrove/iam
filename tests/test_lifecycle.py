@@ -866,3 +866,29 @@ def test_job_changes_lock_the_person_first(person, fake_connection, fake_store, 
     assert first_lock(lambda: run_job(job)) == '"iam_person"'
     task = Task.objects.get(job=job, status=Task.Status.OPEN)
     assert first_lock(lambda: complete_task(task, actor=admin_user)) == '"iam_person"'
+
+
+def test_groups_marked_missing_are_left_alone(person, fake_store, groups):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    account = Account.objects.get(person=person)
+    assert fake_store.accounts[account.external_id]["groups"] == {"g-staff", "g-eng"}
+    # An import that read nothing marked every group missing.
+    for group in groups.values():
+        group.missing = True
+        group.save()
+    start_workflow(person, Workflow.Kind.ACCESS_UPDATE)
+    run_all()
+    assert fake_store.accounts[account.external_id]["groups"] == {"g-staff", "g-eng"}
+    account.refresh_from_db()
+    assert account.applied_groups == ["g-eng", "g-staff"]
+
+
+def test_sign_in_the_adapter_could_not_arrange_becomes_a_task(person, fake_store):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.credentials_problem = "The setup email was not sent. Send it by hand."
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    task = Task.objects.get(kind=Task.Kind.CREDENTIALS)
+    assert task.instructions == "The setup email was not sent. Send it by hand."

@@ -82,7 +82,8 @@ account (Google Workspace, or Keycloak with temporary passwords), the worker
 emails it once to the person's personal address through the email
 connection and forgets it. Without an email connection or personal address,
 a task asks a person to set a new temporary password and hand it over.
-Keycloak can instead send its own set-password email.
+Keycloak can instead send its own set-password email; when it cannot send it
+(or set the temporary password), a task asks a person to do that.
 
 ## Reads from connections
 
@@ -90,7 +91,9 @@ None of these change anything in a connected app.
 
 - **Group import** reads the app's groups (roles, channels, teams) into the
   catalog that profiles and teams choose from. Groups the app no longer lists
-  stay, marked missing, so the policy shows what broke.
+  stay, marked missing, so the policy shows what broke. The app neither adds
+  nor removes memberships of a missing group until an import lists it again:
+  an answer that only seems empty must not strip people of their groups.
 - **Account comparison** reads all accounts, links unlinked accounts to people
   by work email or username (only on a unique match), marks accounts it no
   longer sees as missing, and reports drift: people who should have an

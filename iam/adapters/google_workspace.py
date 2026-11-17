@@ -24,6 +24,8 @@ from .base import (
     generate_password,
 )
 
+# 403 reasons of quotas and rate limits: the request may run again later.
+RATE_LIMIT_REASONS = {"userRateLimitExceeded", "rateLimitExceeded", "quotaExceeded"}
 API_BASE = "https://admin.googleapis.com"
 DIRECTORY = "/admin/directory/v1"
 SCOPES = (
@@ -31,6 +33,15 @@ SCOPES = (
     "https://www.googleapis.com/auth/admin.directory.group",
     "https://www.googleapis.com/auth/admin.directory.group.member",
 )
+
+
+def _error_reasons(response: httpx.Response) -> set[str]:
+    """The reasons of a Google API error answer; never shown to anyone."""
+    try:
+        error = response.json().get("error")
+        return {str(e.get("reason")) for e in error.get("errors") or [] if isinstance(e, dict)}
+    except (ValueError, AttributeError, TypeError):
+        return set()
 
 
 def _lacks_admin_privileges(user: dict) -> bool:
@@ -145,6 +156,14 @@ class GoogleWorkspaceAdapter(Adapter):
             token = self._access_token()
             self._cached_client = self.http(API_BASE, headers={"Authorization": f"Bearer {token}"})
         return self._cached_client
+
+    def raise_for_status(self, response: httpx.Response, what: str) -> None:
+        if response.status_code == 403 and _error_reasons(response) & RATE_LIMIT_REASONS:
+            raise TransientError(
+                f"Google Workspace limited the request rate while trying to {what}; "
+                "it runs again later."
+            )
+        super().raise_for_status(response, what)
 
     def _request(self, method: str, path: str, what: str, *, allow: tuple[int, ...] = (), **kwargs):
         """A Directory API call. Status codes in `allow` are returned, not raised."""
@@ -284,7 +303,20 @@ class GoogleWorkspaceAdapter(Adapter):
         # Google requires a password; an undelivered one is random and unknown.
         password = generate_password() if deliver else generate_password(40)
         body["password"] = password
-        response = self._request("POST", "/users", "create a user", allow=(409,), json=body)
+        try:
+            response = self._request("POST", "/users", "create a user", allow=(409,), json=body)
+        except TransientError:
+            # The answer was lost, but Google may have created the user with
+            # this password: a retry would find it and never send one.
+            created = self.find_account(spec)
+            if created is None:
+                raise
+            return EnsureResult(
+                account=created,
+                created=True,
+                initial_password=password if deliver else None,
+                notes=["Created the Google Workspace user; Google's answer was lost."],
+            )
         if response.status_code == 409:
             existing = self.find_account(spec)
             if existing is None and self._alias_owner(email):

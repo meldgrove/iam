@@ -30,6 +30,7 @@ def fake_store(monkeypatch):
     monkeypatch.setitem(adapters._ADAPTERS, "fake", ("tests.fakes", "FakeAdapter"))
     fakes.STORE.__init__()
     fakes.FakeAdapter.password = None
+    fakes.FakeAdapter.credentials_problem = ""
     return fakes.STORE
 
 
