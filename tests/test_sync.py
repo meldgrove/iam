@@ -447,3 +447,26 @@ def test_a_comparison_locks_only_account_rows(fake_connection, fake_store, perso
         compare_accounts(fake_connection)
     locking = [q["sql"] for q in queries if "FOR UPDATE" in q["sql"]]
     assert locking and all('FOR UPDATE OF "iam_account"' in sql for sql in locking), locking
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_comparison_links_an_account_while_a_job_holds_the_person(fake_connection, person):
+    from django.db import connection, transaction
+
+    from iam.accounts import record_listing
+    from iam.adapters.base import ExternalAccount
+    from iam.jobs import _locked
+    from iam.lifecycle import start_workflow
+
+    needs_postgresql()
+    job = start_workflow(person, Workflow.Kind.ONBOARDING).jobs.get()
+    # A job holds the person, as when it records its account; the comparison
+    # links an account to that person meanwhile (a foreign-key check).
+    thread = change_meanwhile(lambda: _locked(job))
+    listed = [ExternalAccount(external_id="x1", username="ada", email="ada@example.invalid")]
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL lock_timeout = '200ms'")
+        record_listing(fake_connection, listed)
+    thread.join()
+    assert Account.objects.get(external_id="x1").person_id == person.pk

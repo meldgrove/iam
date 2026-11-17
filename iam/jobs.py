@@ -166,7 +166,7 @@ def refresh_workflow(workflow: Workflow) -> Workflow:
     jobs take turns here: two jobs that finish at once would each see the
     other still running, and the workflow would never complete. The person
     comes first, as when a workflow starts or is cancelled."""
-    Person.objects.select_for_update().get(pk=workflow.person_id)
+    Person.objects.select_for_update(no_key=True).get(pk=workflow.person_id)
     locked = Workflow.objects.select_for_update().get(pk=workflow.pk)
     workflow.status, workflow.finished_at = locked.status, locked.finished_at
     if workflow.status == Workflow.Status.CANCELLED:
@@ -191,7 +191,7 @@ def refresh_workflow(workflow: Workflow) -> Workflow:
 
 
 def _finish_person_status(workflow: Workflow) -> None:
-    person = Person.objects.select_for_update().get(pk=workflow.person_id)
+    person = Person.objects.select_for_update(no_key=True).get(pk=workflow.person_id)
     latest = (
         person.workflows.exclude(status=Workflow.Status.CANCELLED)
         .order_by("-created_at", "-pk")
@@ -249,8 +249,11 @@ def _claimed_elsewhere(job: Job, claim: Job) -> bool:
 def _locked(job: Job) -> Job:
     """The job, locked for a change. The person comes first, as when a
     workflow starts, is cancelled or works out its status: with one order
-    everywhere, two changes never wait for each other."""
-    Person.objects.select_for_update().get(pk=job.person_id)
+    everywhere, two changes never wait for each other. Person locks are
+    NO KEY UPDATE: they still take turns, but never hold up a foreign-key
+    check, such as an account comparison linking an account to the person
+    while it holds the connection's accounts."""
+    Person.objects.select_for_update(no_key=True).get(pk=job.person_id)
     return Job.objects.select_for_update().get(pk=job.pk)
 
 
@@ -568,7 +571,7 @@ def _workflow_is_current(job: Job) -> bool:
     that starting a workflow takes: a newer one either replaced this one
     already, or starts after this commits and cancels its group task if it
     plans a job at the same connection."""
-    Person.objects.select_for_update().get(pk=job.person_id)
+    Person.objects.select_for_update(no_key=True).get(pk=job.person_id)
     return (
         Workflow.objects.filter(pk=job.workflow_id)
         .exclude(status=Workflow.Status.CANCELLED)
@@ -708,7 +711,7 @@ def reject_job(job: Job, *, actor: User) -> None:
 
 def _locked_task(task: Task) -> Task:
     if task.person_id is not None:
-        Person.objects.select_for_update().get(pk=task.person_id)
+        Person.objects.select_for_update(no_key=True).get(pk=task.person_id)
     return Task.objects.select_for_update().get(pk=task.pk)
 
 

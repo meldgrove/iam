@@ -122,7 +122,7 @@ def person_edit(request, pk):
     with transaction.atomic():
         # The form saves the whole row: the lock keeps it from writing back a
         # status a workflow changed meanwhile.
-        person = get_object_or_404(Person.objects.select_for_update(), pk=pk)
+        person = get_object_or_404(Person.objects.select_for_update(no_key=True), pk=pk)
         form = PersonForm(request.POST, instance=person)
         if not form.is_valid():
             return render(request, "iam/people/form.html", {"form": form, "person": person})
