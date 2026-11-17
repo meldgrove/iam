@@ -205,3 +205,48 @@ def test_pages_need_sign_in(client):
 
 def test_dev_login_is_off_unless_enabled(client):
     assert client.get("/login/dev/").status_code == 404
+
+
+def test_providers_without_discovery_work_with_all_endpoints_set(settings, monkeypatch):
+    import requests
+
+    def down(url, timeout):
+        raise requests.ConnectionError("no discovery document")
+
+    monkeypatch.setattr(auth.requests, "get", down)
+    settings.OIDC_OP_AUTHORIZATION_ENDPOINT = f"{ISSUER}/auth"
+    settings.OIDC_OP_TOKEN_ENDPOINT = f"{ISSUER}/token"
+    settings.OIDC_OP_USER_ENDPOINT = f"{ISSUER}/userinfo"
+    settings.OIDC_OP_JWKS_ENDPOINT = f"{ISSUER}/certs"
+    assert auth.discovery()["token_endpoint"] == f"{ISSUER}/token"
+    settings.OIDC_OP_JWKS_ENDPOINT = ""
+    with pytest.raises(auth.ProviderUnavailable):
+        auth.discovery()
+
+
+def test_endpoint_settings_keep_the_sign_out_of_a_discovery_document(settings):
+    settings.OIDC_OP_AUTHORIZATION_ENDPOINT = f"{ISSUER}/auth"
+    settings.OIDC_OP_TOKEN_ENDPOINT = f"{ISSUER}/token"
+    settings.OIDC_OP_USER_ENDPOINT = f"{ISSUER}/userinfo"
+    settings.OIDC_OP_JWKS_ENDPOINT = f"{ISSUER}/certs"
+    document = auth.discovery()
+    assert document["token_endpoint"] == f"{ISSUER}/token"
+    assert document["end_session_endpoint"] == DISCOVERY["end_session_endpoint"]
+
+
+def test_role_changes_from_group_claims_are_audited(settings):
+    from iam.models import AuditEvent
+
+    settings.OIDC_ADMIN_GROUPS = ["/iam/admins"]
+    settings.OIDC_VIEWER_GROUPS = ["/iam/viewers"]
+    backend = auth.OIDCBackend()
+    user = backend.create_user(claims(groups=["/iam/viewers"]))
+    backend.update_user(user, claims(groups=["/iam/admins"]))
+    promoted = AuditEvent.objects.get(action="user.signed_in")
+    assert promoted.details["role"] == ["viewer", "admin"]
+    backend.update_user(user, claims(groups=[]))
+    turned_off = AuditEvent.objects.filter(action="user.signed_in").latest("id")
+    assert turned_off.details["is_active"] == [True, False]
+    assert "subject-1" not in str(turned_off.details)
+    backend.update_user(user, claims(groups=[]))  # signing in again changes nothing
+    assert AuditEvent.objects.filter(action="user.signed_in").count() == 2

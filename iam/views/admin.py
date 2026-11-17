@@ -212,7 +212,8 @@ def connection_add_group(request, pk):
         return redirect("connection_detail", pk=pk)
     group, created = ProviderGroup.objects.get_or_create(
         connection=connection,
-        external_id=f"manual:{name.lower()}",
+        # Lowercasing can lengthen a name; the ID must fit in 255 characters.
+        external_id=f"manual:{name.lower()[:248]}",
         defaults={"name": name, "manual": True},
     )
     if created:

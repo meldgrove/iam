@@ -45,6 +45,12 @@ def discovery() -> dict:
     """The provider's OpenID configuration, with explicit settings winning."""
     if not settings.OIDC_ISSUER:
         raise ImproperlyConfigured("Set OIDC_ISSUER, or KEYCLOAK_URL and KEYCLOAK_REALM.")
+    overrides = {
+        "authorization_endpoint": settings.OIDC_OP_AUTHORIZATION_ENDPOINT,
+        "token_endpoint": settings.OIDC_OP_TOKEN_ENDPOINT,
+        "userinfo_endpoint": settings.OIDC_OP_USER_ENDPOINT,
+        "jwks_uri": settings.OIDC_OP_JWKS_ENDPOINT,
+    }
     key = f"oidc-discovery:{settings.OIDC_ISSUER}"
     document = cache.get(key)
     if document is None:
@@ -54,16 +60,14 @@ def discovery() -> dict:
             response.raise_for_status()
             document = response.json()
         except (requests.RequestException, ValueError) as exc:
+            if all(overrides.values()):
+                # A provider without a discovery document: the settings name
+                # every endpoint sign-in needs (sign-out stays local).
+                return {"issuer": settings.OIDC_ISSUER, **overrides}
             raise ProviderUnavailable(f"Could not read {url}") from exc
         if document.get("issuer", "").rstrip("/") != settings.OIDC_ISSUER:
             raise ProviderUnavailable("The discovery document names a different issuer.")
         cache.set(key, document, DISCOVERY_CACHE_SECONDS)
-    overrides = {
-        "authorization_endpoint": settings.OIDC_OP_AUTHORIZATION_ENDPOINT,
-        "token_endpoint": settings.OIDC_OP_TOKEN_ENDPOINT,
-        "userinfo_endpoint": settings.OIDC_OP_USER_ENDPOINT,
-        "jwks_uri": settings.OIDC_OP_JWKS_ENDPOINT,
-    }
     return {**document, **{k: v for k, v in overrides.items() if v}}
 
 
@@ -225,6 +229,7 @@ class OIDCBackend(OIDCAuthenticationBackend):
 
     def update_user(self, user, claims):
         changed = []
+        before = {"role": user.role, "is_active": user.is_active}
         if user.oidc_subject != claims["sub"]:
             user.oidc_subject = claims["sub"]
             changed.append("oidc_subject")
@@ -235,14 +240,33 @@ class OIDCBackend(OIDCAuthenticationBackend):
         if group_roles_configured() and user.role_source == User.RoleSource.PROVIDER:
             role = role_from_groups(claims)
             if role is None:
-                user.is_active = False
-                changed.append("is_active")
+                if user.is_active:
+                    user.is_active = False
+                    changed.append("is_active")
             elif role != user.role:
                 user.role = role
                 changed.append("role")
         if changed:
             user.save(update_fields=changed)
+            self._audit_update(user, changed, before)
         return user
+
+    @staticmethod
+    def _audit_update(user, changed: list[str], before: dict) -> None:
+        details = {"fields": sorted(changed)}
+        for name in ("role", "is_active"):
+            if name in changed:
+                details[name] = [before[name], getattr(user, name)]
+        if "is_active" in changed:
+            summary = f"Turned off app user {user.email}: no group claim grants a role"
+        elif "role" in changed:
+            summary = (
+                f"Changed the role of app user {user.email} to "
+                f"{user.get_role_display().lower()} from a group claim"
+            )
+        else:
+            summary = f"Updated app user {user.email} at sign-in"
+        audit.record("user.signed_in", summary, actor=user, target=user, details=details)
 
     @staticmethod
     def _name(claims) -> str:
