@@ -239,8 +239,9 @@ class OIDCBackend(OIDCAuthenticationBackend):
         if group_roles_configured() and user.role_source == User.RoleSource.PROVIDER:
             role = role_from_groups(claims)
             if role is None:
-                user.is_active = False
-                changed.append("is_active")
+                if user.is_active:
+                    user.is_active = False
+                    changed.append("is_active")
             elif role != user.role:
                 user.role = role
                 changed.append("role")

@@ -238,3 +238,5 @@ def test_role_changes_from_group_claims_are_audited(settings):
     turned_off = AuditEvent.objects.filter(action="user.signed_in").latest("id")
     assert turned_off.details["is_active"] == [True, False]
     assert "subject-1" not in str(turned_off.details)
+    backend.update_user(user, claims(groups=[]))  # signing in again changes nothing
+    assert AuditEvent.objects.filter(action="user.signed_in").count() == 2

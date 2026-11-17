@@ -206,14 +206,14 @@ def _report_run(request, run):
 def connection_add_group(request, pk):
     connection = get_object_or_404(Connection, pk=pk)
     cls = connection.adapter_class
-    # The external ID adds "manual:" and must fit in 255 characters.
-    name = request.POST.get("name", "").strip()[:248]
+    name = request.POST.get("name", "").strip()[:255]
     if not cls or not cls.manual_groups or not name:
         messages.error(request, "Enter a name.")
         return redirect("connection_detail", pk=pk)
     group, created = ProviderGroup.objects.get_or_create(
         connection=connection,
-        external_id=f"manual:{name.lower()}",
+        # Lowercasing can lengthen a name; the ID must fit in 255 characters.
+        external_id=f"manual:{name.lower()[:248]}",
         defaults={"name": name, "manual": True},
     )
     if created:

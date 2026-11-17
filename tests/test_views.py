@@ -499,5 +499,9 @@ def test_a_long_manual_group_name_fits_its_external_id(client_for, admin_user):
     client_for(admin_user).post(
         reverse("connection_add_group", args=[connection.pk]), {"name": "x" * 300}
     )
-    group = connection.groups.get()
-    assert len(group.external_id) <= 255 and group.name == "x" * 248
+    client_for(admin_user).post(
+        reverse("connection_add_group", args=[connection.pk]), {"name": "İ" * 300}
+    )
+    assert all(len(g.external_id) <= 255 for g in connection.groups.all())
+    group = connection.groups.get(name__startswith="x")
+    assert len(group.external_id) <= 255 and group.name == "x" * 255
