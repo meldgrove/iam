@@ -62,3 +62,21 @@ def test_set_variables_win_over_the_defaults():
     assert settings["SENTRY_RELEASE"] == "custom"
     assert settings["SENTRY_ENVIRONMENT"] == "staging-eu"
     assert settings["OIDC_PROVIDER_NAME"] == "Staff login"
+
+
+def test_sentry_gets_no_local_variables_or_request_bodies():
+    # Both hold decrypted connection secrets and initial passwords.
+    code = (
+        "import json, config.settings, sentry_sdk; o = sentry_sdk.get_client().options;"
+        " print(json.dumps([o['send_default_pii'], o['include_local_variables'],"
+        " o['max_request_body_size']]))"
+    )
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        **PRODUCTION,
+        "SENTRY_DSN": "https://public@sentry.example.invalid/1",
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [False, False, "never"]

@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 
 from .adapters.base import Field
+from .crypto import SecretUnreadable
 from .models import AccessProfile, AppSettings, Connection, Person, Team, User
 
 
@@ -151,11 +152,23 @@ class ConnectionForm(forms.Form):
         super().__init__(*args, initial=initial, **kwargs)
         if not adapter_class.supports_write or adapter_class.kind != "provisioning":
             del self.fields["mode"]
-        saved = set(instance.secrets()) if instance is not None and instance.secret_data else set()
+        self.saved_secrets = self._read_saved_secrets()
+        saved = set(self.saved_secrets)
         for spec in adapter_class.fields:
             self.fields[f"cfg_{spec.name}"] = self._build(spec, spec.name in saved)
             if spec.name in initial and not spec.secret:
                 self.initial[f"cfg_{spec.name}"] = initial[spec.name]
+
+    def _read_saved_secrets(self) -> dict:
+        """The saved secrets. Secrets no configured key can read count as
+        not saved, so the admin enters them again instead of getting an error
+        page whose report would carry the new values."""
+        if self.instance is None or not self.instance.secret_data:
+            return {}
+        try:
+            return self.instance.secrets()
+        except SecretUnreadable:
+            return {}
 
     @staticmethod
     def _build(spec: Field, saved: bool) -> forms.Field:
@@ -212,7 +225,7 @@ class ConnectionForm(forms.Form):
             if self.adapter_class.supports_write
             else Connection.Mode.MANUAL
         )
-        values, secrets = {}, connection.secrets() if connection.secret_data else {}
+        values, secrets = {}, dict(self.saved_secrets)
         for spec in self.adapter_class.fields:
             value = self.cleaned_data.get(f"cfg_{spec.name}")
             if spec.secret:

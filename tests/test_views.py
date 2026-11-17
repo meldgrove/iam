@@ -249,6 +249,22 @@ def test_connection_secrets_are_write_only(client_for, admin_user):
     assert "realm" in changed and "client_secret" not in changed
 
 
+def test_unreadable_secrets_can_be_entered_again(client_for, admin_user, fake_connection, settings):
+    # A lost ENCRYPTION_KEY must not turn the edit form into an error page.
+    from cryptography.fernet import Fernet
+
+    settings.ENCRYPTION_KEYS = [Fernet.generate_key().decode()]
+    client = client_for(admin_user)
+    url = reverse("connection_edit", args=[fake_connection.pk])
+    assert client.get(url).status_code == 200
+    data = {"name": "Fake app", "mode": "automatic", "cfg_sync_interval_minutes": "0"}
+    response = client.post(url, {**data, "cfg_token": ""})
+    assert response.status_code == 200 and b"This field is required" in response.content
+    assert client.post(url, {**data, "cfg_token": "new-token"}).status_code == 302
+    fake_connection.refresh_from_db()
+    assert fake_connection.secrets() == {"token": "new-token"}
+
+
 def test_connection_test_records_the_status(client_for, admin_user, fake_connection, fake_store):
     client = client_for(admin_user)
     client.post(reverse("connection_test", args=[fake_connection.pk]))
