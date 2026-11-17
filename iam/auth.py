@@ -51,9 +51,6 @@ def discovery() -> dict:
         "userinfo_endpoint": settings.OIDC_OP_USER_ENDPOINT,
         "jwks_uri": settings.OIDC_OP_JWKS_ENDPOINT,
     }
-    if all(overrides.values()):
-        # Every endpoint is set: a provider without a discovery document.
-        return {"issuer": settings.OIDC_ISSUER, **overrides}
     key = f"oidc-discovery:{settings.OIDC_ISSUER}"
     document = cache.get(key)
     if document is None:
@@ -63,6 +60,10 @@ def discovery() -> dict:
             response.raise_for_status()
             document = response.json()
         except (requests.RequestException, ValueError) as exc:
+            if all(overrides.values()):
+                # A provider without a discovery document: the settings name
+                # every endpoint sign-in needs (sign-out stays local).
+                return {"issuer": settings.OIDC_ISSUER, **overrides}
             raise ProviderUnavailable(f"Could not read {url}") from exc
         if document.get("issuer", "").rstrip("/") != settings.OIDC_ISSUER:
             raise ProviderUnavailable("The discovery document names a different issuer.")

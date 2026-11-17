@@ -224,6 +224,16 @@ def test_providers_without_discovery_work_with_all_endpoints_set(settings, monke
         auth.discovery()
 
 
+def test_endpoint_settings_keep_the_sign_out_of_a_discovery_document(settings):
+    settings.OIDC_OP_AUTHORIZATION_ENDPOINT = f"{ISSUER}/auth"
+    settings.OIDC_OP_TOKEN_ENDPOINT = f"{ISSUER}/token"
+    settings.OIDC_OP_USER_ENDPOINT = f"{ISSUER}/userinfo"
+    settings.OIDC_OP_JWKS_ENDPOINT = f"{ISSUER}/certs"
+    document = auth.discovery()
+    assert document["token_endpoint"] == f"{ISSUER}/token"
+    assert document["end_session_endpoint"] == DISCOVERY["end_session_endpoint"]
+
+
 def test_role_changes_from_group_claims_are_audited(settings):
     from iam.models import AuditEvent
 
