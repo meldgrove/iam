@@ -80,3 +80,27 @@ def test_sentry_gets_no_local_variables_or_request_bodies():
         [sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True, check=True
     )
     assert json.loads(result.stdout) == [False, False, "never"]
+
+
+def load_database(url: str) -> dict:
+    code = "import json, config.settings as s; print(json.dumps(s.DATABASES['default']))"
+    env = {"PATH": os.environ.get("PATH", ""), **PRODUCTION, "DATABASE_URL": url}
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True, check=True
+    )
+    return json.loads(result.stdout)
+
+
+def test_database_connections_survive_restarts_and_failovers():
+    database = load_database("postgresql://iam:secret@db.example.invalid/iam?connect_timeout=3")
+    assert database["CONN_HEALTH_CHECKS"] is True
+    # A value in the URL wins; the others bound how long a dead server can hold a request.
+    assert database["OPTIONS"] == {
+        "connect_timeout": 3,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+    }
+    # SQLite knows none of these options.
+    assert "OPTIONS" not in load_database("sqlite:////tmp/iam-settings-test.sqlite3")
