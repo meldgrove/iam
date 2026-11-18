@@ -117,7 +117,10 @@ own client (docs/authentication.md).
 2. Under the client's **Service account roles**, assign these roles of the
    `realm-management` client: view-users, query-users, manage-users,
    query-groups and view-realm.
-3. For the setup email: configure the realm's email settings.
+3. Keycloak 26.8.2 and later: under the client's **Client scopes**, add
+   `kc-admin-api` as a **Default** scope. The Admin REST API refuses tokens
+   without the audience it adds (401).
+4. For the setup email: configure the realm's email settings.
 
 | Field | Required | Meaning |
 | --- | --- | --- |

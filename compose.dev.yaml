@@ -23,7 +23,7 @@ services:
       retries: 20
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.6.1
+    image: quay.io/keycloak/keycloak:26.8.2-2
     command: ["start-dev", "--import-realm", "--http-port=8098"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -40,7 +40,7 @@ services:
       retries: 60
 
   mailpit:
-    image: axllent/mailpit:v1.27
+    image: axllent/mailpit:v1.33
     ports:
       - "127.0.0.1:${DEV_SMTP_PORT:-1027}:1025"
       - "127.0.0.1:${DEV_MAILPIT_PORT:-8027}:8025"

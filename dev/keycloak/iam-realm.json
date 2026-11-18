@@ -66,7 +66,8 @@
       "secret": "iam-dev-provisioner-secret",
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": true
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic", "email", "kc-admin-api"]
     }
   ],
   "users": [

@@ -3,7 +3,9 @@
 The connection signs in as a confidential client with a service account
 (client credentials grant). Give that service account these roles of the
 realm's `realm-management` client: view-users, query-users, manage-users,
-query-groups and view-realm.
+query-groups and view-realm. Since Keycloak 26.8.2 the client also needs the
+default client scope kc-admin-api: the Admin REST API refuses tokens without
+the audience it adds.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from .base import (
 
 PAGE_SIZE = 100
 REQUIRED_ROLES = "view-users, query-users, manage-users, query-groups and view-realm"
+ADMIN_SCOPE = "kc-admin-api"
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
@@ -80,8 +83,9 @@ class KeycloakAdapter(Adapter):
             "Client ID",
             required=True,
             help=(
-                "A confidential client with service accounts on. Its service account needs "
-                f"the realm-management roles {REQUIRED_ROLES}."
+                "A confidential client with service accounts on and, since Keycloak 26.8.2, "
+                f"the default client scope {ADMIN_SCOPE}. Its service account needs the "
+                f"realm-management roles {REQUIRED_ROLES}."
             ),
         ),
         Field("client_secret", "Client secret", kind="secret", required=True),
@@ -250,6 +254,12 @@ class KeycloakAdapter(Adapter):
             break
         if response.status_code == 404 and missing_ok:
             return None
+        if response.status_code == 401:
+            # Keycloak issued the token but the Admin REST API refuses it.
+            raise ConfigurationError(
+                f"Keycloak refused the access token (401) while trying to {what}. Since "
+                f"Keycloak 26.8.2 the client needs the default client scope {ADMIN_SCOPE}."
+            )
         if response.status_code == 403:
             raise ConfigurationError(
                 f"Keycloak refused access (403) while trying to {what}. Give the client's "

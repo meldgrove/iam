@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Meldgrove IAM: a Django 5.2 app (Python 3.13, PostgreSQL) that manages people,
+Meldgrove IAM: a Django 6.1 app (Python 3.13, PostgreSQL) that manages people,
 access profiles, teams and their accounts in connected apps. One image, three
 processes: `migrate`, `web` (gunicorn) and `worker` (`manage.py run_worker`).
 

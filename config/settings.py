@@ -76,12 +76,13 @@ TEMPLATES = [
     }
 ]
 
-DATABASES = {
-    "default": dj_database_url.parse(
-        env("DATABASE_URL", f"sqlite:///{BASE_DIR / 'var/development.sqlite3'}"),
-        conn_max_age=60,
-    )
-}
+DATABASE_URL = env("DATABASE_URL")
+if not DATABASE_URL:
+    # Since Django 6.1 every command's system checks open the database, and a
+    # fresh checkout (or the test image) has no var/ for the SQLite file.
+    (BASE_DIR / "var").mkdir(exist_ok=True)
+    DATABASE_URL = f"sqlite:///{BASE_DIR / 'var/development.sqlite3'}"
+DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=60)}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "iam.User"
 
