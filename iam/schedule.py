@@ -14,7 +14,7 @@ from .adapters import AdapterKind
 from .jobs import settle_finished_workflows
 from .lifecycle import LifecycleError, start_workflow
 from .models import AppSettings, Connection, Person, SyncRun, User, Workflow
-from .sync import can_compare_accounts, compare_accounts, import_people
+from .sync import can_compare_accounts, compare_accounts, import_people, recover_stopped_reads
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +109,12 @@ def _sync_due_at(connection: Connection, kind: str) -> datetime | None:
     if connection.last_sync_at is None:
         return None
     interval = connection.sync_interval_minutes
+    # Enough runs for the pause after failures to reach the interval.
+    history = max(interval // SYNC_RETRY_MINUTES, 1).bit_length() + 1
     failures = 0
     for status in (
         connection.sync_runs.filter(kind=kind)
-        .order_by("-started_at", "-pk")[:6]
+        .order_by("-started_at", "-pk")[:history]
         .values_list("status", flat=True)
     ):
         if status != SyncRun.Status.FAILED:
@@ -145,6 +147,7 @@ def run_due_sync() -> SyncRun | None:
     with exclusive(SYNC_LOCK_ID) as acquired:
         if not acquired:
             return None
+        recover_stopped_reads()
         due = due_syncs()
         if not due:
             return None

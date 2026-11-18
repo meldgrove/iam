@@ -55,6 +55,15 @@ def test_a_read_waits_as_long_as_the_server_asks(mock_transport, pauses, header)
     assert len(pauses) == 1 and 6 <= pauses[0] <= 8
 
 
+@pytest.mark.parametrize("header", ["NaN", "-5", "soon", "1.5"])
+def test_a_malformed_retry_after_gets_the_usual_pause(mock_transport, pauses, header):
+    transport = mock_transport(
+        answers(httpx.Response(503, headers={"Retry-After": header}), httpx.Response(200))
+    )
+    assert client(transport).get(URL).status_code == 200
+    assert pauses == [1.0]
+
+
 def test_a_long_retry_after_is_left_to_the_job(mock_transport, pauses):
     transport = mock_transport(lambda request: httpx.Response(429, headers={"Retry-After": "120"}))
     assert client(transport).get(URL).status_code == 429

@@ -46,17 +46,19 @@ def watch(stall_seconds: float, *, alive_file: Path = ALIVE_FILE, stop=os._exit)
     returns whether it is alive."""
     stalled = seconds_without_progress()
     if stalled > stall_seconds:
-        logger.critical(
-            "The worker made no progress for %d seconds and stops, so that it is restarted. "
-            "Where each thread was:",
-            stalled,
-        )
-        faulthandler.dump_traceback(all_threads=True)
-        if settings.SENTRY_DSN:
-            import sentry_sdk
+        try:
+            logger.critical(
+                "The worker made no progress for %d seconds and stops, so that it is "
+                "restarted. Where each thread was:",
+                stalled,
+            )
+            faulthandler.dump_traceback(all_threads=True)
+            if settings.SENTRY_DSN:
+                import sentry_sdk
 
-            sentry_sdk.flush(timeout=5)
-        stop(1)
+                sentry_sdk.flush(timeout=5)
+        finally:
+            stop(1)
         return False
     try:
         alive_file.touch()

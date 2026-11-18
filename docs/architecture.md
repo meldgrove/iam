@@ -166,8 +166,9 @@ Once a minute the worker:
 3. completes open workflows whose jobs are all done;
 4. after the queued jobs, runs the one people import or account comparison
    that is most overdue. A slow connection holds up the jobs for one read,
-   and the jobs queued meanwhile run next. A read that failed comes again
-   after 15 minutes, then 30, 60 and so on, never later than its interval.
+   and the jobs queued meanwhile run next. A read that failed, or whose
+   worker stopped during it, comes again after 15 minutes, then 30, 60 and
+   so on, never later than its interval.
 
 Both automatic starts can be turned off in Admin › Settings. With several
 workers, one at a time runs the schedule and one at a time reads from

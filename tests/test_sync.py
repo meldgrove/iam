@@ -283,6 +283,46 @@ def test_a_failed_read_comes_again_sooner_than_its_interval(fake_connection, fak
     assert run_due_sync() is None
 
 
+def test_a_long_interval_is_reached_after_enough_failures(fake_connection, fake_store):
+    fake_connection.settings = {"sync_interval_minutes": 1440}
+    fake_connection.save()
+    start = timezone.now() - timedelta(days=3)
+    for n in range(8):
+        SyncRun.objects.create(
+            connection=fake_connection,
+            kind=SyncRun.Kind.ACCOUNTS,
+            status=SyncRun.Status.FAILED,
+            started_at=start + timedelta(minutes=n),
+        )
+    Connection.objects.filter(pk=fake_connection.pk).update(
+        last_sync_at=timezone.now() - timedelta(minutes=1000)
+    )
+    assert run_due_sync() is None, "a daily read that keeps failing runs once a day"
+
+
+def test_a_read_that_stopped_its_worker_waits_its_turn(
+    fake_connection, fake_store, hr_connection, admin_user
+):
+    fake_connection.settings = {"sync_interval_minutes": 60}
+    fake_connection.save()
+    long_ago = timezone.now() - timedelta(hours=5)
+    Connection.objects.filter(pk=fake_connection.pk).update(last_sync_at=long_ago)
+    Connection.objects.filter(pk=hr_connection.pk).update(
+        last_sync_at=timezone.now() - timedelta(minutes=90)
+    )
+    # The worker died during the comparison, e.g. ended by its watchdog.
+    stopped = SyncRun.objects.create(connection=fake_connection, kind=SyncRun.Kind.ACCOUNTS)
+    by_admin = SyncRun.objects.create(
+        connection=hr_connection, kind=SyncRun.Kind.PEOPLE, triggered_by=admin_user
+    )
+    assert run_due_sync().connection == hr_connection
+    stopped.refresh_from_db()
+    assert stopped.status == SyncRun.Status.FAILED and stopped.finished_at is not None
+    assert run_due_sync() is None, "the stopped read pauses as after any failure"
+    by_admin.refresh_from_db()
+    assert by_admin.status == SyncRun.Status.RUNNING, "a read a person started is left alone"
+
+
 def test_one_read_per_round_the_most_overdue_first(fake_connection, fake_store, hr_connection):
     fake_connection.settings = {"sync_interval_minutes": 60}
     fake_connection.save()

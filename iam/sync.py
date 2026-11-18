@@ -55,6 +55,32 @@ def _run(connection: Connection, kind: str, actor, body) -> SyncRun:
     return run
 
 
+def recover_stopped_reads() -> int:
+    """Close scheduled reads whose worker stopped midway (a crash, the
+    watchdog) as failed, and start their connection's pause after a failure
+    now: a read that keeps stopping its worker then waits its turn instead
+    of coming first again and holding up every other read. Only call it
+    while holding the read lock (iam.schedule.run_due_sync), when no
+    scheduled read runs."""
+    now = timezone.now()
+    stopped = SyncRun.objects.filter(status=SyncRun.Status.RUNNING, triggered_by=None)
+    count = 0
+    for run in stopped.select_related("connection"):
+        run.status = SyncRun.Status.FAILED
+        run.error = "The worker stopped during this read."
+        run.finished_at = now
+        run.save(update_fields=["status", "error", "finished_at"])
+        Connection.objects.filter(pk=run.connection_id).update(last_sync_at=now)
+        audit.record(
+            f"sync.{run.kind}",
+            f"{run.get_kind_display()} from {run.connection.name}: failed",
+            target=run,
+            details={"error": run.error},
+        )
+        count += 1
+    return count
+
+
 # -- groups ------------------------------------------------------------------------
 
 
