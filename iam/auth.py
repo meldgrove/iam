@@ -166,31 +166,35 @@ class OIDCBackend(OIDCAuthenticationBackend):
     def _verify_jws(self, payload, key):
         """The library's signature check, but PyJWT allows the clock
         difference: without it a token from a provider whose clock runs a
-        second ahead is "not yet valid", and every refusal is a server error."""
-        try:
-            alg = jwt.get_unverified_header(payload).get("alg")
-            if alg != self.OIDC_RP_SIGN_ALGO:
-                raise SuspiciousOperation("ID token signed with an unexpected algorithm")
-            return jwt.decode(
-                payload,
-                key,
-                algorithms=[alg],
-                leeway=CLOCK_SKEW_SECONDS,
-                # verify_token checks the audience.
-                options={"verify_aud": False},
-            )
-        except jwt.InvalidTokenError as exc:
-            raise SuspiciousOperation("ID token verification failed") from exc
+        second ahead is "not yet valid"."""
+        alg = jwt.get_unverified_header(payload).get("alg")
+        if alg != self.OIDC_RP_SIGN_ALGO:
+            raise SuspiciousOperation("ID token signed with an unexpected algorithm")
+        return jwt.decode(
+            payload,
+            # A JWK without "alg" counts as RS256 in PyJWT; the check above
+            # already pins the algorithm, so verify with the bare key.
+            key.key if isinstance(key, jwt.PyJWK) else key,
+            algorithms=[alg],
+            leeway=CLOCK_SKEW_SECONDS,
+            # verify_token checks the audience.
+            options={"verify_aud": False},
+        )
 
     def verify_token(self, token, **kwargs):
-        payload = super().verify_token(token, **kwargs)
+        try:
+            payload = super().verify_token(token, **kwargs)
+        except jwt.InvalidTokenError as exc:
+            # PyJWT's own errors would be a server error on the callback.
+            raise SuspiciousOperation("ID token verification failed") from exc
         if payload.get("iss", "").rstrip("/") != settings.OIDC_ISSUER:
             raise SuspiciousOperation("ID token from an unexpected issuer")
         audience = payload.get("aud")
         audiences = audience if isinstance(audience, list) else [audience]
         if settings.OIDC_RP_CLIENT_ID not in audiences:
             raise SuspiciousOperation("ID token for another client")
-        # Security: the library does not check the expiry (OpenID Connect Core 3.1.3.7).
+        # Security: PyJWT checks the expiry only when the token has one
+        # (OpenID Connect Core 3.1.3.7 requires it).
         expires = payload.get("exp")
         if isinstance(expires, bool) or not isinstance(expires, int | float):
             raise SuspiciousOperation("ID token without an expiry")

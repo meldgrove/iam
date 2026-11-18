@@ -164,16 +164,17 @@ def test_signed_id_tokens_allow_the_clock_difference(monkeypatch):
 
     def fake_get(url, **kwargs):
         if url == DISCOVERY["jwks_uri"]:
-            return FakeResponse({"keys": [{**jwk, "kid": "k1", "alg": "RS256"}]})
+            # No "alg": it is optional in a JWKS, and PyJWT then assumes RS256.
+            return FakeResponse({"keys": [{**jwk, "kid": "k1"}]})
         return FakeResponse(DISCOVERY)
 
     monkeypatch.setattr(auth.requests, "get", fake_get)
 
-    def token(signing_key=key, **extra):
+    def token(signing_key=key, algorithm="RS256", **extra):
         now = int(time.time())
         claims = {"iss": ISSUER, "aud": "iam", "sub": "x", "nonce": "n", "iat": now}
         claims = {**claims, "exp": now + 300, **extra}
-        return jwt.encode(claims, signing_key, algorithm="RS256", headers={"kid": "k1"})
+        return jwt.encode(claims, signing_key, algorithm=algorithm, headers={"kid": "k1"})
 
     backend = auth.OIDCBackend()
     ahead = int(time.time()) + 30
@@ -184,9 +185,13 @@ def test_signed_id_tokens_allow_the_clock_difference(monkeypatch):
         token(exp=int(time.time()) - 3600),
         token(iat=int(time.time()) + 3600),
         token(signing_key=other_key),
+        token(algorithm="RS512"),
+        "",
     ):
         with pytest.raises(SuspiciousOperation):
             backend.verify_token(refused, nonce="n")
+    backend.OIDC_RP_SIGN_ALGO = "RS512"
+    assert backend.verify_token(token(algorithm="RS512"), nonce="n")
 
 
 def test_user_info_must_be_about_the_subject_of_the_id_token(monkeypatch):
