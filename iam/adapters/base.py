@@ -91,6 +91,10 @@ class ConfigurationError(AdapterError):
     """The connection's settings or credentials are wrong or incomplete."""
 
 
+class ReadOnlyError(AdapterError):
+    """Read-only mode stopped a change to a connected app, or an email."""
+
+
 @dataclass
 class ExternalAccount:
     external_id: str
@@ -405,3 +409,47 @@ class Adapter:
 
     def send(self, *, to: list[str], subject: str, body: str, reply_to: str = "") -> None:
         raise NotImplementedError
+
+
+class ReadOnlyAdapter:
+    """An adapter that can only read. In read-only mode (READ_ONLY=1),
+    Connection.build_adapter hands this out instead of the adapter itself.
+    Everything not named in READS, such as creating an account, changing
+    groups or sending email, raises ReadOnlyError before it reaches the
+    connected app. An operation added later stays blocked until it is
+    listed here as a read."""
+
+    READS = frozenset(
+        {
+            # What the adapter is.
+            "name",
+            "slug",
+            "kind",
+            "group_label",
+            "supports_groups",
+            "supports_account_listing",
+            "remove_groups_on_disable",
+            # Reads. Some sign in first (an access token); none changes anything.
+            "test_connection",
+            "list_groups",
+            "list_accounts",
+            "can_read_accounts",
+            "find_account",
+            "account_groups",
+            "list_people",
+            "skipped",
+            "manual_instructions",
+        }
+    )
+
+    def __init__(self, adapter: Adapter):
+        self._adapter = adapter
+
+    def __getattr__(self, name: str):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if name in self.READS:
+            return getattr(self._adapter, name)
+        raise ReadOnlyError(
+            f"Read-only mode: {self._adapter.name} was not changed ({name.replace('_', ' ')})."
+        )

@@ -5,7 +5,7 @@
   <tbody>
   {% for job in jobs %}
   <tr>
-    <td><a href="{% url 'job_detail' job.pk %}">{{ job.get_action_display }}</a>{% if job.last_error and job.status != 'succeeded' %}<div class="small muted">{{ job.last_error|truncatechars:140 }}</div>{% endif %}</td>
+    <td><a href="{% url 'job_detail' job.pk %}">{{ job.get_action_display }}</a>{% if job.last_error and job.status != 'succeeded' and job.status != 'rehearsed' %}<div class="small muted">{{ job.last_error|truncatechars:140 }}</div>{% endif %}{% if job.status == 'rehearsed' %}<div class="small muted">Would {{ job.result.would }}{% if job.result.groups_to_add and job.result.groups_to_add != 'none' %} · add to {{ job.result.groups_to_add }}{% endif %}{% if job.result.groups_to_remove and job.result.groups_to_remove != 'none' %} · remove from {{ job.result.groups_to_remove }}{% endif %}</div>{% endif %}</td>
     {% if show_person %}<td><a href="{% url 'person_detail' job.person_id %}">{{ job.person }}</a></td>{% endif %}
     <td>{{ job.connection }}</td>
     <td>{% badge job.status job.get_status_display %}</td>

@@ -20,6 +20,9 @@ them should have, and the onboarding and offboarding that follow from it.
   automatic removals beyond a daily limit wait for an admin, offboarding
   never skips an app silently, account comparisons report drift without
   changing anything, and every change lands in the audit log.
+- **Read-only mode** (`READ_ONLY=1`) for trying the app with real data: it
+  reads every connected app but changes nothing in them and sends no email,
+  and each job reports what it would have changed.
 - **Sign-in** with any OpenID Connect provider or Keycloak. The app's own users
   and roles (viewer, approver, admin) decide what someone may do; roles can
   also come from the provider's group claim.

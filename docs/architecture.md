@@ -91,6 +91,33 @@ would create it again. Keycloak can instead send its own set-password email;
 when it cannot send it (or set the temporary password), a task asks a person
 to do that.
 
+## Read-only mode
+
+With `READ_ONLY=1` ([configuration.md](configuration.md)) the app can be
+tried with real connected apps and real people without changing anything
+in those apps:
+
+- **Adapters can only read.** `Connection.build_adapter` hands out a
+  wrapper that lets through only reads (tests, listings, finding an account
+  and its groups) and refuses everything else, including operations added
+  later, before it reaches the app.
+- **No email** leaves the app: no initial passwords, no task notifications.
+- **Jobs are rehearsed.** The worker finds the account and its groups as
+  the job would, checks that the account is the person's, and records what
+  it would change (create, reactivate or disable the account; the groups
+  to add and remove). At connections without automation it records the
+  steps a person would get, without a task. The job ends as "Checked only
+  (read-only mode)". A read that fails is a failed job, as always.
+- **Workflows complete** once their jobs are rehearsed, so people become
+  active or offboarded in this app. The schedule, imports and account
+  comparisons run as usual.
+
+Turning the mode off replays nothing: an access update applies a person's
+access for real. Jobs still queued then run for real, and so do held or
+failed jobs that someone approves or retries. Every page after sign-in shows
+a banner while the mode is on, and the detailed `/-/readyz` answer reports
+it.
+
 ## Reads from connections
 
 None of these change anything in a connected app.

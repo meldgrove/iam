@@ -40,6 +40,12 @@ explains how the pieces work together.
   job, groups a job could not update, or sign-in details to hand over.
 - **Held removal**: an automatic removal over the daily removal limit; it
   waits for an admin's approval.
+- **Read-only mode**: a deployment setting (`READ_ONLY=1`). The app reads
+  connected apps, changes nothing in them, sends no email and rehearses
+  every job. Not the same as a read-only connection, whose changes become
+  manual tasks.
+- **Rehearsal**: a job run in read-only mode. It reads the account and its
+  groups and records what the job would change, without changing it.
 - **Sync run**: a read from a connection: group import, account comparison
   or people import. Never changes the connected app.
 - **Drift**: differences an account comparison finds between desired access

@@ -17,6 +17,10 @@ the account is created, reactivated or disabled, a group step that keeps
 failing becomes a task while the job succeeds. Nothing here stores
 passwords: a new account's initial password is emailed once to the personal
 address and forgotten.
+
+In read-only mode (READ_ONLY=1) the worker rehearses every job instead: it
+reads what the job would change, records that in the result, changes
+nothing and hands nothing to a person, and no email leaves the app.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ from .adapters.base import (
     AdapterError,
     DisableResult,
     EnsureResult,
+    ExternalAccount,
 )
 from .crypto import SecretUnreadable
 from .models import (
@@ -100,10 +105,13 @@ def start_jobs(workflow: Workflow, jobs: list[Job], *, actor: User | None = None
     Returns the cancelled group tasks. The caller refreshes the workflow once
     it has recorded the start."""
     cancelled = _cancel_replaced_group_tasks(workflow.person_id, jobs, actor)
+    # In read-only mode the worker rehearses these jobs like all others.
     tasks = [
         _hand_to_person(job)
         for job in jobs
-        if job.status == Job.Status.QUEUED and not job.connection.writes_automatically
+        if job.status == Job.Status.QUEUED
+        and not job.connection.writes_automatically
+        and not settings.READ_ONLY
     ]
     notify_after_commit(tasks)
     return cancelled
@@ -136,7 +144,7 @@ def stop_workflow(workflow: Workflow, *, actor: User | None = None, note: str) -
     keeps the worker from claiming a job meanwhile; it covers only the job
     rows, not the connections the ordering joins."""
     unfinished = workflow.jobs.select_for_update(of=("self",)).exclude(
-        status__in=[Job.Status.SUCCEEDED, Job.Status.CANCELLED, Job.Status.RUNNING]
+        status__in=[*Job.FINISHED_STATUSES, Job.Status.RUNNING]
     )
     for job in unfinished:
         cancel_job(job, actor=actor, note=note)
@@ -172,7 +180,7 @@ def refresh_workflow(workflow: Workflow) -> Workflow:
     if workflow.status == Workflow.Status.CANCELLED:
         return workflow
     statuses = set(workflow.jobs.values_list("status", flat=True))
-    if statuses <= {Job.Status.SUCCEEDED, Job.Status.CANCELLED}:
+    if statuses <= set(Job.FINISHED_STATUSES):
         status = Workflow.Status.COMPLETED
     elif Job.Status.FAILED in statuses:
         status = Workflow.Status.FAILED
@@ -323,6 +331,8 @@ def recover_stale_jobs() -> int:
 def run_job(job: Job) -> Job:
     connection = Connection.objects.get(pk=job.connection_id)
     person = Person.objects.select_related("team", "manager").get(pk=job.person_id)
+    if settings.READ_ONLY:
+        return rehearse_job(job, connection, person)
     if not connection.writes_automatically or not _can_write(connection):
         with transaction.atomic():
             claim, job = job, _locked(job)
@@ -337,23 +347,10 @@ def run_job(job: Job) -> Job:
                 _settle(job, _hand_to_person(job))
         return job
     spec = account_spec(person)
-    account = Account.objects.filter(connection=connection, person=person).first()
-    external_id = account.external_id if account else ""
     try:
         adapter = connection.build_adapter()
         # Check whose account the app is about to change before changing it.
-        found = adapter.find_account(spec, external_id)
-        if found is not None and found.external_id:
-            owner = accounts.other_owner(connection, found.external_id, person)
-            if owner is not None:
-                return fail_job(
-                    job,
-                    f"The {connection.name} account {found.username or found.external_id} "
-                    f"belongs to {owner}. Nothing was changed. Check the work email "
-                    "and username.",
-                    retryable=False,
-                )
-            external_id = found.external_id
+        external_id, found = _checked_account(adapter, connection, person, spec)
         # Hand over the account whose owner was checked, so the change cannot
         # land on another account a second lookup finds.
         if job.action == Job.Action.ENSURE_ACCOUNT:
@@ -394,6 +391,27 @@ def run_job(job: Job) -> Job:
         hand_over_sign_in(job, result)
         return fail_job(job, str(error), retryable=True)
     return succeed_job(job, result)
+
+
+def _checked_account(
+    adapter, connection: Connection, person: Person, spec: AccountSpec
+) -> tuple[str, ExternalAccount | None]:
+    """Find the person's account the way a job does and check that it is
+    theirs. Returns the ID of the account to change and what the adapter
+    found. An account linked to someone else raises AdapterError: nothing
+    may change it."""
+    account = Account.objects.filter(connection=connection, person=person).first()
+    external_id = account.external_id if account else ""
+    found = adapter.find_account(spec, external_id)
+    if found is not None and found.external_id:
+        owner = accounts.other_owner(connection, found.external_id, person)
+        if owner is not None:
+            raise AdapterError(
+                f"The {connection.name} account {found.username or found.external_id} "
+                f"belongs to {owner}. Nothing was changed. Check the work email and username."
+            )
+        external_id = found.external_id
+    return external_id, found
 
 
 def record_account_step(job: Job, result: EnsureResult | DisableResult) -> str:
@@ -644,6 +662,86 @@ def _open_task(job: Job, kind: str, title: str, instructions: str) -> Task | Non
     )
 
 
+# -- read-only mode ------------------------------------------------------------
+
+
+def rehearse_job(job: Job, connection: Connection, person: Person) -> Job:
+    """Read-only mode: find out what the job would change, and change
+    nothing. At a connection that changes accounts automatically the worker
+    reads the account and its groups as the job would; anywhere else it
+    records the steps a person would get, without opening a task. A read
+    that fails is handled like any failed job, so it shows where real
+    failures show."""
+    if connection.writes_automatically and _can_write(connection):
+        try:
+            plan = _rehearse_change(job, connection, person)
+        except AdapterError as exc:
+            return fail_job(job, str(exc), retryable=exc.retryable)
+        except SecretUnreadable as exc:
+            return fail_job(job, str(exc), retryable=False)
+        except Exception as exc:  # noqa: BLE001 - every failure must reach a person
+            logger.exception("Rehearsal of job %s failed unexpectedly", job.pk)
+            _report_to_sentry(exc)
+            return fail_job(
+                job,
+                f"Unexpected error ({type(exc).__name__}). The details are in the worker log.",
+                retryable=False,
+            )
+    else:
+        plan = {"would": "ask a person to make the change", "steps": _manual_steps(job)}
+    with transaction.atomic():
+        claim, job = job, _locked(job)
+        if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
+            return job
+        if _claimed_elsewhere(job, claim):
+            return job
+        if _replaced(job):
+            cancel_job(job, note="Replaced by a newer workflow.")
+            _settle(job)
+            return job
+        job.status = Job.Status.REHEARSED
+        job.finished_at = timezone.now()
+        job.locked_until = None
+        job.last_error = ""
+        job.result = plan
+        job.save(update_fields=["status", "finished_at", "locked_until", "last_error", "result"])
+        audit.record(
+            "job.rehearsed",
+            f"Read-only mode: checked {job.get_action_display().lower()} at "
+            f"{connection.name} for {person.full_name} and changed nothing",
+            person=person,
+            target=job,
+            details=plan,
+        )
+        _settle(job)
+    return job
+
+
+def _rehearse_change(job: Job, connection: Connection, person: Person) -> dict:
+    """What the job's adapter call would do, from reads alone."""
+    adapter = connection.build_adapter()
+    _, found = _checked_account(adapter, connection, person, account_spec(person))
+    disabling = job.action == Job.Action.DISABLE_ACCOUNT
+    plan = {}
+    if found is not None:
+        plan["account"] = found.username or found.email or found.external_id
+    if found is None:
+        plan["would"] = "change nothing: no account found" if disabling else "create the account"
+    elif disabling:
+        plan["would"] = "disable the account" + ("" if found.active else " (already disabled)")
+    else:
+        plan["would"] = "keep the account" if found.active else "reactivate the account"
+    if (disabling and found is None) or not adapter.supports_groups:
+        return plan
+    if disabling and not adapter.remove_groups_on_disable:
+        return plan
+    wanted = set() if disabling else set(job.groups)
+    current = adapter.account_groups(found) if found is not None else set()
+    plan["groups_to_add"] = _group_names(job, wanted - current) or "none"
+    plan["groups_to_remove"] = _group_names(job, (current & managed_groups(job)) - wanted) or "none"
+    return plan
+
+
 def _hand_to_person(job: Job) -> Task | None:
     """Turn a job at a connection without automation into a manual task."""
     job.status = Job.Status.MANUAL
@@ -773,6 +871,9 @@ def email_connection() -> Connection | None:
 
 
 def send_email(to: list[str], subject: str, body: str) -> bool:
+    if settings.READ_ONLY:
+        logger.info("Read-only mode: no email sent to %d recipient(s)", len(to))
+        return False
     connection = email_connection()
     if connection is None or not to:
         return False

@@ -36,6 +36,7 @@
       <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn small" type="submit">Sign out</button></form>
     </header>
     <main class="content">
+      {% if read_only_mode %}<div class="notice info"><strong>Read-only mode.</strong> The app reads connected apps but changes nothing in them and sends no email. Workflows run as rehearsals: each job only checks what it would change.</div>{% endif %}
       {% if messages %}<ul class="messages">{% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}</ul>{% endif %}
       {% block content %}{% endblock %}
     </main>

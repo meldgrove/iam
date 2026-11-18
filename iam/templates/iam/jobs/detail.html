@@ -7,6 +7,7 @@
 {% if user.is_approver and job.status == 'failed' %}<form class="inline" method="post" action="{% url 'job_retry' job.pk %}">{% csrf_token %}<button class="btn primary" type="submit">Retry</button></form>{% endif %}
 {% if user.is_admin and job.status == 'held' %}<form class="inline" method="post" action="{% url 'job_approve' job.pk %}">{% csrf_token %}<button class="btn primary" type="submit">Approve removal</button></form><form class="inline" method="post" action="{% url 'job_reject' job.pk %}">{% csrf_token %}<button class="btn danger" type="submit">Reject</button></form>{% endif %}
 </div></div>
+{% if job.status == 'rehearsed' %}<div class="notice info">Read-only mode checked this job and changed nothing. The result shows what it would have done.</div>{% endif %}
 {% if job.status == 'held' %}<div class="notice">This automatic removal is over the daily limit (Admin › Settings). Approve it to run it, or reject it to keep the account.</div>{% endif %}
 <div class="grid two">
 <div class="card"><h2>Details</h2>

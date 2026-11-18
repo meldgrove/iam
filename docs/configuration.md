@@ -35,6 +35,7 @@ can read the database, and the sign-in settings.
 | `SECURE_SSL_REDIRECT` | `1` | Redirect HTTP to HTTPS (health checks under `/-/` are exempt). |
 | `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `1` | Send HSTS for subdomains too. |
 | `HEALTHCHECK_TOKEN` | empty | Shows details on `/-/readyz` for requests with `X-Health-Token`. |
+| `READ_ONLY` | `0` | `1`: read-only mode. The app reads connected apps but changes nothing in them and sends no email; jobs only check what they would change ([architecture.md](architecture.md#read-only-mode)). Set it for web and worker alike (`compose.yaml` does). Any value other than `1`/`0` (or `true`/`false`, `yes`/`no`, `on`/`off`) stops the app from starting. |
 | `TZ` | `UTC` | Time zone for dates, start and end days, and the schedule. |
 | `WEB_WORKERS`, `WEB_THREADS` | `2`, `4` | gunicorn processes and threads. |
 | `WORKER_POLL_SECONDS` | `5` | How often an idle worker looks for jobs. |

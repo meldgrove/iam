@@ -181,6 +181,14 @@ JOB_LEASE_SECONDS = int(env("JOB_LEASE_SECONDS", "300"))
 HEALTHCHECK_TOKEN = env("HEALTHCHECK_TOKEN", "")
 # Outbound calls to connected apps.
 PROVIDER_TIMEOUT_SECONDS = float(env("PROVIDER_TIMEOUT_SECONDS", "20"))
+# Read-only mode: the app reads connected apps but changes nothing in them and
+# sends no email; jobs only check what they would change (docs/architecture.md).
+# A value that is no clear yes or no stops the app, so that a typo can never
+# turn the mode off.
+_read_only = env("READ_ONLY", "0").strip().lower()
+if _read_only not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+    raise ImproperlyConfigured("READ_ONLY must be 1 or 0.")
+READ_ONLY = _read_only in {"1", "true", "yes", "on"}
 
 SENTRY_DSN = env("SENTRY_DSN", "")
 SENTRY_ENVIRONMENT = env("SENTRY_ENVIRONMENT", DEPLOYMENT_ENV)
