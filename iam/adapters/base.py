@@ -19,15 +19,19 @@ never put tokens, passwords or full provider responses in them.
 
 from __future__ import annotations
 
+import email.utils
 import secrets
 import string
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any, ClassVar
 
 import httpx
 from django.conf import settings
+
+from ..liveness import note_progress
 
 
 class AdapterKind:
@@ -205,6 +209,69 @@ def generate_password(length: int = 20) -> str:
 # Default of `found`: the operation looks the account up itself.
 LOOK_UP = object()
 
+# Answers to a read that a moment later can turn out fine.
+RETRY_STATUSES = frozenset({429, 502, 503, 504})
+# Pauses before the second and the third try of a read.
+RETRY_PAUSES = (1.0, 4.0)
+# A server that asks for a longer pause gets it from the job's or the read's
+# own retry, later; the worker does not wait that long in place.
+MAX_RETRY_AFTER_SECONDS = 30.0
+
+
+def pause(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def retry_after(response: httpx.Response) -> float | None:
+    """The pause a Retry-After header asks for, in seconds."""
+    value = response.headers.get("Retry-After", "").strip()
+    if not value:
+        return None
+    try:
+        return max(float(value), 0.0)
+    except ValueError:
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max((when - datetime.now(UTC)).total_seconds(), 0.0)
+
+
+class ProviderClient(httpx.Client):
+    """The HTTP client of every adapter.
+
+    A read (GET or HEAD) that a rate limit, a 502, 503 or 504, or a refused
+    connection stops is tried up to twice more, after the pause the server
+    asks for or a short one, so one hiccup in a long listing does not fail
+    the whole read. Changes are never sent twice here: whether a change
+    landed is unknown, and the adapters handle a lost answer themselves.
+    Every answer counts as progress for the worker's watchdog."""
+
+    def send(self, request: httpx.Request, **kwargs) -> httpx.Response:
+        pauses = list(RETRY_PAUSES) if request.method in ("GET", "HEAD") else []
+        while True:
+            try:
+                response = super().send(request, **kwargs)
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                if not pauses:
+                    raise
+                wait = pauses.pop(0)
+            else:
+                note_progress()
+                if not pauses or response.status_code not in RETRY_STATUSES:
+                    return response
+                asked = retry_after(response)
+                if asked is not None and asked > MAX_RETRY_AFTER_SECONDS:
+                    return response
+                response.close()
+                wait = pauses.pop(0)
+                if asked is not None:
+                    wait = asked
+            pause(wait)
+
 
 class Adapter:
     # Templates show adapter classes; never let them instantiate one.
@@ -255,7 +322,7 @@ class Adapter:
             raise ConfigurationError(f"Missing settings: {', '.join(missing)}.")
 
     def http(self, base_url: str = "", **kwargs) -> httpx.Client:
-        return httpx.Client(
+        return ProviderClient(
             base_url=base_url,
             timeout=kwargs.pop("timeout", settings.PROVIDER_TIMEOUT_SECONDS),
             transport=self.transport,

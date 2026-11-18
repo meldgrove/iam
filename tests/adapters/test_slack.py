@@ -162,6 +162,23 @@ def test_list_accounts_pages_and_skips_bots(mock_transport):
     assert accounts[0].active and not accounts[1].active
 
 
+def test_a_rate_limit_in_the_middle_of_a_listing_waits_and_goes_on(mock_transport, pauses):
+    # Slack allows about 20 users.list pages a minute and answers 429 beyond that.
+    limited = []
+
+    def handler(request):
+        cursor = request.url.params.get("cursor", "")
+        if cursor == "page2" and not limited:
+            limited.append(cursor)
+            return httpx.Response(429, headers={"Retry-After": "3"})
+        members = [{"id": f"U-{cursor or 'page1'}", "name": cursor or "ada", "profile": {}}]
+        return ok(members=members, response_metadata={"next_cursor": "" if cursor else "page2"})
+
+    accounts = list(adapter(mock_transport(handler)).list_accounts())
+    assert [a.external_id for a in accounts] == ["U-page1", "U-page2"]
+    assert pauses == [3.0]
+
+
 def test_list_accounts_rejects_repeated_cursor(mock_transport):
     transport = mock_transport(
         lambda request: ok(members=[], response_metadata={"next_cursor": "same"})
