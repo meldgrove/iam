@@ -123,6 +123,37 @@ def test_offboarding_reaches_profile_connections_without_known_accounts(person, 
     assert workflow.jobs.get().action == Job.Action.DISABLE_ACCOUNT
 
 
+def test_offboarding_checks_an_account_a_comparison_missed(
+    person, fake_store, fake_connection, profile
+):
+    # An account the profile does not grant, linked by a comparison. A later
+    # listing missed it (a page that shifted, an empty answer): it still exists.
+    fake_store.accounts["x1"] = {
+        "username": "ada",
+        "email": "ada@example.invalid",
+        "active": True,
+        "groups": set(),
+    }
+    profile.grants.all().delete()
+    Account.objects.create(
+        connection=fake_connection,
+        person=person,
+        external_id="x1",
+        status=Account.Status.MISSING,
+    )
+    person.status = Person.Status.ACTIVE
+    person.save()
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    assert workflow.jobs.get().action == Job.Action.DISABLE_ACCOUNT
+    run_all()
+    assert fake_store.accounts["x1"]["active"] is False
+    # An access update leaves accounts last seen missing to the comparison.
+    Account.objects.filter(person=person).update(status=Account.Status.MISSING)
+    person.status = Person.Status.ACTIVE
+    person.save()
+    assert not start_workflow(person, Workflow.Kind.ACCESS_UPDATE).jobs.exists()
+
+
 def test_new_workflow_replaces_the_open_one(person):
     first = start_workflow(person, Workflow.Kind.ONBOARDING)
     second = start_workflow(person, Workflow.Kind.OFFBOARDING)
