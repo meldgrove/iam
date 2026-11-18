@@ -346,3 +346,9 @@ def test_a_create_whose_answer_was_lost_keeps_the_password(mock_transport):
     )
     assert result.created and result.initial_password
     assert directory.created[0]["password"] == result.initial_password
+
+
+def test_google_hands_out_sign_in_unless_the_password_is_not_delivered(mock_transport):
+    transport = mock_transport(lambda request: httpx.Response(200, json={}))
+    assert make_adapter(transport).hands_out_sign_in()
+    assert not make_adapter(transport, deliver_initial_password=False).hands_out_sign_in()

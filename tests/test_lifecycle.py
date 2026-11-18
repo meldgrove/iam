@@ -333,6 +333,66 @@ def test_initial_password_is_emailed_never_stored(person, fake_store, monkeypatc
     assert "a***@personal.example.invalid" in summary and "ada@" not in summary
 
 
+def stop_the_worker_after_the_change(job, monkeypatch):
+    """Run the job until the app changed the account, and stop the worker
+    there, before it records anything: a deploy, a crash, a lost database."""
+
+    def killed(*args, **kwargs):
+        raise KeyboardInterrupt("worker killed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("iam.jobs.succeed_job", killed)
+        with pytest.raises(KeyboardInterrupt):
+            run_job(job)
+    Job.objects.filter(pk=job.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
+    assert recover_stale_jobs() == 1
+
+
+def test_sign_in_details_lost_with_a_stopped_worker_become_a_task(person, fake_store, monkeypatch):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    sent = []
+    monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(to) or True)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    stop_the_worker_after_the_change(claim_next_job(), monkeypatch)
+    run_all()
+    job = Job.objects.get()
+    assert job.status == Job.Status.SUCCEEDED
+    assert [c for c in fake_store.calls if c.startswith("create")] == ["create:ada"]
+    assert not sent, "the password died with the worker"
+    task = Task.objects.get(kind=Task.Kind.CREDENTIALS)
+    assert "may never have reached them" in task.instructions
+    assert "Initial-Pass-123" not in task.instructions
+
+
+def test_a_worker_that_stopped_before_the_change_hands_over_sign_in_as_usual(
+    person, fake_store, monkeypatch
+):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    sent = []
+    monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(to) or True)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    job = claim_next_job()
+    Job.objects.filter(pk=job.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
+    recover_stale_jobs()
+    run_all()
+    assert sent == [["ada@personal.example.invalid"]]
+    assert not Task.objects.exists()
+
+
+def test_apps_without_sign_in_details_get_no_task_after_a_stopped_worker(
+    person, fake_store, monkeypatch
+):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    stop_the_worker_after_the_change(claim_next_job(), monkeypatch)
+    run_all()
+    assert Job.objects.get().status == Job.Status.SUCCEEDED
+    assert not Task.objects.exists()
+
+
 def test_approvers_cannot_offboard_an_admin_of_this_app(person, approver_user, admin_user):
     # Offboarding turns the app user off: an approver could lock every admin out.
     admin_user.person = person

@@ -89,6 +89,9 @@ class FakeAdapter(Adapter):
             credentials_problem=self.credentials_problem,
         )
 
+    def hands_out_sign_in(self):
+        return self.password is not None or bool(self.credentials_problem)
+
     def set_active(self, account, active):
         STORE.accounts[account.external_id]["active"] = active
         STORE.calls.append(f"active:{account.external_id}:{active}")

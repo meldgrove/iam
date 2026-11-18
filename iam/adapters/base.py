@@ -389,6 +389,12 @@ class Adapter:
     def list_accounts(self) -> Iterable[ExternalAccount]:
         return []
 
+    def hands_out_sign_in(self) -> bool:
+        """Whether creating an account arranges its first sign-in, such as an
+        initial password or a setup email. A worker that stops between the
+        create and recording it loses that, and a person must check it."""
+        return False
+
     def manual_instructions(self, action: str, spec: AccountSpec, groups: list[str]) -> str:
         """Steps for a person when this app cannot or may not make a change."""
         who = f"{spec.display_name} ({spec.email or spec.username})"

@@ -501,6 +501,9 @@ class KeycloakAdapter(Adapter):
             result.reactivated = True
         return result
 
+    def hands_out_sign_in(self) -> bool:
+        return bool(self.setting("send_setup_email") or self.setting("set_temporary_password"))
+
     def _deliver_credentials(
         self, spec: AccountSpec, account: ExternalAccount, result: EnsureResult
     ) -> None:
