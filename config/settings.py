@@ -195,6 +195,8 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
 # The worker (manage.py run_worker) runs provisioning jobs and the schedule.
 WORKER_POLL_SECONDS = float(env("WORKER_POLL_SECONDS", "5"))
 WORKER_HEARTBEAT_MAX_AGE_SECONDS = int(env("WORKER_HEARTBEAT_MAX_AGE_SECONDS", "300"))
+# A worker without progress for this long is stuck; it ends so that it restarts.
+WORKER_STALL_SECONDS = int(env("WORKER_STALL_SECONDS", "600"))
 JOB_LEASE_SECONDS = int(env("JOB_LEASE_SECONDS", "300"))
 HEALTHCHECK_TOKEN = env("HEALTHCHECK_TOKEN", "")
 # Outbound calls to connected apps.

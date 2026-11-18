@@ -4,7 +4,7 @@ import pytest
 from django.core.management import call_command
 from django.utils import timezone
 
-from iam.adapters.base import HRRecord
+from iam.adapters.base import HRRecord, TransientError
 from iam.models import (
     AccessProfile,
     Account,
@@ -18,7 +18,7 @@ from iam.models import (
     WorkerHeartbeat,
     Workflow,
 )
-from iam.schedule import run_due_syncs, start_due_offboarding, start_due_onboarding
+from iam.schedule import run_due_sync, start_due_offboarding, start_due_onboarding
 from iam.sync import compare_accounts, import_groups, import_people
 
 pytestmark = pytest.mark.django_db
@@ -225,12 +225,66 @@ def test_schedule_offboards_the_day_after_the_last_day(person):
 def test_due_syncs_run_on_their_interval(fake_connection, fake_store):
     fake_connection.settings = {"sync_interval_minutes": 30}
     fake_connection.save()
-    assert run_due_syncs() == 1
-    assert run_due_syncs() == 0
+    assert run_due_sync().kind == SyncRun.Kind.ACCOUNTS
+    assert run_due_sync() is None
     Connection.objects.filter(pk=fake_connection.pk).update(
         last_sync_at=timezone.now() - timedelta(minutes=31)
     )
-    assert run_due_syncs() == 1
+    assert run_due_sync() is not None
+
+
+def test_a_failed_read_comes_again_sooner_than_its_interval(fake_connection, fake_store):
+    fake_connection.settings = {"sync_interval_minutes": 360}
+    fake_connection.save()
+    fake_store.fail_with = TransientError("Fake app answered 503.")
+
+    def minutes_ago(minutes):
+        Connection.objects.filter(pk=fake_connection.pk).update(
+            last_sync_at=timezone.now() - timedelta(minutes=minutes)
+        )
+
+    assert run_due_sync().status == SyncRun.Status.FAILED
+    minutes_ago(14)
+    assert run_due_sync() is None
+    minutes_ago(16)
+    assert run_due_sync().status == SyncRun.Status.FAILED
+    # Each failure waits twice as long, and never longer than the interval.
+    minutes_ago(29)
+    assert run_due_sync() is None
+    minutes_ago(31)
+    fake_store.fail_with = None
+    assert run_due_sync().status == SyncRun.Status.SUCCEEDED
+    minutes_ago(300)
+    assert run_due_sync() is None
+
+
+def test_one_read_per_round_the_most_overdue_first(fake_connection, fake_store, hr_connection):
+    fake_connection.settings = {"sync_interval_minutes": 60}
+    fake_connection.save()
+    Connection.objects.filter(pk=fake_connection.pk).update(
+        last_sync_at=timezone.now() - timedelta(minutes=90)
+    )
+    Connection.objects.filter(pk=hr_connection.pk).update(
+        last_sync_at=timezone.now() - timedelta(minutes=120)
+    )
+    assert run_due_sync().connection == hr_connection
+    assert run_due_sync().connection == fake_connection
+    assert run_due_sync() is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_worker_runs_the_jobs_before_a_read(person, fake_connection, fake_store, monkeypatch):
+    from iam.lifecycle import start_workflow
+
+    seen = []
+
+    def read():
+        seen.append(Job.objects.get().status)
+
+    monkeypatch.setattr("iam.management.commands.run_worker.run_due_sync", read)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    call_command("run_worker", "--once")
+    assert seen == [Job.Status.SUCCEEDED]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -299,6 +353,30 @@ def test_one_worker_at_a_time_runs_the_schedule(person):
     finally:
         other.close()
     assert run_schedule()["onboarding"] == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_worker_that_reads_holds_up_neither_the_schedule_nor_other_reads(
+    person, fake_connection, fake_store
+):
+    from django.db import connection, connections
+
+    from iam.schedule import SYNC_LOCK_ID, run_schedule
+
+    if connection.vendor != "postgresql":
+        pytest.skip("SQLite runs one worker.")
+    fake_connection.settings = {"sync_interval_minutes": 60}
+    fake_connection.save()
+    Person.objects.filter(pk=person.pk).update(start_date=timezone.localdate())
+    other = connections.create_connection("default")
+    try:
+        with other.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_lock(%s)", [SYNC_LOCK_ID])
+        assert run_due_sync() is None, "another worker is reading"
+        assert run_schedule()["onboarding"] == 1
+    finally:
+        other.close()
+    assert run_due_sync() is not None
 
 
 def test_drift_reports_planned_people_with_active_accounts(fake_connection, fake_store, person):
