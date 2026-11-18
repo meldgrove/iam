@@ -55,7 +55,8 @@ def test_a_read_waits_as_long_as_the_server_asks(mock_transport, pauses, header)
     assert len(pauses) == 1 and 6 <= pauses[0] <= 8
 
 
-@pytest.mark.parametrize("header", ["NaN", "-5", "soon", "1.5"])
+# b"\xb2" reads as "²", which str.isdigit() takes for a digit.
+@pytest.mark.parametrize("header", ["NaN", "-5", "soon", "1.5", b"\xb2"])
 def test_a_malformed_retry_after_gets_the_usual_pause(mock_transport, pauses, header):
     transport = mock_transport(
         answers(httpx.Response(503, headers={"Retry-After": header}), httpx.Response(200))

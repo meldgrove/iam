@@ -227,7 +227,7 @@ def retry_after(response: httpx.Response) -> float | None:
     value = response.headers.get("Retry-After", "").strip()
     if not value:
         return None
-    if value.isdigit():
+    if value.isascii() and value.isdigit():
         return float(value)
     try:
         when = email.utils.parsedate_to_datetime(value)

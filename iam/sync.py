@@ -66,17 +66,18 @@ def recover_stopped_reads() -> int:
     stopped = SyncRun.objects.filter(status=SyncRun.Status.RUNNING, triggered_by=None)
     count = 0
     for run in stopped.select_related("connection"):
-        run.status = SyncRun.Status.FAILED
-        run.error = "The worker stopped during this read."
-        run.finished_at = now
-        run.save(update_fields=["status", "error", "finished_at"])
-        Connection.objects.filter(pk=run.connection_id).update(last_sync_at=now)
-        audit.record(
-            f"sync.{run.kind}",
-            f"{run.get_kind_display()} from {run.connection.name}: failed",
-            target=run,
-            details={"error": run.error},
-        )
+        with transaction.atomic():
+            run.status = SyncRun.Status.FAILED
+            run.error = "The worker stopped during this read."
+            run.finished_at = now
+            run.save(update_fields=["status", "error", "finished_at"])
+            Connection.objects.filter(pk=run.connection_id).update(last_sync_at=now)
+            audit.record(
+                f"sync.{run.kind}",
+                f"{run.get_kind_display()} from {run.connection.name}: failed",
+                target=run,
+                details={"error": run.error},
+            )
         count += 1
     return count
 
