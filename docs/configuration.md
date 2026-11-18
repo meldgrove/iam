@@ -12,7 +12,7 @@ can read the database, and the sign-in settings.
 | --- | --- |
 | `DJANGO_SECRET_KEY` | Random value, at least 50 characters. Signs sessions. |
 | `ENCRYPTION_KEY` | Fernet key that encrypts connection secrets. Create one with `python manage.py generate_key`. Several comma-separated keys: the first encrypts, all decrypt (rotation below). Losing it makes the saved connection secrets unreadable. |
-| `DATABASE_URL` | PostgreSQL, e.g. `postgresql://iam:password@postgres:5432/iam`. |
+| `DATABASE_URL` | PostgreSQL, e.g. `postgresql://iam:password@postgres:5432/iam`. Connecting gives up after 10 seconds, and TCP keepalives notice a server that went away within about a minute; `?connect_timeout=...` and the `keepalives_*` parameters in the URL override that. |
 | `ALLOWED_HOSTS` | Public hostname(s), comma-separated. |
 | `CSRF_TRUSTED_ORIGINS` | Public origin, e.g. `https://iam.example.invalid`. |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The sign-in client ([authentication.md](authentication.md)). |
@@ -40,6 +40,7 @@ can read the database, and the sign-in settings.
 | `WEB_WORKERS`, `WEB_THREADS` | `2`, `4` | gunicorn processes and threads. |
 | `WORKER_POLL_SECONDS` | `5` | How often an idle worker looks for jobs. |
 | `WORKER_HEARTBEAT_MAX_AGE_SECONDS` | `300` | After this, the dashboard and `/-/readyz` report the worker as stale. |
+| `WORKER_STALL_SECONDS` | `600` | A worker without any progress for this long is stuck: it logs where it was and ends, and the container restarts it ([architecture.md](architecture.md#schedule)). |
 | `JOB_LEASE_SECONDS` | `300` | A running job whose worker stopped runs again after this. |
 | `PROVIDER_TIMEOUT_SECONDS` | `20` | Timeout of each call to a connected app. |
 | `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | empty | Error reporting without personal data. The release defaults to `iam@<version>`. |

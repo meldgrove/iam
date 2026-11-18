@@ -24,7 +24,7 @@ per connection:
 | --- | --- | --- | --- |
 | Onboarding | By an approver, or by the schedule a set number of days before the start date | Planned → Onboarding → Active | Create or update the account where the profile grants one |
 | Access update | By an approver after changing profile, team or policy; during onboarding it starts a new onboarding instead | stays Active | Create or update where granted; disable known accounts no longer granted |
-| Offboarding | By an approver, or by the schedule the day after the last day | → Offboarding → Offboarded | Disable every known account and every account the profile grants |
+| Offboarding | By an approver, or by the schedule the day after the last day | → Offboarding → Offboarded | Disable every known account (also one the last comparison no longer listed) and every account the profile grants |
 
 A new workflow for the same person replaces the open one: its unfinished jobs
 are cancelled. Onboarding and access updates can be cancelled; offboarding
@@ -56,11 +56,21 @@ connection in automatic mode it calls the adapter:
 
 The operations are idempotent, so a job can safely run again.
 
-**Failures.** Timeouts, rate limits and server errors retry after 1, 2, 4,
-8 and 16 minutes; after the sixth attempt, or at once for any other error,
-the job fails and a failure task asks a person to fix the cause and press
-Retry, or to make the change by hand and complete the task. Error messages
-never contain credentials or provider responses.
+**Failures.** A read (GET) that a rate limit, a 502, 503 or 504, or a
+refused connection stops is tried twice more at once, after the pause the
+connected app asks for (up to 30 seconds) or 1 and 4 seconds; changes are
+never sent twice. Timeouts, rate limits and server errors that remain retry the job
+after 1, 2, 4, 8 and 16 minutes; after the sixth attempt, or at once for any
+other error, the job fails and a failure task asks a person to fix the cause
+and press Retry, or to make the change by hand and complete the task. Error
+messages never contain credentials or provider responses.
+
+**A stopped worker.** A job whose worker stopped mid-run (a deploy, a crash,
+a lost database) runs again once its lease (`JOB_LEASE_SECONDS`) runs out.
+If the app had already created the account, the sign-in details that run
+arranged are lost: when the next run finds an account the app does not know
+as the person's, at an app that hands out sign-in details (Google Workspace,
+Keycloak), a task asks a person to check that the person can sign in.
 
 Groups never hold up onboarding or offboarding. When a group step fails, the
 account is still created, reactivated or disabled, and a new account's
@@ -133,7 +143,10 @@ None of these change anything in a connected app.
   account but have none, and active accounts the person's access does not
   grant (including planned people, e.g. after a cancelled onboarding, and
   offboarded people). Fixing drift is an access update or offboarding an
-  approver starts.
+  approver starts. A scheduled comparison whose listing lacks at least 10,
+  and more than half, of the accounts it saw before fails and records
+  nothing: such an answer is more likely broken than true. "Compare
+  accounts now" records it.
 - **People import** (Personio) creates planned people and updates names,
   type, team, manager and dates. It never changes a work email, never
   offboards anyone by itself (the last day does that through the schedule),
@@ -150,12 +163,24 @@ Once a minute the worker:
    cancelled their last onboarding;
 2. starts offboarding for people whose last day has passed (planned people
    only when they have an account or an app user);
-3. runs the people imports and account comparisons that are due;
-4. completes open workflows whose jobs are all done.
+3. completes open workflows whose jobs are all done;
+4. after the queued jobs, runs the one people import or account comparison
+   that is most overdue. A slow connection holds up the jobs for one read,
+   and the jobs queued meanwhile run next. A read that failed comes again
+   after 15 minutes, then 30, 60 and so on, never later than its interval.
 
 Both automatic starts can be turned off in Admin › Settings. With several
-workers, one at a time runs the schedule (a PostgreSQL advisory lock), and
-a job's result counts only from the worker that holds its current claim.
+workers, one at a time runs the schedule and one at a time reads from
+connections (PostgreSQL advisory locks), so one worker can run jobs while
+another reads, and a job's result counts only from the worker that holds
+its current claim.
+
+The worker writes a heartbeat each round and after each job, which the
+dashboard and `/-/readyz` check. A watchdog thread ends a worker that made
+no progress for `WORKER_STALL_SECONDS` (every answer from a connected app
+counts), for example one stuck on a database connection whose server went
+away. It logs where each thread was, and the container's restart policy
+starts a fresh worker.
 
 ## Audit log
 
