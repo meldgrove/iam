@@ -58,8 +58,8 @@ The operations are idempotent, so a job can safely run again.
 
 **Failures.** A read (GET) that a rate limit, a 502, 503 or 504, or a
 refused connection stops is tried twice more at once, after the pause the
-connected app asks for (up to 30 seconds) or 1 and 4 seconds; changes are
-never sent twice. Timeouts, rate limits and server errors that remain retry the job
+connected app asks for (up to 30 seconds in all) or 1 and 4 seconds;
+changes are never sent twice. Timeouts, rate limits and server errors that remain retry the job
 after 1, 2, 4, 8 and 16 minutes; after the sixth attempt, or at once for any
 other error, the job fails and a failure task asks a person to fix the cause
 and press Retry, or to make the change by hand and complete the task. Error
@@ -176,8 +176,8 @@ connections (PostgreSQL advisory locks), so one worker can run jobs while
 another reads, and a job's result counts only from the worker that holds
 its current claim.
 
-The worker writes a heartbeat each round and after each job, which the
-dashboard and `/-/readyz` check. A watchdog thread ends a worker that made
+The worker writes a heartbeat each round, after each job, and during a long
+read while it gets answers, which the dashboard and `/-/readyz` check. A watchdog thread ends a worker that made
 no progress for `WORKER_STALL_SECONDS` (every answer from a connected app
 counts), for example one stuck on a database connection whose server went
 away. It logs where each thread was, and the container's restart policy

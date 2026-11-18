@@ -9,6 +9,7 @@ finishes the job it is running first. A watchdog ends a worker that is stuck
 
 import logging
 import signal
+import threading
 import time
 
 from django.conf import settings
@@ -26,6 +27,9 @@ logger = logging.getLogger("iam.worker")
 SCHEDULE_SECONDS = 60
 # The heartbeat is written at most this often.
 HEARTBEAT_SECONDS = 10
+# During long work the heartbeat goes on while the worker made progress
+# within this time; a stuck worker stops beating.
+PROGRESS_SECONDS = 60
 
 
 class Command(BaseCommand):
@@ -41,6 +45,9 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, self._stop)
         if not once:
             liveness.start_watchdog(settings.WORKER_STALL_SECONDS)
+            threading.Thread(
+                target=self._beat_during_long_work, name="worker-heartbeat", daemon=True
+            ).start()
         last_schedule = float("-inf")
         logger.info("Worker started")
         while not self.stopping:
@@ -90,6 +97,24 @@ class Command(BaseCommand):
         """Tell the watchdog, the dashboard and /-/readyz that the worker is
         getting somewhere."""
         liveness.note_progress()
+        self._write_heartbeat()
+
+    def _beat_during_long_work(self) -> None:
+        while not self.stopping:
+            time.sleep(HEARTBEAT_SECONDS)
+            self.beat_if_progressing()
+
+    def beat_if_progressing(self) -> bool:
+        """Keep the heartbeat fresh during one long read, where every answer
+        from a connected app counts as progress. Runs in its own thread, with
+        its own database connection."""
+        if liveness.seconds_without_progress() >= PROGRESS_SECONDS:
+            return False
+        close_old_connections()
+        self._write_heartbeat()
+        return True
+
+    def _write_heartbeat(self) -> None:
         now = time.monotonic()
         if self.last_beat is not None and now - self.last_beat < HEARTBEAT_SECONDS:
             return

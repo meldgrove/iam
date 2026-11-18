@@ -71,6 +71,20 @@ def test_a_long_retry_after_is_left_to_the_job(mock_transport, pauses):
     assert len(transport.requests) == 1 and not pauses
 
 
+def test_the_pauses_of_one_request_add_up_to_30_seconds_at_most(mock_transport, pauses):
+    transport = mock_transport(lambda request: httpx.Response(429, headers={"Retry-After": "20"}))
+    assert client(transport).get(URL).status_code == 429
+    assert pauses == [20.0] and len(transport.requests) == 2
+
+
+def test_a_connection_that_timed_out_is_not_tried_again(mock_transport, pauses):
+    # The next try would wait just as long, and a page waiting for it would time out.
+    transport = mock_transport(answers(httpx.ConnectTimeout("timed out"), httpx.Response(200)))
+    with pytest.raises(httpx.ConnectTimeout):
+        client(transport).get(URL)
+    assert len(transport.requests) == 1 and not pauses
+
+
 def test_a_refused_connection_is_tried_again(mock_transport, pauses):
     refused = httpx.ConnectError("refused")
     transport = mock_transport(answers(refused, httpx.Response(200)))

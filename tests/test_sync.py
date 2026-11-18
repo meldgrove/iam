@@ -363,6 +363,26 @@ def test_worker_runs_jobs_and_beats(person, fake_store):
     assert WorkerHeartbeat.objects.filter(name="worker").exists()
 
 
+@pytest.mark.django_db(transaction=True)
+def test_the_heartbeat_goes_on_during_long_work_only_while_the_worker_gets_answers(
+    monkeypatch,
+):
+    import time
+
+    from iam import liveness
+    from iam.management.commands.run_worker import PROGRESS_SECONDS, Command
+
+    worker = Command()
+    worker.last_beat = None
+    liveness.note_progress()  # e.g. a page of a long listing arrived
+    assert worker.beat_if_progressing()
+    beat = WorkerHeartbeat.objects.get(name="worker").beat_at
+    worker.last_beat = None
+    monkeypatch.setattr(liveness, "_last_progress", time.monotonic() - PROGRESS_SECONDS)
+    assert not worker.beat_if_progressing(), "a stuck worker stops beating"
+    assert WorkerHeartbeat.objects.get(name="worker").beat_at == beat
+
+
 def test_one_failing_person_does_not_stop_the_schedule(person, monkeypatch):
     import iam.schedule
 

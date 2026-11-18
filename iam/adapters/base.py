@@ -213,9 +213,10 @@ LOOK_UP = object()
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 # Pauses before the second and the third try of a read.
 RETRY_PAUSES = (1.0, 4.0)
-# A server that asks for a longer pause gets it from the job's or the read's
-# own retry, later; the worker does not wait that long in place.
-MAX_RETRY_AFTER_SECONDS = 30.0
+# The pauses of one request add up to at most this, which also bounds how
+# long a page that reads a connected app waits. A server that asks for more
+# gets it from the job's or the read's own retry, later.
+MAX_RETRY_WAIT_SECONDS = 30.0
 
 
 def pause(seconds: float) -> None:
@@ -244,16 +245,18 @@ class ProviderClient(httpx.Client):
     A read (GET or HEAD) that a rate limit, a 502, 503 or 504, or a refused
     connection stops is tried up to twice more, after the pause the server
     asks for or a short one, so one hiccup in a long listing does not fail
-    the whole read. Changes are never sent twice here: whether a change
+    the whole read. A connection that timed out is not tried again: the
+    next try would wait as long. Changes are never sent twice here: whether a change
     landed is unknown, and the adapters handle a lost answer themselves.
     Every answer counts as progress for the worker's watchdog."""
 
     def send(self, request: httpx.Request, **kwargs) -> httpx.Response:
         pauses = list(RETRY_PAUSES) if request.method in ("GET", "HEAD") else []
+        budget = MAX_RETRY_WAIT_SECONDS
         while True:
             try:
                 response = super().send(request, **kwargs)
-            except (httpx.ConnectError, httpx.ConnectTimeout):
+            except httpx.ConnectError:
                 if not pauses:
                     raise
                 wait = pauses.pop(0)
@@ -262,12 +265,13 @@ class ProviderClient(httpx.Client):
                 if not pauses or response.status_code not in RETRY_STATUSES:
                     return response
                 asked = retry_after(response)
-                if asked is not None and asked > MAX_RETRY_AFTER_SECONDS:
-                    return response
-                response.close()
                 wait = pauses.pop(0)
                 if asked is not None:
                     wait = asked
+                if wait > budget:
+                    return response
+                response.close()
+            budget -= wait
             pause(wait)
 
 
