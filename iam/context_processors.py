@@ -7,6 +7,7 @@ def app(request):
     context = {
         "app_version": settings.APP_VERSION,
         "provider_name": settings.OIDC_PROVIDER_NAME,
+        "read_only_mode": settings.READ_ONLY,
     }
     if not getattr(request, "user", None) or not request.user.is_authenticated:
         return context

@@ -173,10 +173,14 @@ class Connection(models.Model):
         return {**self.settings, **self.secrets()}
 
     def build_adapter(self, **kwargs):
+        """The adapter for this connection. In read-only mode it can only read."""
+        from .adapters.base import ReadOnlyAdapter
+
         cls = self.adapter_class
         if cls is None:
             raise LookupError(f"Unknown adapter {self.adapter!r}")
-        return cls(self.config(), connection=self, **kwargs)
+        adapter = cls(self.config(), connection=self, **kwargs)
+        return ReadOnlyAdapter(adapter) if settings.READ_ONLY else adapter
 
     @property
     def supports_groups(self) -> bool:
@@ -491,9 +495,14 @@ class Job(models.Model):
         MANUAL = "manual", "Manual task open"
         FAILED = "failed", "Failed"
         SUCCEEDED = "succeeded", "Done"
+        # Read-only mode: the worker checked what the job would change and
+        # changed nothing. The result says what it found.
+        REHEARSED = "rehearsed", "Checked only (read-only mode)"
         CANCELLED = "cancelled", "Cancelled"
 
     OPEN_STATUSES = (Status.QUEUED, Status.RUNNING, Status.HELD, Status.MANUAL, Status.FAILED)
+    # Nothing more happens to a job in one of these.
+    FINISHED_STATUSES = (Status.SUCCEEDED, Status.REHEARSED, Status.CANCELLED)
 
     workflow = models.ForeignKey(Workflow, on_delete=models.CASCADE, related_name="jobs")
     person = models.ForeignKey(Person, on_delete=models.CASCADE, related_name="jobs")

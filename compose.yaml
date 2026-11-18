@@ -23,6 +23,8 @@ x-application: &application
     FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
     HEALTHCHECK_TOKEN: ${HEALTHCHECK_TOKEN:?Set a random health check token}
     TZ: ${TZ:-UTC}
+    # 1: read connected apps, change nothing in them and send no email (docs/architecture.md).
+    READ_ONLY: ${READ_ONLY:-0}
     # Sign-in: OIDC_ISSUER for any OpenID Connect provider, or KEYCLOAK_URL and KEYCLOAK_REALM.
     OIDC_ISSUER: ${OIDC_ISSUER:-}
     KEYCLOAK_URL: ${KEYCLOAK_URL:-}

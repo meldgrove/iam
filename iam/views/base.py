@@ -85,6 +85,7 @@ def readyz(request):
     if detailed:
         body["checks"] = checks
         body["version"] = settings.APP_VERSION
+        body["read_only"] = settings.READ_ONLY
     return JsonResponse(body, status=200 if healthy else 503)
 
 

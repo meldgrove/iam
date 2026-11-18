@@ -5,7 +5,7 @@ register = template.Library()
 
 TONES = {
     "ok": {"active", "succeeded", "completed", "done", "ok"},
-    "info": {"onboarding", "running", "queued", "planned", "untested", "unknown"},
+    "info": {"onboarding", "running", "queued", "planned", "untested", "unknown", "rehearsed"},
     "warn": {"held", "manual", "waiting", "offboarding", "open", "missing"},
     "danger": {"failed", "error"},
 }

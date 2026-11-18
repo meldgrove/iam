@@ -73,6 +73,39 @@ docker compose run --rm web python manage.py createadmin --email admin@example.i
    offboarding, the daily removal limit, and who gets task emails.
 7. Turn the connections on.
 
+## Trying it with real data: read-only mode
+
+Start with `READ_ONLY=1` ([architecture.md](architecture.md#read-only-mode)).
+The app then reads connected apps but never changes them and sends no email,
+and every job only reports what it would change. A banner on every page
+after sign-in shows that the mode is on.
+
+1. Set `READ_ONLY=1` and deploy. Check `/-/readyz` with the health token:
+   it answers `"read_only": true`.
+2. Add the connections, turn them on, test them and import their groups.
+   In read-only mode a connection that is on and automatic still only reads.
+3. Build the access profiles and teams.
+4. Import people. Existing staff arrive as planned; with automatic
+   onboarding on (Admin › Settings), the schedule rehearses their onboarding
+   within a minute and they become active in this app. Turn it off first to
+   go person by person.
+5. Compare accounts on each connection and review the drift. Jobs with the
+   status "Checked only (read-only mode)" say what the app would do to each
+   account: create, reactivate or disable it, and which groups it would add
+   or remove. Fix the policy or the data and rehearse again with an access
+   update.
+
+To leave read-only mode:
+
+1. Look at Jobs › Open. Queued jobs run for real once the mode is off, and
+   so do held or failed jobs that someone approves or retries. Cancel the
+   workflows you do not want.
+2. Consider setting connections to manual first, then to automatic one at a
+   time.
+3. Set `READ_ONLY=0` and redeploy web and worker.
+4. Rehearsed jobs are not replayed. Start an access update for each person
+   whose access should now be applied, beginning with test accounts.
+
 ## Upgrades
 
 Releases that need operator action list their steps under "Upgrade steps
