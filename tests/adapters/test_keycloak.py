@@ -208,6 +208,15 @@ def test_connection_names_missing_roles_on_403(keycloak, mock_transport):
     assert "secret-ish" not in result.message
 
 
+def test_connection_names_the_admin_api_scope_on_401(keycloak, mock_transport):
+    # Keycloak 26.8.2 and later: a token without the kc-admin-api audience.
+    keycloak.failures[("GET", f"{ADMIN}/users/count")] = 401
+    result = adapter_for(keycloak, mock_transport).test_connection()
+    assert not result.ok
+    assert "401" in result.message and "kc-admin-api" in result.message
+    assert "client-secret-value" not in result.message
+
+
 def test_connection_reports_rejected_client_secret(keycloak, mock_transport):
     keycloak.token_status = 401
     result = adapter_for(keycloak, mock_transport).test_connection()
