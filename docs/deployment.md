@@ -10,8 +10,10 @@ from `compose.yaml`:
 | `worker` | `manage.py run_worker` | Runs jobs, the schedule and reads from connections. One is enough; with a second, one runs jobs while the other reads a big directory. |
 | `updater` | Meldgrove Updater | Installs new releases ([updates.md](updates.md)). |
 
-PostgreSQL 16 or newer runs separately (a managed database, or its own Coolify
-resource). Nothing else is needed: no Redis, no message queue.
+PostgreSQL 16 or newer runs separately (a managed database, its own Coolify
+resource, or a PostgreSQL server of your own). Nothing else is needed: no
+Redis, no message queue. The stack runs on [Coolify](#coolify) or on a
+[Debian server](#debian).
 
 ## Coolify
 
@@ -27,7 +29,7 @@ resource). Nothing else is needed: no Redis, no message queue.
    | --- | --- |
    | `IAM_VERSION` | `0.1` (a release series; see [updates.md](updates.md)) |
    | `DJANGO_SECRET_KEY` | random, 50+ characters |
-   | `ENCRYPTION_KEY` | `docker run --rm ghcr.io/meldgrove/iam:0.1 python manage.py generate_key`; keep a copy with the backups |
+   | `ENCRYPTION_KEY` | `docker run --rm -e DJANGO_DEBUG=1 ghcr.io/meldgrove/iam:0.1 python manage.py generate_key`; keep a copy with the backups |
    | `DATABASE_URL` | the PostgreSQL resource's internal URL |
    | `ALLOWED_HOSTS` | `iam.example.invalid` |
    | `CSRF_TRUSTED_ORIGINS` | `https://iam.example.invalid` |
@@ -37,16 +39,65 @@ resource). Nothing else is needed: no Redis, no message queue.
    | `BOOTSTRAP_ADMIN_EMAILS` or `OIDC_ADMIN_GROUPS` | the first admin |
 
 5. Deploy. Sign in, then continue with "First steps" below.
+6. **Automatic updates:** set them up [on Coolify](updates.md#on-coolify).
 
-## Docker Compose without a platform
+## Debian
 
-Put the variables above in `.env` next to `compose.yaml`, run a reverse proxy
-(Caddy, Traefik, nginx) in front of `web`, and start:
+On a server with Debian 12 or later, or a similar system such as Ubuntu,
+run the commands as root (`sudo -i`). `compose.yaml` has no database: use
+a PostgreSQL 16 or newer of your own, such as a managed database, that the
+containers can reach.
 
-```sh
-docker compose up -d
-docker compose run --rm web python manage.py createadmin --email admin@example.invalid
-```
+1. **Docker:** install Docker Engine and the Compose plugin from Docker's
+   apt repository ([Debian](https://docs.docker.com/engine/install/debian/),
+   [Ubuntu](https://docs.docker.com/engine/install/ubuntu/)), and Git:
+   `apt install git`.
+2. **Get the files** at the newest release:
+
+   ```sh
+   git clone --branch stable https://github.com/meldgrove/iam.git /srv/iam
+   cd /srv/iam
+   ```
+
+3. **Create `.env`** next to `compose.yaml` with the variables from the table
+   under [Coolify](#coolify), with `DATABASE_URL` pointing to the database,
+   and make it readable for root only: `chmod 600 .env`. `.env.example`
+   holds development settings; do not copy it.
+4. **Publish `web` on the server:** `compose.yaml` only exposes port 8000 to
+   the Docker network, where Coolify's proxy reaches it. Docker Compose also
+   reads `compose.override.yaml` next to it:
+
+   ```sh
+   cat > compose.override.yaml << 'EOF'
+   services:
+     web:
+       ports:
+         - "127.0.0.1:8000:8000"
+   EOF
+   ```
+
+5. **Start.** The second command adds the first admin; leave it out when
+   `BOOTSTRAP_ADMIN_EMAILS` or `OIDC_ADMIN_GROUPS` makes one
+   ([authentication.md](authentication.md#the-first-admin)).
+
+   ```sh
+   docker compose up -d --pull always
+   docker compose run --rm web python manage.py createadmin --email admin@example.invalid
+   ```
+
+6. **HTTPS:** point the domain's DNS at the server, install Caddy
+   (`apt install caddy`), and replace `/etc/caddy/Caddyfile` with:
+
+   ```text
+   iam.example.invalid {
+   	reverse_proxy 127.0.0.1:8000
+   }
+   ```
+
+   Then `systemctl reload caddy`. Caddy gets the certificate itself.
+
+7. Sign in, then continue with "First steps" below.
+8. **Automatic updates:** set them up [on Debian](updates.md#on-debian).
 
 ## Health
 
@@ -121,5 +172,14 @@ To leave read-only mode:
 ## Upgrades
 
 Releases that need operator action list their steps under "Upgrade steps
-needed" in the release notes ([releases.md](releases.md)). Database
-migrations run automatically in `migrate`.
+needed" in the release notes ([releases.md](releases.md)). Take the steps,
+then move to the new series ([updates.md](updates.md#choose-what-to-run)):
+
+- **Coolify:** change `IAM_VERSION` in the resource's environment variables
+  and redeploy. Coolify reads `compose.yaml` from `stable`, which is at the
+  newest release.
+- **Debian:** in `/srv/iam`, run `git pull` (the newest release's
+  `compose.yaml`), change `IAM_VERSION` in `.env`, and run
+  `docker compose up -d --pull always`.
+
+Database migrations run automatically in `migrate`.

@@ -47,7 +47,7 @@ Keycloak connection: see [docs/development.md](docs/development.md).
 
 ## Documentation
 
-- [Deployment](docs/deployment.md): Docker Compose or Coolify, PostgreSQL, keys, health checks
+- [Deployment](docs/deployment.md): Coolify or a Debian server, PostgreSQL, keys, health checks
 - [Configuration](docs/configuration.md): environment variables
 - [Sign-in and roles](docs/authentication.md): OpenID Connect, Keycloak, roles, first admin
 - [Connections](docs/connections.md): setting up each app
