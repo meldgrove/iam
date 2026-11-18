@@ -17,6 +17,7 @@ import logging
 import time
 from urllib.parse import urlencode
 
+import jwt
 import requests
 from django.conf import settings
 from django.contrib.auth.backends import BaseBackend
@@ -161,6 +162,25 @@ class OIDCBackend(OIDCAuthenticationBackend):
     @property
     def OIDC_OP_JWKS_ENDPOINT(self):  # noqa: N802
         return self._endpoint("jwks_uri")
+
+    def _verify_jws(self, payload, key):
+        """The library's signature check, but PyJWT allows the clock
+        difference: without it a token from a provider whose clock runs a
+        second ahead is "not yet valid", and every refusal is a server error."""
+        try:
+            alg = jwt.get_unverified_header(payload).get("alg")
+            if alg != self.OIDC_RP_SIGN_ALGO:
+                raise SuspiciousOperation("ID token signed with an unexpected algorithm")
+            return jwt.decode(
+                payload,
+                key,
+                algorithms=[alg],
+                leeway=CLOCK_SKEW_SECONDS,
+                # verify_token checks the audience.
+                options={"verify_aud": False},
+            )
+        except jwt.InvalidTokenError as exc:
+            raise SuspiciousOperation("ID token verification failed") from exc
 
     def verify_token(self, token, **kwargs):
         payload = super().verify_token(token, **kwargs)

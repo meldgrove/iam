@@ -152,6 +152,43 @@ def test_tokens_from_another_issuer_or_client_are_refused(monkeypatch):
             backend.verify_token("t")
 
 
+def test_signed_id_tokens_allow_the_clock_difference(monkeypatch):
+    # The library checks exp, iat and nbf with PyJWT, which allows no clock
+    # difference: a provider clock a second ahead would refuse sign-ins.
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key(), as_dict=True)
+
+    def fake_get(url, **kwargs):
+        if url == DISCOVERY["jwks_uri"]:
+            return FakeResponse({"keys": [{**jwk, "kid": "k1", "alg": "RS256"}]})
+        return FakeResponse(DISCOVERY)
+
+    monkeypatch.setattr(auth.requests, "get", fake_get)
+
+    def token(signing_key=key, **extra):
+        now = int(time.time())
+        claims = {"iss": ISSUER, "aud": "iam", "sub": "x", "nonce": "n", "iat": now}
+        claims = {**claims, "exp": now + 300, **extra}
+        return jwt.encode(claims, signing_key, algorithm="RS256", headers={"kid": "k1"})
+
+    backend = auth.OIDCBackend()
+    ahead = int(time.time()) + 30
+    assert backend.verify_token(token(), nonce="n")["sub"] == "x"
+    assert backend.verify_token(token(iat=ahead, nbf=ahead), nonce="n")
+    assert backend.verify_token(token(exp=int(time.time()) - 30), nonce="n")
+    for refused in (
+        token(exp=int(time.time()) - 3600),
+        token(iat=int(time.time()) + 3600),
+        token(signing_key=other_key),
+    ):
+        with pytest.raises(SuspiciousOperation):
+            backend.verify_token(refused, nonce="n")
+
+
 def test_user_info_must_be_about_the_subject_of_the_id_token(monkeypatch):
     from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 

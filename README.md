@@ -58,6 +58,6 @@ Keycloak connection: see [docs/development.md](docs/development.md).
 
 ## Stack
 
-Django 5.2 on Python 3.13, PostgreSQL, one Docker image with three
+Django 6.1 on Python 3.13, PostgreSQL, one Docker image with three
 processes: `migrate` (one-time), `web` (gunicorn) and `worker`
 (`manage.py run_worker`, jobs and schedule; no Redis or queue needed).

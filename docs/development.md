@@ -13,7 +13,8 @@
 The realm (`dev/keycloak/iam-realm.json`) has the sign-in client `iam`
 (secret `iam-dev-client-secret`, with a group claim), the provisioning client
 `iam-provisioner` (secret `iam-dev-provisioner-secret`, service account with
-the realm-management roles the Keycloak connection needs), groups under
+the realm-management roles and the `kc-admin-api` scope the Keycloak connection
+needs), groups under
 `/apps`, `/teams` and `/iam`, and sends its emails to Mailpit.
 
 ```sh
