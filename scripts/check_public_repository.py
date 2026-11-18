@@ -20,6 +20,7 @@ PUBLIC_HOSTS = {
     "developers.google.com",
     "developers.hubspot.com",
     "developer.personio.de",
+    "docs.docker.com",
     "docs.slack.dev",
     "files.pythonhosted.org",
     "github.com",

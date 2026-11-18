@@ -6,10 +6,11 @@ the tag named in `IAM_VERSION` and pulls it again on every deploy.
 
 The `updater` service in `compose.yaml` installs new releases. Once an hour it asks the
 registry whether that tag points to a new image. If so, it waits for the
-[cooldown](#when-a-release-installs) and then calls the hosting platform's deploy link,
-and the platform pulls the image, runs the migrations, and replaces web and worker. It
-is [Meldgrove Updater](https://github.com/meldgrove/updater),
-the same for every Meldgrove app. Until `UPDATE_DEPLOY_HOOK_URL` is set, it does
+[cooldown](#when-a-release-installs) and then calls Coolify's deploy link, or leaves a
+request for the Debian server in its volume `updater`. Coolify or the server pulls the
+image, runs the migrations, and replaces web and worker. It is
+[Meldgrove Updater](https://github.com/meldgrove/updater),
+the same for every Meldgrove app. Until it is [switched on](#switch-it-on), it does
 nothing.
 
 ## Choose what to run
@@ -28,7 +29,8 @@ every 1.x release, and 2.0.0 is the next release that needs action.
 
 When a release is out that the tag does not reach, the `updater` log names it. Moving
 to another series is a manual upgrade: read the release notes of every version since
-the deployed one, take their upgrade steps, then change `IAM_VERSION`. Do
+the deployed one, take their upgrade steps, then change `IAM_VERSION`
+([deployment.md](deployment.md#upgrades)). Do
 it soon: an earlier series gets no more fixes, and `stable` already holds the
 `compose.yaml` of the new one.
 
@@ -43,12 +45,15 @@ replaced before it reaches the deployment. `UPDATE_COOLDOWN` changes the time: `
 installs within the hour, `7d` waits a week. Security fixes wait as well; redeploy by
 hand to install a release at once.
 
-Coolify replaces web and worker while it deploys. `UPDATE_WINDOW`, such as `02:00-05:00`
-in the time zone `TZ` (default UTC), keeps installs out of working hours.
+Coolify or the server replaces web and worker while it deploys. `UPDATE_WINDOW`, such
+as `02:00-05:00` in the time zone `TZ` (default UTC), keeps installs out of working
+hours.
 
 ## Switch it on
 
-Set up [backups](#backups) first. Then, in Coolify:
+Set up [backups](#backups) first.
+
+### On Coolify
 
 1. Under Settings > Advanced, turn on API Access if it is off.
 2. Under Keys & Tokens > API Tokens, create a token with only the `deploy` permission;
@@ -62,26 +67,23 @@ The `updater` container's log then says which tag it watches, and later each
 deployment it starts or that the platform refused. The sidebar shows the running
 version.
 
-### Other platforms
+### On Debian
 
-Any platform with a deploy link that redeploys on `POST` works. Set
-`UPDATE_DEPLOY_HOOK_TOKEN` only when the platform expects a bearer token. The deploy
-must pull the image again; `compose.yaml` asks Docker Compose to do that with
-`pull_policy: always`. Use an `https://` link, since the token travels with every
-call.
+As root in `/srv/iam` ([deployment.md](deployment.md#debian)), with
+`UPDATE_DEPLOY_HOOK_URL` empty:
 
-### Docker Compose without a platform
-
-Without a deploy link, leave `UPDATE_DEPLOY_HOOK_URL` empty and run Docker Compose
-every hour, for example with cron:
-
-```cron
-0 * * * * cd /srv/iam && docker compose up --detach --quiet-pull
+```sh
+docker compose up -d --pull always
+docker compose run --rm -T --pull always updater host-setup > updater-setup.sh
+sh updater-setup.sh
 ```
 
-It pulls the tag and replaces only containers whose image changed, after the migration
-job has finished. Watch the repository's releases on GitHub for releases outside the
-series (Watch > Custom > Releases).
+The first command starts the image the tag points to now, which the updater takes as
+installed. The second writes the setup script from the updater's image; read it before
+you run it. The script installs a systemd unit that waits for the updater's request,
+then pulls the new image and runs `docker compose up -d`, migrations first.
+`docker compose logs updater` names the tag it watches, and
+`journalctl -u meldgrove-updater-iam.service` shows each installation.
 
 ## Backups
 
@@ -99,5 +101,8 @@ backup from before the update.
 
 ## Switch it off
 
-Clear `UPDATE_DEPLOY_HOOK_URL` and redeploy, or set `IAM_VERSION` to an
-exact version.
+- **Coolify:** clear `UPDATE_DEPLOY_HOOK_URL` and redeploy.
+- **Debian:** as root in `/srv/iam`, run `sh updater-setup.sh remove`.
+
+Or set `IAM_VERSION` to an exact version and redeploy (on Debian,
+`docker compose up -d`).
