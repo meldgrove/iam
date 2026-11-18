@@ -75,6 +75,31 @@ def test_account_comparison_links_by_email_and_reports_drift(fake_connection, fa
     ]
 
 
+def test_a_listing_without_most_accounts_is_not_recorded(fake_connection, fake_store, admin_user):
+    for n in range(15):
+        fake_store.accounts[f"x{n}"] = {
+            "username": f"user{n}",
+            "email": "",
+            "active": True,
+            "groups": set(),
+        }
+    assert compare_accounts(fake_connection).summary["accounts"] == 15
+    # A few accounts really are gone.
+    for n in range(3):
+        del fake_store.accounts[f"x{n}"]
+    assert compare_accounts(fake_connection).summary["missing"] == 3
+    # An answer that only seems empty.
+    saved, fake_store.accounts = fake_store.accounts, {}
+    run = compare_accounts(fake_connection)
+    assert run.status == SyncRun.Status.FAILED
+    assert "listed 0 accounts, without 12 of the 12" in run.error
+    assert Account.objects.filter(status=Account.Status.ACTIVE).count() == 12
+    # An admin who knows they are gone records it.
+    run = compare_accounts(fake_connection, actor=admin_user)
+    assert run.status == SyncRun.Status.SUCCEEDED and run.summary["missing"] == 12
+    fake_store.accounts = saved
+
+
 def test_account_comparison_reports_missing_access(fake_connection, fake_store, person):
     Person.objects.filter(pk=person.pk).update(status=Person.Status.ACTIVE)
     run = compare_accounts(fake_connection)
