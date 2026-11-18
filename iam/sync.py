@@ -55,6 +55,33 @@ def _run(connection: Connection, kind: str, actor, body) -> SyncRun:
     return run
 
 
+def recover_stopped_reads() -> int:
+    """Close scheduled reads whose worker stopped midway (a crash, the
+    watchdog) as failed, and start their connection's pause after a failure
+    now: a read that keeps stopping its worker then waits its turn instead
+    of coming first again and holding up every other read. Only call it
+    while holding the read lock (iam.schedule.run_due_sync), when no
+    scheduled read runs."""
+    now = timezone.now()
+    stopped = SyncRun.objects.filter(status=SyncRun.Status.RUNNING, triggered_by=None)
+    count = 0
+    for run in stopped.select_related("connection"):
+        with transaction.atomic():
+            run.status = SyncRun.Status.FAILED
+            run.error = "The worker stopped during this read."
+            run.finished_at = now
+            run.save(update_fields=["status", "error", "finished_at"])
+            Connection.objects.filter(pk=run.connection_id).update(last_sync_at=now)
+            audit.record(
+                f"sync.{run.kind}",
+                f"{run.get_kind_display()} from {run.connection.name}: failed",
+                target=run,
+                details={"error": run.error},
+            )
+        count += 1
+    return count
+
+
 # -- groups ------------------------------------------------------------------------
 
 
@@ -109,14 +136,40 @@ def can_compare_accounts(connection: Connection) -> bool:
     return reader() if callable(reader) else True
 
 
+# A scheduled comparison that would mark at least this many accounts, and
+# more than half of those the app saw, as not found records nothing.
+VANISHED_LIMIT = 10
+
+
 def compare_accounts(connection: Connection, actor=None) -> SyncRun:
     def body(adapter, run):
         if not can_compare_accounts(connection):
             raise SyncError(f"{connection.name} cannot list accounts.")
         listed = list(adapter.list_accounts())
+        if actor is None:
+            _check_listing(connection, listed)
         return {**record_listing(connection, listed), **drift(connection)}
 
     return _run(connection, SyncRun.Kind.ACCOUNTS, actor, body)
+
+
+def _check_listing(connection: Connection, listed) -> None:
+    """Refuse a listing that lacks most of the accounts the app saw: such an
+    answer (an empty page, a permission that changed) is more likely broken
+    than true. A comparison an admin starts records it anyway."""
+    seen = {account.external_id for account in listed}
+    known = set(
+        connection.accounts.exclude(external_id="")
+        .exclude(status=Account.Status.MISSING)
+        .values_list("external_id", flat=True)
+    )
+    vanished = len(known - seen)
+    if vanished >= VANISHED_LIMIT and vanished * 2 > len(known):
+        raise SyncError(
+            f"{connection.name} listed {len(seen)} accounts, without {vanished} of the "
+            f"{len(known)} it listed before. Nothing was recorded: an answer like this is more "
+            "likely broken than true. If the accounts are really gone, use Compare accounts now."
+        )
 
 
 def drift(connection: Connection) -> dict:

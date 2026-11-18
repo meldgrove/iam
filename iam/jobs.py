@@ -320,7 +320,11 @@ def recover_stale_jobs() -> int:
             job.locked_until = None
             job.next_attempt_at = timezone.now()
             job.last_error = "The worker stopped while running this job; it runs again."
-            job.save(update_fields=["status", "locked_until", "next_attempt_at", "last_error"])
+            # The next run checks whether this one created an account it never recorded.
+            job.result = {**job.result, "interrupted": True}
+            job.save(
+                update_fields=["status", "locked_until", "next_attempt_at", "last_error", "result"]
+            )
             count += 1
     return count
 
@@ -361,6 +365,8 @@ def run_job(job: Job) -> Job:
                 managed_groups=managed_groups(job),
                 found=found,
             )
+            if _created_by_a_stopped_worker(job, adapter, person, found, result):
+                result.credentials_problem = _lost_sign_in(connection, person)
         else:
             result = adapter.disable_account(
                 spec, external_id=external_id, managed_groups=managed_groups(job), found=found
@@ -412,6 +418,36 @@ def _checked_account(
             )
         external_id = found.external_id
     return external_id, found
+
+
+def _created_by_a_stopped_worker(
+    job: Job, adapter, person: Person, found: ExternalAccount | None, result: EnsureResult
+) -> bool:
+    """Whether the account may be one that a worker created and stopped
+    before recording: the job ran before and was interrupted, and it finds
+    an account the app does not know as the person's. The sign-in details
+    that worker arranged never reached anyone."""
+    return bool(
+        job.result.get("interrupted")
+        and found is not None
+        and not result.created
+        and not result.initial_password
+        and not result.credentials_problem
+        and adapter.hands_out_sign_in()
+        and not Account.objects.filter(
+            connection_id=job.connection_id, person=person, external_id=found.external_id
+        ).exists()
+    )
+
+
+def _lost_sign_in(connection: Connection, person: Person) -> str:
+    return (
+        f"The worker stopped while it set up the {connection.name} account of "
+        f"{person.full_name}, after the account was created. The sign-in details it "
+        f"arranged (an initial password or a setup email) may never have reached them. Ask "
+        f"whether they can sign in; if not, set a new temporary password in "
+        f"{connection.name} or send its setup email again, and hand it over in a safe way."
+    )
 
 
 def record_account_step(job: Job, result: EnsureResult | DisableResult) -> str:
@@ -899,7 +935,7 @@ def hand_over_sign_in(job: Job, result: EnsureResult | DisableResult) -> None:
         return
     if result.initial_password:
         deliver_initial_password(job, result.initial_password)
-    elif result.created and result.credentials_problem:
+    elif result.credentials_problem:
         _open_credentials_task(job, result.credentials_problem)
 
 

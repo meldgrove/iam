@@ -2,6 +2,15 @@ import httpx
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def pauses(monkeypatch):
+    """Reads that adapters try again pause without sleeping in tests; the
+    pauses they asked for are listed here."""
+    asked = []
+    monkeypatch.setattr("iam.adapters.base.pause", asked.append)
+    return asked
+
+
 @pytest.fixture
 def mock_transport():
     """Build an httpx.MockTransport from a handler(request) -> httpx.Response

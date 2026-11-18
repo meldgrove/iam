@@ -536,3 +536,13 @@ def test_a_refused_temporary_password_becomes_a_credentials_problem(keycloak, mo
     ).ensure_account(spec(), groups=set(), managed_groups=set())
     assert result.initial_password is None
     assert "did not set a temporary password (400)" in result.credentials_problem
+
+
+def test_keycloak_hands_out_sign_in_unless_both_ways_are_off(keycloak, mock_transport):
+    assert adapter_for(keycloak, mock_transport).hands_out_sign_in()
+    assert adapter_for(
+        keycloak, mock_transport, send_setup_email=False, set_temporary_password=True
+    ).hands_out_sign_in()
+    assert not adapter_for(
+        keycloak, mock_transport, send_setup_email=False, set_temporary_password=False
+    ).hands_out_sign_in()

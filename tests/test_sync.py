@@ -4,7 +4,7 @@ import pytest
 from django.core.management import call_command
 from django.utils import timezone
 
-from iam.adapters.base import HRRecord
+from iam.adapters.base import HRRecord, TransientError
 from iam.models import (
     AccessProfile,
     Account,
@@ -18,7 +18,7 @@ from iam.models import (
     WorkerHeartbeat,
     Workflow,
 )
-from iam.schedule import run_due_syncs, start_due_offboarding, start_due_onboarding
+from iam.schedule import run_due_sync, start_due_offboarding, start_due_onboarding
 from iam.sync import compare_accounts, import_groups, import_people
 
 pytestmark = pytest.mark.django_db
@@ -73,6 +73,31 @@ def test_account_comparison_links_by_email_and_reports_drift(fake_connection, fa
     assert run.summary["unexpected_access"] == [
         {"id": person.pk, "name": "Ada Lovelace", "status": "offboarded"}
     ]
+
+
+def test_a_listing_without_most_accounts_is_not_recorded(fake_connection, fake_store, admin_user):
+    for n in range(15):
+        fake_store.accounts[f"x{n}"] = {
+            "username": f"user{n}",
+            "email": "",
+            "active": True,
+            "groups": set(),
+        }
+    assert compare_accounts(fake_connection).summary["accounts"] == 15
+    # A few accounts really are gone.
+    for n in range(3):
+        del fake_store.accounts[f"x{n}"]
+    assert compare_accounts(fake_connection).summary["missing"] == 3
+    # An answer that only seems empty.
+    saved, fake_store.accounts = fake_store.accounts, {}
+    run = compare_accounts(fake_connection)
+    assert run.status == SyncRun.Status.FAILED
+    assert "listed 0 accounts, without 12 of the 12" in run.error
+    assert Account.objects.filter(status=Account.Status.ACTIVE).count() == 12
+    # An admin who knows they are gone records it.
+    run = compare_accounts(fake_connection, actor=admin_user)
+    assert run.status == SyncRun.Status.SUCCEEDED and run.summary["missing"] == 12
+    fake_store.accounts = saved
 
 
 def test_account_comparison_reports_missing_access(fake_connection, fake_store, person):
@@ -225,12 +250,106 @@ def test_schedule_offboards_the_day_after_the_last_day(person):
 def test_due_syncs_run_on_their_interval(fake_connection, fake_store):
     fake_connection.settings = {"sync_interval_minutes": 30}
     fake_connection.save()
-    assert run_due_syncs() == 1
-    assert run_due_syncs() == 0
+    assert run_due_sync().kind == SyncRun.Kind.ACCOUNTS
+    assert run_due_sync() is None
     Connection.objects.filter(pk=fake_connection.pk).update(
         last_sync_at=timezone.now() - timedelta(minutes=31)
     )
-    assert run_due_syncs() == 1
+    assert run_due_sync() is not None
+
+
+def test_a_failed_read_comes_again_sooner_than_its_interval(fake_connection, fake_store):
+    fake_connection.settings = {"sync_interval_minutes": 360}
+    fake_connection.save()
+    fake_store.fail_with = TransientError("Fake app answered 503.")
+
+    def minutes_ago(minutes):
+        Connection.objects.filter(pk=fake_connection.pk).update(
+            last_sync_at=timezone.now() - timedelta(minutes=minutes)
+        )
+
+    assert run_due_sync().status == SyncRun.Status.FAILED
+    minutes_ago(14)
+    assert run_due_sync() is None
+    minutes_ago(16)
+    assert run_due_sync().status == SyncRun.Status.FAILED
+    # Each failure waits twice as long, and never longer than the interval.
+    minutes_ago(29)
+    assert run_due_sync() is None
+    minutes_ago(31)
+    fake_store.fail_with = None
+    assert run_due_sync().status == SyncRun.Status.SUCCEEDED
+    minutes_ago(300)
+    assert run_due_sync() is None
+
+
+def test_a_long_interval_is_reached_after_enough_failures(fake_connection, fake_store):
+    fake_connection.settings = {"sync_interval_minutes": 1440}
+    fake_connection.save()
+    start = timezone.now() - timedelta(days=3)
+    for n in range(8):
+        SyncRun.objects.create(
+            connection=fake_connection,
+            kind=SyncRun.Kind.ACCOUNTS,
+            status=SyncRun.Status.FAILED,
+            started_at=start + timedelta(minutes=n),
+        )
+    Connection.objects.filter(pk=fake_connection.pk).update(
+        last_sync_at=timezone.now() - timedelta(minutes=1000)
+    )
+    assert run_due_sync() is None, "a daily read that keeps failing runs once a day"
+
+
+def test_a_read_that_stopped_its_worker_waits_its_turn(
+    fake_connection, fake_store, hr_connection, admin_user
+):
+    fake_connection.settings = {"sync_interval_minutes": 60}
+    fake_connection.save()
+    long_ago = timezone.now() - timedelta(hours=5)
+    Connection.objects.filter(pk=fake_connection.pk).update(last_sync_at=long_ago)
+    Connection.objects.filter(pk=hr_connection.pk).update(
+        last_sync_at=timezone.now() - timedelta(minutes=90)
+    )
+    # The worker died during the comparison, e.g. ended by its watchdog.
+    stopped = SyncRun.objects.create(connection=fake_connection, kind=SyncRun.Kind.ACCOUNTS)
+    by_admin = SyncRun.objects.create(
+        connection=hr_connection, kind=SyncRun.Kind.PEOPLE, triggered_by=admin_user
+    )
+    assert run_due_sync().connection == hr_connection
+    stopped.refresh_from_db()
+    assert stopped.status == SyncRun.Status.FAILED and stopped.finished_at is not None
+    assert run_due_sync() is None, "the stopped read pauses as after any failure"
+    by_admin.refresh_from_db()
+    assert by_admin.status == SyncRun.Status.RUNNING, "a read a person started is left alone"
+
+
+def test_one_read_per_round_the_most_overdue_first(fake_connection, fake_store, hr_connection):
+    fake_connection.settings = {"sync_interval_minutes": 60}
+    fake_connection.save()
+    Connection.objects.filter(pk=fake_connection.pk).update(
+        last_sync_at=timezone.now() - timedelta(minutes=90)
+    )
+    Connection.objects.filter(pk=hr_connection.pk).update(
+        last_sync_at=timezone.now() - timedelta(minutes=120)
+    )
+    assert run_due_sync().connection == hr_connection
+    assert run_due_sync().connection == fake_connection
+    assert run_due_sync() is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_worker_runs_the_jobs_before_a_read(person, fake_connection, fake_store, monkeypatch):
+    from iam.lifecycle import start_workflow
+
+    seen = []
+
+    def read():
+        seen.append(Job.objects.get().status)
+
+    monkeypatch.setattr("iam.management.commands.run_worker.run_due_sync", read)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    call_command("run_worker", "--once")
+    assert seen == [Job.Status.SUCCEEDED]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -242,6 +361,26 @@ def test_worker_runs_jobs_and_beats(person, fake_store):
     call_command("run_worker", "--once")
     assert Job.objects.get().status == Job.Status.SUCCEEDED
     assert WorkerHeartbeat.objects.filter(name="worker").exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_heartbeat_goes_on_during_long_work_only_while_the_worker_gets_answers(
+    monkeypatch,
+):
+    import time
+
+    from iam import liveness
+    from iam.management.commands.run_worker import PROGRESS_SECONDS, Command
+
+    worker = Command()
+    worker.last_beat = None
+    liveness.note_progress()  # e.g. a page of a long listing arrived
+    assert worker.beat_if_progressing()
+    beat = WorkerHeartbeat.objects.get(name="worker").beat_at
+    worker.last_beat = None
+    monkeypatch.setattr(liveness, "_last_progress", time.monotonic() - PROGRESS_SECONDS)
+    assert not worker.beat_if_progressing(), "a stuck worker stops beating"
+    assert WorkerHeartbeat.objects.get(name="worker").beat_at == beat
 
 
 def test_one_failing_person_does_not_stop_the_schedule(person, monkeypatch):
@@ -299,6 +438,30 @@ def test_one_worker_at_a_time_runs_the_schedule(person):
     finally:
         other.close()
     assert run_schedule()["onboarding"] == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_worker_that_reads_holds_up_neither_the_schedule_nor_other_reads(
+    person, fake_connection, fake_store
+):
+    from django.db import connection, connections
+
+    from iam.schedule import SYNC_LOCK_ID, run_schedule
+
+    if connection.vendor != "postgresql":
+        pytest.skip("SQLite runs one worker.")
+    fake_connection.settings = {"sync_interval_minutes": 60}
+    fake_connection.save()
+    Person.objects.filter(pk=person.pk).update(start_date=timezone.localdate())
+    other = connections.create_connection("default")
+    try:
+        with other.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_lock(%s)", [SYNC_LOCK_ID])
+        assert run_due_sync() is None, "another worker is reading"
+        assert run_schedule()["onboarding"] == 1
+    finally:
+        other.close()
+    assert run_due_sync() is not None
 
 
 def test_drift_reports_planned_people_with_active_accounts(fake_connection, fake_store, person):

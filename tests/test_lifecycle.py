@@ -123,6 +123,37 @@ def test_offboarding_reaches_profile_connections_without_known_accounts(person, 
     assert workflow.jobs.get().action == Job.Action.DISABLE_ACCOUNT
 
 
+def test_offboarding_checks_an_account_a_comparison_missed(
+    person, fake_store, fake_connection, profile
+):
+    # An account the profile does not grant, linked by a comparison. A later
+    # listing missed it (a page that shifted, an empty answer): it still exists.
+    fake_store.accounts["x1"] = {
+        "username": "ada",
+        "email": "ada@example.invalid",
+        "active": True,
+        "groups": set(),
+    }
+    profile.grants.all().delete()
+    Account.objects.create(
+        connection=fake_connection,
+        person=person,
+        external_id="x1",
+        status=Account.Status.MISSING,
+    )
+    person.status = Person.Status.ACTIVE
+    person.save()
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    assert workflow.jobs.get().action == Job.Action.DISABLE_ACCOUNT
+    run_all()
+    assert fake_store.accounts["x1"]["active"] is False
+    # An access update leaves accounts last seen missing to the comparison.
+    Account.objects.filter(person=person).update(status=Account.Status.MISSING)
+    person.status = Person.Status.ACTIVE
+    person.save()
+    assert not start_workflow(person, Workflow.Kind.ACCESS_UPDATE).jobs.exists()
+
+
 def test_new_workflow_replaces_the_open_one(person):
     first = start_workflow(person, Workflow.Kind.ONBOARDING)
     second = start_workflow(person, Workflow.Kind.OFFBOARDING)
@@ -300,6 +331,66 @@ def test_initial_password_is_emailed_never_stored(person, fake_store, monkeypatc
     # The audit log shows where it went, without keeping the private address.
     summary = AuditEvent.objects.get(action="credentials.sent").summary
     assert "a***@personal.example.invalid" in summary and "ada@" not in summary
+
+
+def stop_the_worker_after_the_change(job, monkeypatch):
+    """Run the job until the app changed the account, and stop the worker
+    there, before it records anything: a deploy, a crash, a lost database."""
+
+    def killed(*args, **kwargs):
+        raise KeyboardInterrupt("worker killed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("iam.jobs.succeed_job", killed)
+        with pytest.raises(KeyboardInterrupt):
+            run_job(job)
+    Job.objects.filter(pk=job.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
+    assert recover_stale_jobs() == 1
+
+
+def test_sign_in_details_lost_with_a_stopped_worker_become_a_task(person, fake_store, monkeypatch):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    sent = []
+    monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(to) or True)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    stop_the_worker_after_the_change(claim_next_job(), monkeypatch)
+    run_all()
+    job = Job.objects.get()
+    assert job.status == Job.Status.SUCCEEDED
+    assert [c for c in fake_store.calls if c.startswith("create")] == ["create:ada"]
+    assert not sent, "the password died with the worker"
+    task = Task.objects.get(kind=Task.Kind.CREDENTIALS)
+    assert "may never have reached them" in task.instructions
+    assert "Initial-Pass-123" not in task.instructions
+
+
+def test_a_worker_that_stopped_before_the_change_hands_over_sign_in_as_usual(
+    person, fake_store, monkeypatch
+):
+    from tests.fakes import FakeAdapter
+
+    FakeAdapter.password = "Initial-Pass-123"
+    sent = []
+    monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(to) or True)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    job = claim_next_job()
+    Job.objects.filter(pk=job.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
+    recover_stale_jobs()
+    run_all()
+    assert sent == [["ada@personal.example.invalid"]]
+    assert not Task.objects.exists()
+
+
+def test_apps_without_sign_in_details_get_no_task_after_a_stopped_worker(
+    person, fake_store, monkeypatch
+):
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    stop_the_worker_after_the_change(claim_next_job(), monkeypatch)
+    run_all()
+    assert Job.objects.get().status == Job.Status.SUCCEEDED
+    assert not Task.objects.exists()
 
 
 def test_approvers_cannot_offboard_an_admin_of_this_app(person, approver_user, admin_user):

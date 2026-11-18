@@ -193,6 +193,12 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
             "connection_id", flat=True
         )
     )
+    known = [Account.Status.ACTIVE, Account.Status.UNKNOWN]
+    if offboarding:
+        # A comparison can miss an account (a page that shifted, an answer
+        # that only seemed empty); disabling one that is really gone changes
+        # nothing.
+        known.append(Account.Status.MISSING)
     settings = AppSettings.load()
     jobs = []
     for connection in provisioning_connections(include_disabled=offboarding):
@@ -209,10 +215,7 @@ def _plan_jobs(workflow: Workflow, person: Person) -> list[Job]:
                 managed_groups=managed,
             )
         else:
-            has_account = account is not None and account.status in (
-                Account.Status.ACTIVE,
-                Account.Status.UNKNOWN,
-            )
+            has_account = account is not None and account.status in known
             if not has_account and connection.pk not in entitled and connection.pk not in creating:
                 continue
             job = Job(

@@ -82,7 +82,24 @@ if not DATABASE_URL:
     # fresh checkout (or the test image) has no var/ for the SQLite file.
     (BASE_DIR / "var").mkdir(exist_ok=True)
     DATABASE_URL = f"sqlite:///{BASE_DIR / 'var/development.sqlite3'}"
-DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=60)}
+# A reused connection is checked before each request and worker round, so a
+# database restart or failover costs no failed request.
+DATABASES = {
+    "default": dj_database_url.parse(DATABASE_URL, conn_max_age=60, conn_health_checks=True)
+}
+if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+    # Give up on an unreachable server after 10 seconds, and notice within
+    # about a minute that a server went away mid-query (a failover without a
+    # goodbye), instead of after the operating system's two hours. Values in
+    # DATABASE_URL (?connect_timeout=...) win.
+    for _name, _value in {
+        "connect_timeout": 10,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+    }.items():
+        DATABASES["default"].setdefault("OPTIONS", {}).setdefault(_name, _value)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "iam.User"
 
@@ -178,6 +195,8 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
 # The worker (manage.py run_worker) runs provisioning jobs and the schedule.
 WORKER_POLL_SECONDS = float(env("WORKER_POLL_SECONDS", "5"))
 WORKER_HEARTBEAT_MAX_AGE_SECONDS = int(env("WORKER_HEARTBEAT_MAX_AGE_SECONDS", "300"))
+# A worker without progress for this long is stuck; it ends so that it restarts.
+WORKER_STALL_SECONDS = int(env("WORKER_STALL_SECONDS", "600"))
 JOB_LEASE_SECONDS = int(env("JOB_LEASE_SECONDS", "300"))
 HEALTHCHECK_TOKEN = env("HEALTHCHECK_TOKEN", "")
 # Outbound calls to connected apps.

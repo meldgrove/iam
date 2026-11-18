@@ -191,6 +191,9 @@ class GoogleWorkspaceAdapter(Adapter):
                 return
             params["pageToken"] = token
 
+    def hands_out_sign_in(self) -> bool:
+        return bool(self.setting("deliver_initial_password", True))
+
     def test_connection(self) -> TestResult:
         self._request(
             "GET", "/users", "list users", params={"customer": self.customer, "maxResults": 1}

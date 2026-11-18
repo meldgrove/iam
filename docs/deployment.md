@@ -7,7 +7,7 @@ from `compose.yaml`:
 | --- | --- | --- |
 | `migrate` | `manage.py migrate` | Runs once per deploy; web and worker wait for it. |
 | `web` | gunicorn on port 8000 | Behind a reverse proxy that terminates HTTPS. |
-| `worker` | `manage.py run_worker` | Runs jobs and the schedule. Exactly one is enough; more are safe. |
+| `worker` | `manage.py run_worker` | Runs jobs, the schedule and reads from connections. One is enough; with a second, one runs jobs while the other reads a big directory. |
 | `updater` | Meldgrove Updater | Installs new releases ([updates.md](updates.md)). |
 
 PostgreSQL 16 or newer runs separately (a managed database, or its own Coolify
@@ -50,12 +50,24 @@ docker compose run --rm web python manage.py createadmin --email admin@example.i
 
 ## Health
 
-- `GET /-/healthz`: the web process answers (liveness).
+- `GET /-/healthz`: the web process answers (liveness). The web
+  healthcheck in `compose.yaml` uses it.
 - `GET /-/readyz`: database reachable and worker heartbeat younger than
   `WORKER_HEARTBEAT_MAX_AGE_SECONDS`; 503 otherwise. With the header
   `X-Health-Token: <HEALTHCHECK_TOKEN>` it also lists each check and the
-  version. The worker's healthcheck in `compose.yaml` uses it.
+  version.
+- The worker's healthcheck in `compose.yaml` checks a file its watchdog
+  touches while the worker makes progress. A stuck worker ends itself and
+  the restart policy starts it again.
 - The dashboard warns when the worker has not reported in time.
+
+Nothing in the app alerts anyone when the worker stops: point an uptime
+monitor (Uptime Kuma, Better Stack, a cloud provider's checks) at
+`https://iam.example.invalid/-/readyz`. It answers 503 when the database is
+unreachable or the worker is stale, without the token too.
+
+`compose.yaml` gives the worker two minutes to finish the job it is running
+when a deploy stops it, and web 40 seconds to finish its requests.
 
 ## First steps after the first sign-in
 

@@ -19,15 +19,19 @@ never put tokens, passwords or full provider responses in them.
 
 from __future__ import annotations
 
+import email.utils
 import secrets
 import string
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any, ClassVar
 
 import httpx
 from django.conf import settings
+
+from ..liveness import note_progress
 
 
 class AdapterKind:
@@ -205,6 +209,71 @@ def generate_password(length: int = 20) -> str:
 # Default of `found`: the operation looks the account up itself.
 LOOK_UP = object()
 
+# Answers to a read that a moment later can turn out fine.
+RETRY_STATUSES = frozenset({429, 502, 503, 504})
+# Pauses before the second and the third try of a read.
+RETRY_PAUSES = (1.0, 4.0)
+# The pauses of one request add up to at most this, which also bounds how
+# long a page that reads a connected app waits. A server that asks for more
+# gets it from the job's or the read's own retry, later.
+MAX_RETRY_WAIT_SECONDS = 30.0
+
+
+def pause(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def retry_after(response: httpx.Response) -> float | None:
+    """The pause a Retry-After header asks for, in seconds."""
+    value = response.headers.get("Retry-After", "").strip()
+    if not value:
+        return None
+    if value.isascii() and value.isdigit():
+        return float(value)
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max((when - datetime.now(UTC)).total_seconds(), 0.0)
+
+
+class ProviderClient(httpx.Client):
+    """The HTTP client of every adapter.
+
+    A read (GET or HEAD) that a rate limit, a 502, 503 or 504, or a refused
+    connection stops is tried up to twice more, after the pause the server
+    asks for or a short one, so one hiccup in a long listing does not fail
+    the whole read. A connection that timed out is not tried again: the
+    next try would wait as long. Changes are never sent twice here: whether a change
+    landed is unknown, and the adapters handle a lost answer themselves.
+    Every answer counts as progress for the worker's watchdog."""
+
+    def send(self, request: httpx.Request, **kwargs) -> httpx.Response:
+        pauses = list(RETRY_PAUSES) if request.method in ("GET", "HEAD") else []
+        budget = MAX_RETRY_WAIT_SECONDS
+        while True:
+            try:
+                response = super().send(request, **kwargs)
+            except httpx.ConnectError:
+                if not pauses:
+                    raise
+                wait = pauses.pop(0)
+            else:
+                note_progress()
+                if not pauses or response.status_code not in RETRY_STATUSES:
+                    return response
+                asked = retry_after(response)
+                wait = pauses.pop(0)
+                if asked is not None:
+                    wait = asked
+                if wait > budget:
+                    return response
+                response.close()
+            budget -= wait
+            pause(wait)
+
 
 class Adapter:
     # Templates show adapter classes; never let them instantiate one.
@@ -255,7 +324,7 @@ class Adapter:
             raise ConfigurationError(f"Missing settings: {', '.join(missing)}.")
 
     def http(self, base_url: str = "", **kwargs) -> httpx.Client:
-        return httpx.Client(
+        return ProviderClient(
             base_url=base_url,
             timeout=kwargs.pop("timeout", settings.PROVIDER_TIMEOUT_SECONDS),
             transport=self.transport,
@@ -321,6 +390,12 @@ class Adapter:
 
     def list_accounts(self) -> Iterable[ExternalAccount]:
         return []
+
+    def hands_out_sign_in(self) -> bool:
+        """Whether creating an account arranges its first sign-in, such as an
+        initial password or a setup email. A worker that stops between the
+        create and recording it loses that, and a person must check it."""
+        return False
 
     def manual_instructions(self, action: str, spec: AccountSpec, groups: list[str]) -> str:
         """Steps for a person when this app cannot or may not make a change."""
