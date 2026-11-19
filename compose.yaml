@@ -1,9 +1,12 @@
 # Production: the application as one stack (migrations, web, worker, updater).
 # PostgreSQL runs separately (a managed database or its own Coolify resource);
 # set DATABASE_URL to it. Local development uses compose.dev.yaml.
-# IAM_VERSION names a release series such as 0.1 (every 0.1.x release), latest,
-# or an exact version (docs/updates.md). Every deploy pulls the tag again.
-# Coolify reads this file from the branch `stable`, which is at the newest release.
+# IAM_VERSION is the image tag (docs/updates.md). On Coolify it names what to
+# follow: a release series such as 0.1 (every 0.1.x release), latest, preview, or
+# an exact version. On a Debian server with the updater's host setup, the updater
+# writes the installed version into .env, such as 0.1.3. Every deploy pulls the
+# tag again. Coolify reads this file from the branch `stable`, which is at the
+# newest release.
 x-image: &image ghcr.io/meldgrove/iam:${IAM_VERSION:?Set the release series, e.g. 0.1}
 
 x-application: &application
@@ -41,6 +44,8 @@ x-application: &application
     SENTRY_DSN: ${SENTRY_DSN:-}
     SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
     SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+    # The updater below, for the admins' update button (docs/updates.md).
+    UPDATER_URL: ${UPDATER_URL:-http://updater:8080}
 
 services:
   # One-time job. Coolify leaves services with restart "no" out of the stack's
@@ -84,23 +89,27 @@ services:
       timeout: 5s
       retries: 3
 
-  # Automatic updates (docs/updates.md): off until UPDATE_DEPLOY_HOOK_URL is set
-  # (Coolify) or the server watches the volume `updater` (Debian: `updater
-  # host-setup`). When the tag in IAM_VERSION points to a new image, it calls that
-  # deploy link or leaves a request in the volume, and Coolify or the server
-  # deploys the new release.
+  # Updates (docs/updates.md): checks for new versions, shows them to admins in
+  # the app (the update button, Admin > Settings > Updates) and installs them:
+  # through Coolify's deploy link (UPDATE_DEPLOY_HOOK_URL), or through the
+  # server's host setup (Debian: `updater host-setup`), which writes the
+  # installed version into IAM_VERSION in .env. Without either, it only checks.
+  # Its API has no authentication: never publish its port.
   updater:
-    image: ghcr.io/meldgrove/updater:0.1
+    image: ghcr.io/meldgrove/updater:0.2
     pull_policy: ${PULL_POLICY:-always}
     restart: unless-stopped
     mem_limit: 64m
     environment:
       IMAGE: *image
+      VERSION_VARIABLE: IAM_VERSION
       DEPLOY_HOOK_URL: ${UPDATE_DEPLOY_HOOK_URL:-}
       DEPLOY_HOOK_TOKEN: ${UPDATE_DEPLOY_HOOK_TOKEN:-}
       COOLDOWN: ${UPDATE_COOLDOWN:-3d}
       WINDOW: ${UPDATE_WINDOW:-}
       TZ: ${TZ:-UTC}
+      REGISTRY_USERNAME: ${UPDATE_REGISTRY_USERNAME:-}
+      REGISTRY_PASSWORD: ${UPDATE_REGISTRY_PASSWORD:-}
     volumes:
       - updater:/trigger
 
