@@ -270,6 +270,7 @@ def test_automatic_removals_over_the_limit_wait_for_approval(person, fake_store,
     settings.save()
     start_workflow(person, Workflow.Kind.ONBOARDING)
     run_all()
+    Person.objects.filter(pk=person.pk).update(end_date=timezone.localdate() - timedelta(days=1))
     workflow = start_workflow(person, Workflow.Kind.OFFBOARDING, automatic=True)
     job = workflow.jobs.get()
     assert job.status == Job.Status.HELD
@@ -284,6 +285,7 @@ def test_rejecting_a_held_removal_keeps_the_account(person, fake_store, admin_us
     AppSettings.objects.update_or_create(pk=1, defaults={"removal_limit_per_day": 0})
     start_workflow(person, Workflow.Kind.ONBOARDING)
     run_all()
+    Person.objects.filter(pk=person.pk).update(end_date=timezone.localdate() - timedelta(days=1))
     job = start_workflow(person, Workflow.Kind.OFFBOARDING, automatic=True).jobs.get()
     reject_job(job, actor=admin_user)
     job.refresh_from_db()
@@ -408,6 +410,25 @@ def test_approvers_cannot_offboard_an_admin_of_this_app(person, approver_user, a
     start_workflow(person, Workflow.Kind.OFFBOARDING, actor=admin_user)
     admin_user.refresh_from_db()
     assert not admin_user.is_active
+
+
+@pytest.mark.parametrize("new_end_date", [None, 0, 7])
+def test_automatic_offboarding_rechecks_the_current_last_day(person, admin_user, new_end_date):
+    today = timezone.localdate()
+    person.status = Person.Status.ACTIVE
+    person.end_date = today - timedelta(days=1)
+    person.save(update_fields=["status", "end_date"])
+    admin_user.person = person
+    admin_user.save(update_fields=["person"])
+
+    Person.objects.filter(pk=person.pk).update(
+        end_date=None if new_end_date is None else today + timedelta(days=new_end_date)
+    )
+    with pytest.raises(LifecycleError, match="last day has not passed"):
+        start_workflow(person, Workflow.Kind.OFFBOARDING, automatic=True)
+    assert not Workflow.objects.exists()
+    admin_user.refresh_from_db()
+    assert admin_user.is_active
 
 
 def test_undeliverable_password_becomes_a_task(person, fake_store):

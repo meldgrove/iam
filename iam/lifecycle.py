@@ -102,8 +102,14 @@ def start_workflow(
             # Applying access during onboarding restarts the onboarding with
             # the new access, so the person still becomes active at its end.
             kind = Workflow.Kind.ONBOARDING
-        if kind == Workflow.Kind.OFFBOARDING and actor is not None:
-            _check_may_offboard(person, actor)
+        if kind == Workflow.Kind.OFFBOARDING:
+            if actor is not None:
+                _check_may_offboard(person, actor)
+            if automatic:
+                # The last day may have changed since the schedule selected this person.
+                if not person.end_date or person.end_date >= today():
+                    raise LifecycleError("The person's last day has not passed.")
+                reason = f"last day was {person.end_date:%d.%m.%Y}"
         if kind == Workflow.Kind.ONBOARDING and person.access_profile_id is None:
             raise LifecycleError("Choose an access profile before onboarding.")
         superseded = _supersede_open_workflows(person, actor)
@@ -150,12 +156,18 @@ def _supersede_open_workflows(person: Person, actor) -> list[int]:
     return ids
 
 
+def higher_role_app_user(person: Person, actor: User) -> User | None:
+    user = User.objects.filter(person=person, is_active=True).first()
+    if user is not None and ROLE_RANK.get(user.role, 0) > ROLE_RANK.get(actor.role, 0):
+        return user
+    return None
+
+
 def _check_may_offboard(person: Person, actor: User) -> None:
     """Offboarding turns off the person's app user, so nobody may offboard
     someone with a higher role in this app than their own. The schedule
     (no actor) still offboards everyone after their last day."""
-    user = User.objects.filter(person=person, is_active=True).first()
-    if user is not None and ROLE_RANK.get(user.role, 0) > ROLE_RANK.get(actor.role, 0):
+    if user := higher_role_app_user(person, actor):
         raise LifecycleError(
             f"{person.full_name} is {_with_article(user.get_role_display().lower())} of this "
             "app. Only someone with that role can start the offboarding."
