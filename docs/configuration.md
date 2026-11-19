@@ -47,8 +47,10 @@ can read the database, and the sign-in settings.
 | `SENTRY_TRACES_SAMPLE_RATE` | `0` | Performance tracing share. |
 
 Gunicorn access logs include request paths and omit query strings and
-referrers, which can carry sign-in parameters or personal data. Configure
-reverse proxy access logs separately.
+referrers, which can carry sign-in parameters or personal data. The Caddy
+example in [deployment.md](deployment.md) leaves proxy access logging off.
+If you enable access logs on a proxy, log the request path and omit queries
+and the `Referer` header there too.
 
 ## Development only
 

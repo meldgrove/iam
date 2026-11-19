@@ -31,7 +31,9 @@ schedule starts offboarding after the last day currently on record has passed.
 
 The app checks the ID token's signature (keys from the provider's JWKS),
 issuer and audience. Sign-out ends the provider session when the provider
-publishes an `end_session_endpoint`.
+publishes a valid `end_session_endpoint`. The app checks the discovery
+document's issuer and sign-in endpoints before caching it. If the provider
+returns invalid sign-in metadata, the app shows a sign-in unavailable page.
 
 ## Keycloak
 
