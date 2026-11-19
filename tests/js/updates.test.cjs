@@ -63,7 +63,10 @@ test("each status has its button state", () => {
     [response({ available: release("0.2.1"), installing: { version: "0.2.1", stage: "pulling" } }), "installing"],
     [response({ available: failedRelease, last: failedLast }), "failed"],
     [response({ available: release("0.2.1"), last: failedLast }), "available"],
-    [response({ mode: "off", automatic: false, available: release("0.2.1") }), "off"],
+    [response({ mode: "off", automatic: false }), "off"],
+    // Off installs nothing, but still offers new versions.
+    [response({ mode: "off", automatic: false, available: release("0.2.1") }), "available"],
+    [response({ mode: "off", automatic: false, attention: release("0.3.0") }), "attention"],
   ];
   for (const [answer, state] of cases) {
     assert.equal(logic.deriveState(answer), state, JSON.stringify(answer && answer.updater));
@@ -83,10 +86,8 @@ test("tooltips", () => {
 });
 
 test("a click opens the popover only when there is something to show", () => {
-  assert.equal(logic.hasPopover("current", response()), false);
-  assert.equal(logic.hasPopover("available", response()), true);
-  assert.equal(logic.hasPopover("off", response({ mode: "off" })), false);
-  assert.equal(logic.hasPopover("off", response({ mode: "off", available: release("0.2.1") })), true);
+  for (const state of ["available", "attention", "failed", "installing"]) assert.equal(logic.hasPopover(state), true);
+  for (const state of ["idle", "current", "checking", "off", "unreachable"]) assert.equal(logic.hasPopover(state), false);
 });
 
 test("the available popover", () => {
@@ -131,9 +132,12 @@ test("the attention, failed, off and installing popovers", () => {
   assert.deepEqual(failed.text, ["0.2.0 is still running."]);
   assert.equal(failed.action.label, "Try again");
 
-  const off = logic.popover("off", response({ mode: "off", available: release("0.2.1") }), { now: NOW });
+  const off = logic.popover("available", response({ mode: "off", available: release("0.2.1") }), { now: NOW });
+  assert.equal(off.title, "Update available");
   assert.equal(off.action, null);
   assert.equal(off.installs, "Automatic updates are off on this server");
+  const offFailed = logic.popover("failed", response({ mode: "off", available: failedRelease, last: failedLast }), { now: NOW });
+  assert.equal(offFailed.action, null);
 
   const installing = response({ installing: { version: "0.2.1", stage: "rolling-back", startedAt: hoursAgo(0.1), manual: true } });
   const pending = logic.pendingInstall("0.2.1", response(), NOW - 60_000);
@@ -181,4 +185,47 @@ test("relative times", () => {
   assert.equal(logic.ago(hoursAgo(26), NOW), "1 day ago");
   assert.equal(logic.ago(hoursAgo(50), NOW), "2 days ago");
   assert.equal(logic.ago("not a date", NOW), "");
+});
+
+// Answers captured from Meldgrove Updater 0.2 (tests/fixtures/updater-0.2).
+const fs = require("node:fs");
+const path = require("node:path");
+
+const FIXTURES = path.join(__dirname, "..", "fixtures", "updater-0.2");
+const sample = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name), "utf8"));
+const sampleResponse = (name) => {
+  const updater = sample(name);
+  return { app: { version: updater.installed }, reachable: true, updater, error: null };
+};
+
+test("each answer of Updater 0.2 has its button state", () => {
+  const expected = {
+    "status-off-available-attention.json": "available",
+    "status-host-available.json": "available",
+    "status-platform-locked.json": "current",
+    "status-installing.json": "installing",
+    "status-failed.json": "failed",
+    "status-preview.json": "failed",
+    "install-202.json": "installing",
+  };
+  const names = fs.readdirSync(FIXTURES).filter((name) => name.endsWith(".json"));
+  assert.deepEqual(names.sort(), Object.keys(expected).sort());
+  for (const [name, state] of Object.entries(expected)) {
+    const answer = sampleResponse(name);
+    assert.equal(logic.deriveState(answer), state, name);
+    assert.equal(logic.popover(state, answer, { now: NOW }).title !== "", logic.hasPopover(state), name);
+  }
+});
+
+test("the popovers of Updater 0.2's answers", () => {
+  const off = logic.popover("available", sampleResponse("status-off-available-attention.json"), { now: NOW });
+  assert.equal(off.meta.startsWith("0.2.1"), true);
+  assert.equal(off.action, null);
+  assert.equal(off.installs, "Automatic updates are off on this server");
+  const preview = logic.popover("failed", sampleResponse("status-preview.json"), { now: NOW });
+  assert.equal(preview.title, "Update to 0.1.3 failed");
+  assert.equal(preview.message, "container library-web-1 is unhealthy");
+  assert.equal(preview.action.version, "0.1.3");
+  const installing = logic.popover("installing", sampleResponse("status-installing.json"), { now: NOW });
+  assert.equal(installing.meta, "Downloading");
 });

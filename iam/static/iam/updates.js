@@ -190,7 +190,7 @@
     const error = (answer.body && answer.body.error) || (response && response.updater && response.updater.error);
     render();
     const current = state();
-    if (openAfter && logic.hasPopover(current, response)) openPanel();
+    if (openAfter && logic.hasPopover(current)) openPanel();
     else if (openAfter && error) showToast(error, "danger");
     else if (openAfter && current === "current") showToast(logic.tooltip(current, response, pending));
   }
@@ -283,7 +283,7 @@
   button.addEventListener("click", () => {
     if (!panel.hidden) return closePanel();
     const current = state();
-    if (logic.hasPopover(current, response)) return openPanel();
+    if (logic.hasPopover(current)) return openPanel();
     if (current === "checking") return undefined;
     if (current === "unreachable") return refresh();
     return runCheck({ openAfter: true });

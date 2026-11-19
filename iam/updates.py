@@ -1,7 +1,7 @@
 """In-app updates: a small client for the Meldgrove Updater's HTTP API
-(docs/updates.md). The updater runs next to the app in compose.yaml at
-UPDATER_URL; it has no authentication, so only admin views call it, and only
-with validated input."""
+(https://github.com/meldgrove/updater#the-apps-update-button). The updater
+runs next to the app in compose.yaml at UPDATER_URL; it has no
+authentication, so only admin views call it, and only with validated input."""
 
 from __future__ import annotations
 

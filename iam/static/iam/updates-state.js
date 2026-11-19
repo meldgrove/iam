@@ -1,12 +1,15 @@
-// The update button's logic (docs/updates.md, "Button" and "Install flow"),
-// without the page: which state an UpdatesResponse means, what the popover
-// says, and when an installation is over. updates.js draws it; the tests in
-// tests/js/ run this file in Node.
+// The update button's logic (docs/updates.md; the updater's API:
+// https://github.com/meldgrove/updater#the-apps-update-button), without the
+// page: which state an UpdatesResponse means, what the popover says, and when
+// an installation is over. updates.js draws it; the tests in tests/js/ run
+// this file in Node.
 "use strict";
 
 const IamUpdates = (() => {
   const FAILED = ["failed", "rolled-back"];
   const SLOW_AFTER_MS = 15 * 60 * 1000;
+  // The updater refuses installations while automatic updates are off.
+  const OFF = "Automatic updates are off on this server";
   const MAX_NOTES = 8;
   const STAGES = {
     requested: () => "Waiting for the server",
@@ -26,9 +29,10 @@ const IamUpdates = (() => {
     if (updater.installing) return "installing";
     if (checking || updater.checking) return "checking";
     if (failedUpdate(updater)) return "failed";
-    if (updater.mode === "off") return "off";
+    // Also with automatic updates off: the updater still offers new versions.
     if (updater.available) return "available";
     if (updater.attention) return "attention";
+    if (updater.mode === "off") return "off";
     return "current";
   }
 
@@ -65,7 +69,7 @@ const IamUpdates = (() => {
       case "failed":
         return `Update to ${updater.last.version} failed`;
       case "off":
-        return "Automatic updates are off on this server";
+        return OFF;
       case "unreachable":
         return "No update service. See the deployment guide.";
       default:
@@ -75,10 +79,8 @@ const IamUpdates = (() => {
 
   // Whether a click opens the popover; otherwise it checks (or, without an
   // update service, asks for the status again).
-  function hasPopover(state, response) {
-    if (["available", "attention", "failed", "installing"].includes(state)) return true;
-    const updater = response && response.updater;
-    return state === "off" && Boolean(updater && (updater.available || updater.attention));
+  function hasPopover(state) {
+    return ["available", "attention", "failed", "installing"].includes(state);
   }
 
   function ago(iso, now) {
@@ -128,7 +130,7 @@ const IamUpdates = (() => {
     return { title: `Install ${update.version} now?`, text: restart, url: "", danger: false };
   }
 
-  // What the popover shows, as plain data (docs/updates.md, "Popover").
+  // What the popover shows, as plain data.
   function popover(state, response, { pending = null, restarting = false, now = Date.now(), app = "The app", checking = false, error = "" } = {}) {
     const updater = (response && response.updater) || {};
     const installed = installedVersion(response);
@@ -171,6 +173,10 @@ const IamUpdates = (() => {
       model.message = updater.last.message || update.failed;
       model.text = [`${installed} is still running.`];
       model.url = update.url || "";
+      if (updater.mode === "off") {
+        model.installs = OFF;
+        return model;
+      }
       model.action = {
         label: "Try again",
         primary: true,
@@ -196,7 +202,7 @@ const IamUpdates = (() => {
       model.more = list.more;
     }
     if (updater.mode === "off") {
-      model.installs = "Automatic updates are off on this server";
+      model.installs = OFF;
       return model;
     }
     if (!attention) model.installs = installsLine(update, now);
