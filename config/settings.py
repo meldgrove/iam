@@ -162,13 +162,17 @@ USE_I18N = False
 USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Hashed, compressed static files with a manifest outside debug mode. The image
+# collects them with DJANGO_DEBUG=1 and STATIC_MANIFEST=1 (Dockerfile): without
+# the manifest, every page fails in production.
+STATIC_MANIFEST = env("STATIC_MANIFEST", "0" if DEBUG else "1") == "1"
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {
         "BACKEND": (
-            "django.contrib.staticfiles.storage.StaticFilesStorage"
-            if DEBUG
-            else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+            "whitenoise.storage.CompressedManifestStaticFilesStorage"
+            if STATIC_MANIFEST
+            else "django.contrib.staticfiles.storage.StaticFilesStorage"
         )
     },
 }

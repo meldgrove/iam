@@ -59,6 +59,7 @@ and the `Referer` header there too.
 | --- | --- |
 | `DJANGO_DEBUG=1` with `DEPLOYMENT_ENV=development` | Development mode. Without `ENCRYPTION_KEY`, a key is derived from the development secret key. |
 | `DEV_LOGIN=1` | Sign in as any app user without a provider (`/login/dev/`). Ignored unless `DJANGO_DEBUG=1`. |
+| `STATIC_MANIFEST` | `1` serves static files through their manifest (hashed, compressed names), as production always does; the default is `0` in development mode. The image sets it while collecting static files. |
 
 ## Rotating the encryption key
 
