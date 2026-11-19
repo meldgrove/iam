@@ -25,3 +25,5 @@ STORAGES = {
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 }
 SECURE_SSL_REDIRECT = False
+# Tests answer for the updater (tests/conftest.py); this is only the address.
+UPDATER_URL = "http://updater:8080"

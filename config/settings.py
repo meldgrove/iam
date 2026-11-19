@@ -4,6 +4,7 @@ this file only reads what the process needs before it can reach the database."""
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
@@ -209,6 +210,15 @@ _read_only = env("READ_ONLY", "0").strip().lower()
 if _read_only not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
     raise ImproperlyConfigured("READ_ONLY must be 1 or 0.")
 READ_ONLY = _read_only in {"1", "true", "yes", "on"}
+
+# In-app updates (docs/updates.md): the Meldgrove Updater next to the app.
+# Unlike the other variables, an empty value means something: no updater, no
+# update button.
+UPDATER_URL = os.getenv("UPDATER_URL", "http://updater:8080").strip().rstrip("/")
+if UPDATER_URL and (
+    urlsplit(UPDATER_URL).scheme not in {"http", "https"} or not urlsplit(UPDATER_URL).netloc
+):
+    raise ImproperlyConfigured("UPDATER_URL must be an http:// or https:// URL, or empty.")
 
 SENTRY_DSN = env("SENTRY_DSN", "")
 SENTRY_ENVIRONMENT = env("SENTRY_ENVIRONMENT", DEPLOYMENT_ENV)

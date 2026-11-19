@@ -19,5 +19,7 @@ def app(request):
         nav_failed_jobs=Job.objects.filter(status=Job.Status.FAILED).count(),
         nav_held_jobs=Job.objects.filter(status=Job.Status.HELD).count(),
         account_url=account_url(),
+        # The update button (docs/updates.md): admins only, off without an updater.
+        updates_button=request.user.is_admin and bool(settings.UPDATER_URL),
     )
     return context

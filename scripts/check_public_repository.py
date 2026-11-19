@@ -33,7 +33,7 @@ PUBLIC_HOSTS = {
     "www.rfc-editor.org",
     "www.w3.org",
 }
-LOCAL_HOSTS = {"localhost", "127.0.0.1", "web", "keycloak", "mailpit", "postgres"}
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "web", "keycloak", "mailpit", "postgres", "updater"}
 PRIVATE_SUFFIXES = {".db", ".sqlite3", ".dump", ".eml", ".pem", ".key", ".log", ".tar", ".zip"}
 # Binary files that are part of the repository on purpose.
 REVIEWED_BINARIES = {"docs/screenshots"}

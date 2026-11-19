@@ -11,6 +11,31 @@ def pauses(monkeypatch):
     return asked
 
 
+class FakeUpdater:
+    """Stands in for the Meldgrove Updater at UPDATER_URL. Refuses connections
+    until a test sets `handler(request) -> httpx.Response`; records requests."""
+
+    def __init__(self):
+        self.requests = []
+        self.handler = self.refuse
+
+    @staticmethod
+    def refuse(request):
+        raise httpx.ConnectError("Connection refused", request=request)
+
+    def __call__(self, request):
+        self.requests.append(request)
+        return self.handler(request)
+
+
+@pytest.fixture(autouse=True)
+def updater(monkeypatch):
+    """No test reaches a real update service."""
+    fake = FakeUpdater()
+    monkeypatch.setattr("iam.updates.transport", httpx.MockTransport(fake))
+    return fake
+
+
 @pytest.fixture
 def mock_transport():
     """Build an httpx.MockTransport from a handler(request) -> httpx.Response
