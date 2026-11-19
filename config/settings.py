@@ -253,20 +253,40 @@ if not DEBUG:
     if len(SECRET_KEY) < 50:
         raise ImproperlyConfigured("DJANGO_SECRET_KEY must have at least 50 characters.")
 
+
+def _strip_sentry_request_metadata(event, _hint):
+    # OIDC codes and people searches appear in queries. Headers can carry
+    # health-check credentials or referrers with more query parameters.
+    if "request" in event:
+        event["request"] = {
+            key: value for key, value in event["request"].items() if key in {"method", "url"}
+        }
+    return event
+
+
 if SENTRY_DSN:
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.httpx import HttpxIntegration
+    from sentry_sdk.integrations.logging import ignore_logger
+    from sentry_sdk.integrations.stdlib import StdlibIntegration
 
+    # Django log records can carry the full request or referer separately
+    # from the SDK's HTTP context. Keep those records in Django's local log.
+    ignore_logger("django.security.*")
+    ignore_logger("django.request")
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         environment=SENTRY_ENVIRONMENT,
         release=SENTRY_RELEASE or None,
         integrations=[DjangoIntegration()],
+        # Outbound HTTP breadcrumbs and spans can carry email addresses in
+        # provider URL paths and filters.
+        disabled_integrations=[HttpxIntegration, StdlibIntegration],
         send_default_pii=False,
-        # Security: frame locals and request bodies hold decrypted connection
-        # secrets and initial passwords, and Sentry's scrubber only hides
-        # keys named exactly "password", "secret" or "token".
         include_local_variables=False,
         max_request_body_size="never",
+        before_send=_strip_sentry_request_metadata,
+        before_send_transaction=_strip_sentry_request_metadata,
         traces_sample_rate=float(env("SENTRY_TRACES_SAMPLE_RATE", "0")),
     )
