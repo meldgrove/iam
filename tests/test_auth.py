@@ -146,6 +146,19 @@ def test_existing_user_matches_by_subject_then_verified_email():
     assert list(backend.filter_users_by_claims(claims(email="other@example.invalid"))) == [invited]
 
 
+def test_first_sign_in_rechecks_the_current_identity():
+    backend = auth.OIDCBackend()
+    invited = User.objects.create_user(email="ada@example.invalid", role=Role.APPROVER)
+    stale = User.objects.get(pk=invited.pk)
+    backend.update_user(invited, claims())
+
+    # The earlier match still has no subject when the first sign-in commits.
+    with pytest.raises(SuspiciousOperation, match="identity changed"):
+        backend.update_user(stale, claims(sub="subject-2"))
+    invited.refresh_from_db()
+    assert invited.oidc_subject == "subject-1"
+
+
 def test_unknown_people_get_no_user():
     assert auth.OIDCBackend().create_user(claims()) is None
     assert not User.objects.exists()
