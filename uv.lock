@@ -283,7 +283,7 @@ requires-dist = [
     { name = "gunicorn", specifier = ">=23,<27" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "mozilla-django-oidc", specifier = ">=5.0.2,<6" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.9,<4" },
     { name = "pyjwt", specifier = ">=2.10,<3" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "sentry-sdk", specifier = ">=2.40,<3" },
