@@ -8,7 +8,7 @@ from `compose.yaml`:
 | `migrate` | `manage.py migrate` | Runs once per deploy; web and worker wait for it. |
 | `web` | gunicorn on port 8000 | Behind a reverse proxy that terminates HTTPS. |
 | `worker` | `manage.py run_worker` | Runs jobs, the schedule and reads from connections. One is enough; with a second, one runs jobs while the other reads a big directory. |
-| `updater` | Meldgrove Updater | Installs new releases ([updates.md](updates.md)). |
+| `updater` | Meldgrove Updater | Checks for and installs updates; the admins' update button talks to it ([updates.md](updates.md)). |
 
 PostgreSQL 16 or newer runs separately (a managed database, its own Coolify
 resource, or a PostgreSQL server of your own). Nothing else is needed: no
@@ -27,7 +27,7 @@ Redis, no message queue. The stack runs on [Coolify](#coolify) or on a
 
    | Variable | Value |
    | --- | --- |
-   | `IAM_VERSION` | `0.1` (a release series; see [updates.md](updates.md)) |
+   | `IAM_VERSION` | `0.1` (a release series, or `preview`; see [updates.md](updates.md#on-coolify)) |
    | `DJANGO_SECRET_KEY` | random, 50+ characters |
    | `ENCRYPTION_KEY` | `docker run --rm -e DJANGO_DEBUG=1 ghcr.io/meldgrove/iam:0.1 python manage.py generate_key`; keep a copy with the backups |
    | `DATABASE_URL` | the PostgreSQL resource's internal URL |
@@ -62,7 +62,8 @@ containers can reach.
 3. **Create `.env`** next to `compose.yaml` with the variables from the table
    under [Coolify](#coolify), with `DATABASE_URL` pointing to the database,
    and make it readable for root only: `chmod 600 .env`. `.env.example`
-   holds development settings; do not copy it.
+   holds development settings; do not copy it. Once automatic updates are on,
+   the updater writes the installed version into `IAM_VERSION` there.
 4. **Publish `web` on the server:** `compose.yaml` only exposes port 8000 to
    the Docker network, where Coolify's proxy reaches it. Docker Compose also
    reads `compose.override.yaml` next to it:
@@ -133,7 +134,8 @@ when a deploy stops it, and web 40 seconds to finish its requests.
    existing accounts to people by work email or username and lists drift.
 5. **People:** add them, or connect Personio to import them.
 6. **Admin › Settings:** onboarding lead time, automatic onboarding and
-   offboarding, the daily removal limit, and who gets task emails.
+   offboarding, the daily removal limit, who gets task emails, and the update
+   channel ([updates.md](updates.md#channels)).
 7. Turn the connections on.
 
 ## Trying it with real data: read-only mode
@@ -172,14 +174,16 @@ To leave read-only mode:
 ## Upgrades
 
 Releases that need operator action list their steps under "Upgrade steps
-needed" in the release notes ([releases.md](releases.md)). Take the steps,
-then move to the new series ([updates.md](updates.md#choose-what-to-run)):
+needed" in the release notes ([releases.md](releases.md)); the update button
+shows such a release as needing upgrade steps. Take the steps, then move to
+the new series ([updates.md](updates.md#channels)):
 
 - **Coolify:** change `IAM_VERSION` in the resource's environment variables
   and redeploy. Coolify reads `compose.yaml` from `stable`, which is at the
   newest release.
 - **Debian:** in `/srv/iam`, run `git pull` (the newest release's
-  `compose.yaml`), change `IAM_VERSION` in `.env`, and run
-  `docker compose up -d --pull always`.
+  `compose.yaml`), then install the release with the update button
+  ("Install anyway…"). Without the host setup: change `IAM_VERSION` in
+  `.env` and run `docker compose up -d --pull always`.
 
 Database migrations run automatically in `migrate`.

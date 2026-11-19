@@ -104,3 +104,21 @@ def test_database_connections_survive_restarts_and_failovers():
     }
     # SQLite knows none of these options.
     assert "OPTIONS" not in load_database("sqlite:////tmp/iam-settings-test.sqlite3")
+
+
+def load_updater_url(**variables: str) -> subprocess.CompletedProcess:
+    code = "import config.settings as s; print(repr(s.UPDATER_URL))"
+    env = {"PATH": os.environ.get("PATH", ""), **PRODUCTION, **variables}
+    return subprocess.run(
+        [sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True
+    )
+
+
+def test_updater_url_defaults_to_the_compose_service_and_empty_switches_it_off():
+    assert load_updater_url().stdout.strip() == "'http://updater:8080'"
+    assert load_updater_url(UPDATER_URL="").stdout.strip() == "''"
+    assert load_updater_url(UPDATER_URL="http://127.0.0.1:8080/").stdout.strip() == (
+        "'http://127.0.0.1:8080'"
+    )
+    refused = load_updater_url(UPDATER_URL="updater:8080")
+    assert refused.returncode != 0 and "UPDATER_URL must be" in refused.stderr

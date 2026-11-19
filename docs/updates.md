@@ -1,53 +1,71 @@
-# Automatic updates
+# Updates
 
-Each release publishes the production image `ghcr.io/meldgrove/iam` under
-its version, its series and `latest` (see [releases](releases.md)). `compose.yaml` runs
-the tag named in `IAM_VERSION` and pulls it again on every deploy.
+Each release publishes the production image `ghcr.io/meldgrove/iam` under its
+version, its series and `latest` (see [releases](releases.md)). Each change on `main`
+whose checks pass publishes a preview such as `0.2.1-preview.3` under its version and
+`preview`.
 
-The `updater` service in `compose.yaml` installs new releases. Once an hour it asks the
-registry whether that tag points to a new image. If so, it waits for the
-[cooldown](#when-a-release-installs) and then calls Coolify's deploy link, or leaves a
-request for the Debian server in its volume `updater`. Coolify or the server pulls the
-image, runs the migrations, and replaces web and worker. It is
-[Meldgrove Updater](https://github.com/meldgrove/updater),
-the same for every Meldgrove app. Until it is [switched on](#switch-it-on), it does
-nothing.
+The `updater` service in `compose.yaml` checks for new versions once an hour, shows them
+to admins in the app, and installs them: through Coolify's deploy link, or through a
+request in its volume `updater` that the Debian server carries out. Coolify or the
+server pulls the image, runs the migrations, and replaces web and worker. It is
+[Meldgrove Updater](https://github.com/meldgrove/updater), the same for every Meldgrove
+app. Until it is [switched on](#switch-it-on), it only checks.
 
-## Choose what to run
+## Channels
 
-| `IAM_VERSION` | Runs | Updates automatically to |
+| Channel | Offers | Installs automatically |
 | --- | --- | --- |
-| `0.1` | the newest 0.1.x release | every 0.1.x release, never 0.2.0 |
-| `latest` | the newest release | every release |
-| `0.1.0` | exactly this release | nothing |
+| **Stable** (default) | releases | a release of the installed series, three days after it came out |
+| **Preview** | every change on `main` as soon as its checks pass, and every release | within the hour |
 
-A series such as `0.1` receives every release that needs no operator action: fixes,
-features, and migrations that run on their own. A release that operators must act on
-starts the next series, so `0.1` never moves to 0.2.0, and a deployment on a series
-stays current until then. From 1.0.0 the series is the major version: `1` receives
-every 1.x release, and 2.0.0 is the next release that needs action.
+Admins choose the channel in Admin › Settings › Updates. Preview brings new features
+first, and now and then a new bug; previews have no release notes. Switching from
+Preview back to Stable installs nothing and never goes back to an older version: the
+app keeps the preview until a release is newer, since a database that a newer version
+migrated may not work with an older one.
 
-When a release is out that the tag does not reach, the `updater` log names it. Moving
-to another series is a manual upgrade: read the release notes of every version since
-the deployed one, take their upgrade steps, then change `IAM_VERSION`
-([deployment.md](deployment.md#upgrades)). Do
-it soon: an earlier series gets no more fixes, and `stable` already holds the
-`compose.yaml` of the new one.
+A release that operators must act on starts a new series (0.1 → 0.2; from 1.0.0,
+1 → 2). Stable shows it as needing upgrade steps and never installs it on its own:
+take the steps from its release notes, then install it from the update button
+("Install anyway…"; [deployment.md](deployment.md#upgrades)).
 
-With `latest`, every release installs, including one whose notes list upgrade steps,
-before anyone has taken them. Watch the repository's releases on GitHub (Watch >
-Custom > Releases) and take the steps right away.
+On [Coolify](#on-coolify), the image tag in `IAM_VERSION` decides instead of the
+channel, and the settings say so. A new series then needs a new tag: the update button
+shows it without "Install anyway…".
 
-## When a release installs
+## The update button
+
+Admins (and only they) see an update icon in the top bar. A click checks for updates.
+An available update shows a dot; the button then shows its changes, when it installs
+automatically, and **Install now**. While it installs, the button shows the progress;
+Meldgrove IAM restarts, and the page reloads once the installation has finished (on a
+Debian server: once every service is healthy). When an installation fails, the server
+goes back to the version before, and the button says why. Admin › Settings › Updates
+shows the installed version, the channel, and when updates install automatically.
+
+The app reaches the updater at `UPDATER_URL` ([configuration.md](configuration.md));
+`compose.yaml` sets it. Read-only mode (`READ_ONLY=1`) does not hold back updates of
+the app itself; it only leaves connected apps unchanged.
+
+## When an update installs
 
 A release installs three days after it came out, so that a faulty release can be
 replaced before it reaches the deployment. `UPDATE_COOLDOWN` changes the time: `0`
-installs within the hour, `7d` waits a week. Security fixes wait as well; redeploy by
-hand to install a release at once.
+installs within the hour, `7d` waits a week. Security fixes wait as well; install them
+at once with the update button. Previews do not wait.
 
 Coolify or the server replaces web and worker while it deploys. `UPDATE_WINDOW`, such
-as `02:00-05:00` in the time zone `TZ` (default UTC), keeps installs out of working
-hours.
+as `02:00-05:00` in the time zone `TZ` (default UTC), keeps automatic installs out of
+working hours; the update button installs at any time. A version whose installation
+failed does not install again automatically; a newer one does.
+
+| Variable (`compose.yaml`) | Meaning |
+| --- | --- |
+| `UPDATE_DEPLOY_HOOK_URL`, `UPDATE_DEPLOY_HOOK_TOKEN` | Coolify's deploy link and its token ([On Coolify](#on-coolify)). |
+| `UPDATE_COOLDOWN` | How long a stable release is out before it installs: `3d` (default), `12h`, `30m`, seconds. |
+| `UPDATE_WINDOW`, `TZ` | Automatic installs only between two times of day. |
+| `UPDATE_REGISTRY_USERNAME`, `UPDATE_REGISTRY_PASSWORD` | Only for an image in a private registry. |
 
 ## Switch it on
 
@@ -63,9 +81,20 @@ Set up [backups](#backups) first.
 4. In the resource's environment variables, set `UPDATE_DEPLOY_HOOK_URL` to the
    webhook and `UPDATE_DEPLOY_HOOK_TOKEN` to the token. Redeploy.
 
-The `updater` container's log then says which tag it watches, and later each
-deployment it starts or that the platform refused. The sidebar shows the running
-version.
+On Coolify the image tag set there decides what installs:
+
+| `IAM_VERSION` | Installs |
+| --- | --- |
+| `0.1` | every 0.1.x release, never 0.2.0 |
+| `latest` | every release, also one whose notes list upgrade steps, before anyone took them |
+| `preview` | every preview and release: the unstable channel |
+| `0.1.0` | nothing |
+
+When the tag points to a new image, the updater calls the deploy link (after the
+cooldown, or at once from the update button), and Coolify pulls and deploys it. To
+move to a new series, take its upgrade steps, then change `IAM_VERSION` and redeploy
+([deployment.md](deployment.md#upgrades)). With `latest`, watch the repository's
+releases on GitHub (Watch > Custom > Releases) and take upgrade steps right away.
 
 ### On Debian
 
@@ -78,12 +107,31 @@ docker compose run --rm -T --pull always updater host-setup > updater-setup.sh
 sh updater-setup.sh
 ```
 
-The first command starts the image the tag points to now, which the updater takes as
-installed. The second writes the setup script from the updater's image; read it before
-you run it. The script installs a systemd unit that waits for the updater's request,
-then pulls the new image and runs `docker compose up -d`, migrations first.
-`docker compose logs updater` names the tag it watches, and
-`journalctl -u meldgrove-updater-iam.service` shows each installation.
+The first command starts the image that `IAM_VERSION` points to, which the updater
+takes as installed. The second writes the setup script from the updater's image; read
+it before you run it. The script installs a systemd unit that waits for the updater's
+requests. For each installation it writes the exact version into `IAM_VERSION` in
+`.env` (`0.1` becomes `0.1.3`, for example), pulls the image, and runs
+`docker compose up --wait`, migrations first. When the app does not become healthy, it
+restores `.env` and starts the version before. The channel is chosen in the app.
+`journalctl -u meldgrove-updater-iam` shows each installation.
+
+It installs images, not files: when a release changes `compose.yaml`, its upgrade
+steps say to run `git pull` in `/srv/iam` first.
+
+**Servers set up before the update button** (updater 0.1) keep following the tag in
+`IAM_VERSION`, and the app says that the channel needs the host setup again. As root
+in `/srv/iam`, run `git pull`, set `IAM_VERSION` in `.env` to the release that brings
+the update button (or a newer one), then:
+
+```sh
+docker compose up -d --pull always
+docker compose run --rm -T --pull always updater host-setup > updater-setup.sh && sh updater-setup.sh
+```
+
+`git pull` brings the `compose.yaml` of the newest release from the branch `stable`
+(with updater 0.2). `docker compose up -d --pull always` starts that release of the
+app, not only the new updater; the last command replaces the host setup.
 
 ## Backups
 
@@ -101,8 +149,9 @@ backup from before the update.
 
 ## Switch it off
 
-- **Coolify:** clear `UPDATE_DEPLOY_HOOK_URL` and redeploy.
+- **Coolify:** clear `UPDATE_DEPLOY_HOOK_URL` and redeploy, or set `IAM_VERSION` to an
+  exact version.
 - **Debian:** as root in `/srv/iam`, run `sh updater-setup.sh remove`.
 
-Or set `IAM_VERSION` to an exact version and redeploy (on Debian,
-`docker compose up -d`).
+The updater keeps checking, and the update button keeps showing new versions, with
+"Automatic updates are off on this server".

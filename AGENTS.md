@@ -27,6 +27,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run python manage.py makemigrations --check --dry-run
 uv run pytest
 TEST_DATABASE_URL=postgresql://iam:iam@localhost:55438/iam uv run pytest
+node --test tests/js/updates.test.cjs
 python3 scripts/check_public_repository.py
 ```
 

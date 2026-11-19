@@ -44,11 +44,18 @@ uv run ruff check . && uv run ruff format --check .
 uv run python manage.py makemigrations --check --dry-run
 uv run pytest                                               # SQLite
 TEST_DATABASE_URL=postgresql://iam:iam@localhost:55438/iam uv run pytest
+node --test tests/js/updates.test.cjs                       # the update button's logic
 python3 scripts/check_public_repository.py
 ```
 
 Adapters are tested against `httpx.MockTransport` fakes (`mock_transport`
-fixture); the engine against an in-memory adapter (`tests/fakes.py`).
+fixture); the engine against an in-memory adapter (`tests/fakes.py`). No test
+reaches an updater: the `updater` fixture answers for it.
+
+The update button needs an updater at `UPDATER_URL` (`.env.example` leaves it
+empty, which hides the button). Any server that answers the updater's API
+([docs/updates.md](updates.md)) works, such as a stand-in that returns a fixed
+status.
 
 ## End-to-end check
 

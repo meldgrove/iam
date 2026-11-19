@@ -3,7 +3,7 @@ from django.urls import path
 from mozilla_django_oidc.views import OIDCLogoutView
 
 from .auth import AuthenticationRequestView, CallbackView
-from .views import admin, base, people, policy, work
+from .views import admin, base, people, policy, updates, work
 
 urlpatterns = [
     path("", base.dashboard, name="dashboard"),
@@ -84,4 +84,9 @@ urlpatterns = [
     path("admin/users/new/", admin.user_form, name="user_create"),
     path("admin/users/<int:pk>/", admin.user_form, name="user_edit"),
     path("admin/settings/", admin.settings_form, name="settings"),
+    # In-app updates: JSON for the update button and the settings section
+    path("admin/updates/", updates.status, name="updates"),
+    path("admin/updates/check/", updates.check, name="updates_check"),
+    path("admin/updates/install/", updates.install, name="updates_install"),
+    path("admin/updates/channel/", updates.channel, name="updates_channel"),
 ]
