@@ -126,8 +126,7 @@ the update button (or a newer one), then:
 
 ```sh
 docker compose up -d --pull always
-docker compose run --rm -T --pull always updater host-setup > updater-setup.sh
-sh updater-setup.sh
+docker compose run --rm -T --pull always updater host-setup > updater-setup.sh && sh updater-setup.sh
 ```
 
 `git pull` brings the `compose.yaml` of the newest release from the branch `stable`

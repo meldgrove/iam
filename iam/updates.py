@@ -106,7 +106,10 @@ def _call(method: str, path: str, *, timeout: float, payload: dict | None = None
     if not isinstance(error, str) or not error.strip():
         error = f"The update service answered HTTP {response.status_code}."
     latest = status() if path != "/v1/status" else None
-    return Result(409, True, latest.updater if latest and latest.reachable else None, error[:500])
+    # A failure (5xx) keeps its status code: the update button must not take
+    # it for a refusal, since the updater may have started the installation.
+    code = response.status_code if response.status_code >= 500 else 409
+    return Result(code, True, latest.updater if latest and latest.reachable else None, error[:500])
 
 
 def _json(response: httpx.Response):

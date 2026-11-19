@@ -231,8 +231,27 @@ def test_a_refusal_comes_back_as_409_with_the_latest_status(admin, updater):
 def test_an_updater_error_without_a_sentence_still_explains(admin, updater):
     updater.handler = answer({"POST /v1/check": (500, "boom")})
     response = admin.post(reverse("updates_check"), "{}", content_type="application/json")
-    assert response.status_code == 409
+    assert response.status_code == 500
     assert response.json()["error"] == "The update service answered HTTP 500."
+
+
+def test_an_updater_failure_on_install_stays_a_5xx(admin, updater):
+    # The updater may have taken the request: the button must not read it as
+    # a refusal (409) and forget the installation.
+    updater.handler = answer({"POST /v1/install": (503, {"error": "The volume is not writable."})})
+    response = admin.post(
+        reverse("updates_install"),
+        json.dumps({"version": "0.2.1"}),
+        content_type="application/json",
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "app": {"version": None},
+        "reachable": True,
+        "updater": STATUS,
+        "error": "The volume is not writable.",
+    }
+    assert not AuditEvent.objects.filter(action="updates.install").exists()
 
 
 def test_channel_takes_only_stable_or_preview(admin, updater):

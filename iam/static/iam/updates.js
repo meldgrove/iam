@@ -14,49 +14,72 @@
   const dialog = document.querySelector(".updates-confirm");
   const toast = document.querySelector(".updates-toast");
   const STORAGE_KEY = "iam.updates.installing";
+  const DISMISSED_KEY = "iam.updates.dismissed";
   const POLL_MS = 5 * 60 * 1000;
   const INSTALL_POLL_MS = 2000;
   const FOCUS_MIN_MS = 60 * 1000;
+  // How long each request may take; the routes wait for the updater up to
+  // 6 s (status), 16 s (install) and 41 s (check).
+  const STATUS_REQUEST_MS = 10 * 1000;
+  const INSTALL_REQUEST_MS = 25 * 1000;
+  const CHECK_REQUEST_MS = 50 * 1000;
 
   let response = null;
   let checking = false;
   let restarting = false;
   let actionError = "";
-  let pending = loadPending();
+  let pending = load(STORAGE_KEY);
   // The `last` of the installation that the button followed until it failed.
   let failure = null;
   let lastFetch = 0;
   let installTimer = null;
   let reloadTimer = null;
   let pollTimer = null;
+  // The wait's own timers: the deadline of an unconfirmed attempt and the
+  // 15 minutes until Stop waiting, whatever the polls return.
+  let deadlineTimer = null;
+  let slowTimer = null;
   let slowShown = false;
-  // Signed out or no admin any more: no more polling on this page.
+  // Signed out or no admin any more: no more automatic requests on this page.
   let stopped = false;
-  // The installation an admin stopped waiting for: not followed again.
-  let dismissed = "";
+  // The installation an admin stopped waiting for: not followed again, also
+  // after a reload.
+  let dismissed = load(DISMISSED_KEY);
 
-  function loadPending() {
+  function load(key) {
     try {
-      const value = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null");
+      const value = JSON.parse(sessionStorage.getItem(key) || "null");
       return value && typeof value.version === "string" ? value : null;
     } catch {
       return null;
     }
   }
 
-  function savePending() {
+  function save(key, value) {
     try {
-      if (pending) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(pending));
-      else sessionStorage.removeItem(STORAGE_KEY);
+      if (value) sessionStorage.setItem(key, JSON.stringify(value));
+      else sessionStorage.removeItem(key);
     } catch {
       // Without storage, a reload during the restart only stops the waiting.
     }
   }
 
-  // {status, body, signedOut}: status 0 when the app did not answer; body
-  // null unless JSON; signedOut for a sign-in redirect, 401 or 403.
-  async function call(url, payload) {
-    const options = { headers: { Accept: "application/json" }, credentials: "same-origin", redirect: "manual" };
+  function savePending() {
+    save(STORAGE_KEY, pending);
+  }
+
+  // {status, body, signedOut}: status 0 when the app did not answer within
+  // `timeout` ms; body null unless readable JSON; signedOut for a sign-in
+  // redirect (a redirect, or an HTML page instead of JSON), 401 or 403.
+  async function call(url, payload, timeout) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    const options = {
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+      redirect: "manual",
+      signal: controller.signal,
+    };
     if (payload !== undefined) {
       options.method = "POST";
       options.headers["Content-Type"] = "application/json";
@@ -65,15 +88,32 @@
     }
     try {
       const answer = await fetch(url, options);
+      const type = answer.headers.get("Content-Type") || "";
       // These routes redirect only to the sign-in.
-      if (answer.type === "opaqueredirect" || answer.status === 401 || answer.status === 403) {
+      if (answer.type === "opaqueredirect" || answer.status === 401 || answer.status === 403 ||
+        (answer.status < 400 && type.includes("text/html"))) {
         return { status: answer.status, body: null, signedOut: true };
       }
-      const json = (answer.headers.get("Content-Type") || "").includes("application/json");
-      return { status: answer.status, body: json ? await answer.json() : null, signedOut: false };
+      let body = null;
+      if (type.includes("application/json")) {
+        try {
+          body = await answer.json();
+        } catch {
+          // Unreadable: the status code still counts.
+        }
+      }
+      return { status: answer.status, body, signedOut: false };
     } catch {
       return { status: 0, body: null, signedOut: false };
+    } finally {
+      clearTimeout(timer);
     }
+  }
+
+  // A request while an unconfirmed attempt waits gets at most the time left.
+  function requestTime(limit) {
+    if (!pending || pending.confirmed) return limit;
+    return Math.min(limit, logic.deadline(pending) - Date.now());
   }
 
   function state() {
@@ -107,6 +147,7 @@
   function fillPanel(current) {
     const model = logic.popover(current, response, {
       pending,
+      waiting: Boolean(pending) && !stopped,
       restarting,
       now: Date.now(),
       app,
@@ -122,6 +163,7 @@
     if (model.meta) parts.push(element("p", "updates-meta", model.meta));
     if (model.message) parts.push(element("p", "updates-message", model.message));
     for (const line of model.text) parts.push(element("p", "", line));
+    if (model.failed) parts.push(element("p", "updates-message", model.failed));
     if (model.notes.length) {
       const list = element("ul", "updates-notes");
       for (const note of model.notes) list.append(element("li", "", note));
@@ -187,23 +229,24 @@
     if (!body || !body.app || body.updater === undefined) return;
     response = body;
     const installing = response.updater && response.updater.installing;
-    if (!pending && installing && dismissed === `${installing.version} ${installing.startedAt}`) return;
+    if (!pending && logic.dismisses(dismissed, installing)) return;
     const followed = logic.follow(pending, response, Date.now());
     if (followed !== pending) {
       pending = followed;
       failure = null;
       savePending();
+      armTimers();
     }
     if (pending && !installTimer && !stopped) waitForInstall();
   }
 
-  // A sign-in redirect, 401 or 403: stop polling; a page load after signing
+  // A sign-in redirect, 401 or 403: stop every automatic request of the page
+  // (polls, interval, focus, back-forward cache); a page load after signing
   // in again keeps waiting for a saved installation.
   function signedOut() {
     stopped = true;
     restarting = false;
-    clearTimeout(installTimer);
-    installTimer = null;
+    stopTimers();
     actionError = logic.SIGNED_OUT;
     render();
     if (pending) showToast(logic.SIGNED_OUT, "danger");
@@ -212,7 +255,8 @@
   async function refresh() {
     if (stopped) return;
     lastFetch = Date.now();
-    const answer = await call(urls.statusUrl);
+    const answer = await call(urls.statusUrl, undefined, STATUS_REQUEST_MS);
+    if (stopped) return;
     if (answer.signedOut) return signedOut();
     adopt(answer.body);
     render();
@@ -223,7 +267,7 @@
     checking = true;
     actionError = "";
     render();
-    const answer = await call(urls.checkUrl, {});
+    const answer = await call(urls.checkUrl, {}, CHECK_REQUEST_MS);
     checking = false;
     if (answer.signedOut) return signedOut();
     adopt(answer.body);
@@ -261,22 +305,27 @@
     actionError = "";
     failure = null;
     stopped = false;
-    // Remembered before the request: a lost answer must not lose the installation.
+    dismissed = null;
+    save(DISMISSED_KEY, null);
+    // Remembered before the request: a lost answer must not lose the
+    // installation. Its 60 s deadline starts now.
     pending = logic.pendingInstall(version, response, Date.now());
     savePending();
+    armTimers();
     render();
     openPanel();
-    const answer = await call(urls.installUrl, { version });
-    // A poll meanwhile ended it, or follows another installation.
+    const answer = await call(urls.installUrl, { version }, requestTime(INSTALL_REQUEST_MS));
+    // The deadline ended it meanwhile.
     if (!pending || pending.version !== version) return render();
     if (answer.body && answer.body.app && answer.body.updater !== undefined) response = answer.body;
     // Accepted, refused (forget it), another installation (follow that one),
-    // or unclear (keep it; the status settles it within a minute).
+    // or unclear (keep it; the status or the deadline settles it).
     const result = logic.answerInstall(pending, answer, Date.now());
     pending = result.pending;
     actionError = result.error;
     savePending();
-    if (answer.signedOut) stopped = true;
+    armTimers();
+    if (answer.signedOut) return signedOut();
     render();
     openPanel();
     if (pending) waitForInstall();
@@ -287,18 +336,68 @@
     installTimer = setTimeout(pollInstall, INSTALL_POLL_MS);
   }
 
+  // Sets the wait's own timers for the current attempt.
+  function armTimers() {
+    clearTimeout(deadlineTimer);
+    clearTimeout(slowTimer);
+    deadlineTimer = null;
+    slowTimer = null;
+    if (!pending || stopped) return;
+    const now = Date.now();
+    if (!pending.confirmed) deadlineTimer = setTimeout(settleUnconfirmed, Math.max(0, logic.deadline(pending) - now));
+    if (!slowShown) slowTimer = setTimeout(showSlow, Math.max(0, pending.startedAt + logic.SLOW_AFTER_MS - now));
+  }
+
+  function clearWaitTimers() {
+    clearTimeout(installTimer);
+    clearTimeout(deadlineTimer);
+    clearTimeout(slowTimer);
+    installTimer = null;
+    deadlineTimer = null;
+    slowTimer = null;
+  }
+
+  function stopTimers() {
+    clearInterval(pollTimer);
+    clearWaitTimers();
+  }
+
   function forget() {
     pending = null;
     savePending();
-    clearTimeout(installTimer);
-    installTimer = null;
+    clearWaitTimers();
     restarting = false;
     slowShown = false;
   }
 
+  // No status confirmed the attempt within 60 s: forget it and say why;
+  // normal polling then shows what runs.
+  function settleUnconfirmed() {
+    deadlineTimer = null;
+    if (!pending || pending.confirmed) return;
+    const error = logic.unconfirmed(pending);
+    forget();
+    actionError = error;
+    render();
+    openPanel();
+    refresh();
+  }
+
+  function showSlow() {
+    slowTimer = null;
+    if (!pending || slowShown) return;
+    slowShown = true;
+    render();
+    openPanel();
+  }
+
+  // Ignores this installation from then on, by the identity stored on the
+  // attempt: the latest status may not report it (unreachable updater).
   function stopWaiting() {
-    const installing = response && response.updater && response.updater.installing;
-    dismissed = installing ? `${installing.version} ${installing.startedAt}` : "";
+    if (pending) {
+      dismissed = logic.dismissal(pending);
+      save(DISMISSED_KEY, dismissed);
+    }
     forget();
     closePanel();
     refresh();
@@ -307,22 +406,26 @@
   async function pollInstall() {
     installTimer = null;
     if (!pending || stopped) return;
-    const answer = await call(urls.statusUrl);
-    if (!pending) return;
+    const time = requestTime(STATUS_REQUEST_MS);
+    if (time <= 0) return settleUnconfirmed();
+    const answer = await call(urls.statusUrl, undefined, time);
+    if (!pending || stopped) return;
     if (answer.signedOut) return signedOut();
-    if (!answer.body || !answer.body.app || answer.status >= 500) {
-      // The app restarts: expected; keep asking.
-      restarting = true;
-      pending.outage = true;
-      savePending();
+    // A status follows a reported installation (also another one).
+    const body = answer.status < 500 ? answer.body : null;
+    adopt(body);
+    pending = logic.observe(pending, answer);
+    savePending();
+    armTimers();
+    // No answer, a 5xx or an unreachable updater: the app or the updater
+    // restarts, which is expected; keep asking.
+    restarting = !(body && body.app && body.reachable && body.updater);
+    if (restarting) {
       render();
       waitForInstall();
       return;
     }
-    adopt(answer.body);
-    // The updater restarts as well: expected.
-    restarting = !(response && response.reachable);
-    const outcome = logic.installOutcome(response, pending, Date.now());
+    const outcome = logic.installOutcome(response, pending);
     if (outcome === "done") {
       const version = pending.version;
       forget();
@@ -339,19 +442,7 @@
       openPanel();
       return;
     }
-    if (outcome === "not-started") {
-      const reason = pending.reason;
-      forget();
-      actionError = reason ? `The installation did not start. ${reason}` : "The installation did not start.";
-      render();
-      openPanel();
-      return;
-    }
     render();
-    if (outcome === "slow" && !slowShown) {
-      slowShown = true;
-      openPanel();
-    }
     waitForInstall();
   }
 
@@ -360,7 +451,7 @@
     const current = state();
     if (logic.hasPopover(current)) return openPanel();
     if (current === "checking") return undefined;
-    if (current === "unreachable") return refresh();
+    // Also without an update service: the check says why.
     return runCheck({ openAfter: true });
   });
   document.addEventListener("click", (event) => {
@@ -378,12 +469,14 @@
   });
 
   function start() {
+    if (stopped) return;
     clearInterval(pollTimer);
     pollTimer = setInterval(() => {
       if (!pending) refresh();
     }, POLL_MS);
     if (pending) {
       // A reload during an installation: keep waiting for it.
+      armTimers();
       pollInstall();
     } else {
       refresh();
@@ -393,10 +486,8 @@
   // Leaving the page stops every timer, also the reload after an update; a
   // page restored from the back-forward cache starts again.
   window.addEventListener("pagehide", () => {
-    clearInterval(pollTimer);
-    clearTimeout(installTimer);
+    stopTimers();
     clearTimeout(reloadTimer);
-    installTimer = null;
   });
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) start();

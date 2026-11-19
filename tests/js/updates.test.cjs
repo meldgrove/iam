@@ -151,6 +151,10 @@ test("the attention, failed, off and installing popovers", () => {
   const slow = logic.popover("installing", installing, { pending, now: NOW + 16 * 60_000 });
   assert.match(slow.message, /^This takes longer than expected\. Check the server \(journalctl -u meldgrove-updater-iam\)\.$/);
   assert.equal(slow.stop, "Stop waiting");
+  // Without an active wait (none, or polling stopped), no reload is promised.
+  const watching = logic.popover("installing", installing, { now: NOW, app: "Meldgrove IAM" });
+  assert.deepEqual(watching.text, ["Meldgrove IAM restarts."]);
+  assert.equal(logic.popover("installing", installing, { pending, waiting: false, now: NOW + 16 * 60_000 }).stop, "");
 });
 
 test("an installation ends when the new version answers", () => {
@@ -170,7 +174,6 @@ test("an installation ends when the new version answers", () => {
   assert.equal(logic.installOutcome(response({ last: accepted }, { version: null }), { ...pending, outage: true }, NOW), "done");
   const rolledBack = { ...installed, result: "rolled-back" };
   assert.equal(logic.installOutcome(response({ last: rolledBack }), pending, NOW), "failed");
-  assert.equal(logic.installOutcome(before, pending, NOW + 16 * 60_000), "slow");
 });
 
 test("the app's new version is not enough while the updater still installs it", () => {
@@ -278,28 +281,115 @@ test("the answer to the install request decides whether the attempt is kept", ()
   const signedOut = logic.answerInstall(pending, { status: 0, body: null, signedOut: true }, NOW);
   assert.equal(signedOut.pending, null);
   assert.equal(signedOut.error, logic.SIGNED_OUT);
+
+  // 202 confirms without a readable body; any 4xx refuses; a 5xx that the
+  // route passes through is unclear.
+  assert.equal(logic.answerInstall(pending, { status: 202, body: null }, NOW).pending.confirmed, true);
+  assert.deepEqual(logic.answerInstall(pending, { status: 400, body: null }, NOW), { pending: null, error: "The server answered HTTP 400." });
+  const failing = logic.answerInstall(pending, { status: 503, body: { ...before, error: "The volume is not writable." } }, NOW);
+  assert.equal(failing.pending.confirmed, false);
+  assert.equal(failing.pending.reason, "The volume is not writable.");
 });
 
-test("an unclear request is settled by the status within a minute", () => {
+test("an unclear request ends at its deadline with what the polls saw", () => {
   const before = response({ available: release("0.2.1") });
-  const pending = { ...logic.pendingInstall("0.2.1", before, NOW), reason: "No answer from the server." };
-  assert.equal(logic.installOutcome(before, pending, NOW + 30_000), "waiting");
-  assert.equal(logic.installOutcome(before, pending, NOW + 61_000), "not-started");
-  // Also without the updater; but while the app does not answer, or once it
-  // restarted, nothing is settled.
-  const unreachable = { app: { version: "0.2.0" }, reachable: false, updater: null, error: "No connection." };
-  assert.equal(logic.installOutcome(unreachable, pending, NOW + 61_000), "not-started");
-  assert.equal(logic.installOutcome(null, pending, NOW + 61_000), "waiting");
-  assert.equal(logic.installOutcome(unreachable, { ...pending, outage: true }, NOW + 61_000), "waiting");
-  // The status reports it: follow it.
+  const unclear = logic.answerInstall(logic.pendingInstall("0.2.1", before, NOW), { status: 502, body: null }, NOW + 1000).pending;
+  assert.equal(logic.deadline(unclear), NOW + 60_000);
+  assert.equal(logic.unconfirmed(unclear), "The installation could not be confirmed. The server answered HTTP 502.");
+  // Every poll fails: an outage, and the deadline says so.
+  const failing = logic.observe(unclear, { status: 0, body: null });
+  assert.equal(failing.outage, true);
+  assert.equal(logic.unconfirmed(failing), "The installation could not be confirmed. No answer from the server.");
+  const unreachable = { app: { version: "0.2.0" }, reachable: false, updater: null, error: "No connection to http://updater:8080." };
+  assert.equal(logic.unconfirmed(logic.observe(unclear, { status: 200, body: unreachable })),
+    "The installation could not be confirmed. No connection to http://updater:8080.");
+  // A reachable status without the attempt, also after an outage.
+  const answered = logic.observe(failing, { status: 200, body: before });
+  assert.equal(answered.answered, true);
+  assert.equal(logic.unconfirmed(answered), "The installation did not start. The server answered HTTP 502.");
+  assert.equal(logic.installOutcome(before, answered), "waiting");
+  // The status reports it: follow it, and the deadline no longer applies.
   const running = response({ available: release("0.2.1"), installing: { version: "0.2.1", stage: "pulling", startedAt: hoursAgo(0), manual: true } });
-  const followed = logic.follow(pending, running, NOW + 2000);
+  const followed = logic.follow(failing, running, NOW + 2000);
   assert.equal(followed.confirmed, true);
-  assert.equal(logic.installOutcome(running, followed, NOW + 61_000), "waiting");
+  assert.equal(logic.observe(followed, { status: 200, body: running }), followed);
   // Or a fresh result for it.
   const last = { version: "0.2.1", result: "installed", message: null, finishedAt: new Date(NOW + 5000).toISOString() };
-  assert.equal(logic.follow(pending, response({ last }), NOW + 6000).confirmed, true);
-  assert.equal(logic.installOutcome(response({ last }), pending, NOW + 61_000), "done");
+  assert.equal(logic.follow(unclear, response({ last }), NOW + 6000).confirmed, true);
+  assert.equal(logic.installOutcome(response({ last }), unclear), "done");
+});
+
+test("a result in the same second as the request is fresh (the updater writes whole seconds)", () => {
+  const before = response({ mode: "platform", available: release("0.2.1") });
+  const pending = logic.answerInstall(logic.pendingInstall("0.2.1", before, NOW + 400), { status: 0, body: null }, NOW + 900).pending;
+  const accepted = { version: "0.2.1", result: "accepted", message: null, finishedAt: "2026-11-19T12:00:00Z" };
+  const answer = response({ mode: "platform", last: accepted }, { version: "0.2.1" });
+  const followed = logic.follow(pending, answer, NOW + 2000);
+  assert.equal(followed.confirmed, true);
+  assert.equal(logic.installOutcome(answer, followed), "done");
+});
+
+test("a retry in the same second does not take the earlier failure as its own", () => {
+  const failed = { version: "0.2.1", result: "failed", message: "The deploy link answered HTTP 500.", finishedAt: "2026-11-19T12:00:00Z" };
+  const before = response({ mode: "platform", available: release("0.2.1"), last: failed });
+  const pending = logic.pendingInstall("0.2.1", before, NOW + 700);
+  assert.deepEqual(pending.earlier, { version: "0.2.1", result: "failed", finishedAt: "2026-11-19T12:00:00Z" });
+  assert.equal(logic.follow(pending, before, NOW + 2000).confirmed, false);
+  const confirmed = { ...pending, confirmed: true };
+  assert.equal(logic.installOutcome(before, confirmed), "waiting");
+  const again = { ...failed, message: "The deploy link answered HTTP 502.", finishedAt: "2026-11-19T12:00:01Z" };
+  assert.equal(logic.installOutcome(response({ mode: "platform", available: release("0.2.1"), last: again }), confirmed), "failed");
+});
+
+test("an unreachable updater while following is an outage; a reachable accepted then completes", () => {
+  const before = response({ mode: "platform", available: release("0.2.1") }, { version: null });
+  // 202 confirms, also when its body cannot be read.
+  let pending = logic.answerInstall(logic.pendingInstall("0.2.1", before, NOW), { status: 202, body: null }, NOW + 500).pending;
+  assert.equal(pending.confirmed, true);
+  const accepted = { version: "0.2.1", result: "accepted", message: null, finishedAt: "2026-11-19T12:00:01Z" };
+  const back = response({ mode: "platform", last: accepted }, { version: null });
+  assert.equal(logic.installOutcome(back, pending), "waiting", "no outage seen yet");
+  const unreachable = { app: { version: null }, reachable: false, updater: null, error: "No connection to http://updater:8080." };
+  pending = logic.observe(pending, { status: 200, body: unreachable });
+  assert.equal(pending.outage, true);
+  pending = logic.observe(pending, { status: 200, body: back });
+  assert.equal(logic.installOutcome(back, pending), "done");
+});
+
+test("Stop waiting ignores the installation by the identity stored on the attempt", () => {
+  const before = response({ available: release("0.2.1") });
+  const installing = { version: "0.2.1", stage: "pulling", startedAt: "2026-11-19T12:00:01Z", manual: true };
+  const running = response({ available: release("0.2.1"), installing });
+  const pending = logic.answerInstall(logic.pendingInstall("0.2.1", before, NOW), { status: 202, body: running }, NOW).pending;
+  assert.equal(pending.serverStartedAt, Date.parse(installing.startedAt));
+  // The latest status is unreachable when the admin stops waiting: the
+  // attempt still knows the installation.
+  const dismissed = logic.dismissal(pending);
+  assert.equal(logic.dismisses(dismissed, installing), true);
+  assert.equal(logic.dismisses(dismissed, { ...installing, startedAt: "2026-11-19T12:30:00Z" }), false, "a later installation");
+  assert.equal(logic.dismisses(dismissed, { ...installing, version: "0.2.2" }), false);
+  assert.equal(logic.dismisses(null, installing), false);
+  // Never reported: the version and the attempt's start.
+  const unseen = logic.dismissal(logic.answerInstall(logic.pendingInstall("0.2.1", before, NOW + 500), { status: 202, body: null }, NOW + 600).pending);
+  assert.equal(logic.dismisses(unseen, installing), true);
+  assert.equal(logic.dismisses(unseen, { ...installing, startedAt: "2026-11-19T11:59:59Z" }), false);
+});
+
+test("a newer offer replaces an old failure and keeps its message", () => {
+  const last = { version: "0.2.1", result: "rolled-back", message: "migrate failed. 0.2.0 runs again.", finishedAt: hoursAgo(0) };
+  const answer = response({ available: release("0.2.2"), last });
+  assert.equal(logic.deriveState(answer, { failure: last }), "available");
+  const model = logic.popover("available", answer, { now: NOW, failure: last });
+  assert.equal(model.title, "Update available");
+  assert.equal(model.failed, "0.2.1 failed: migrate failed. 0.2.0 runs again.");
+  assert.equal(model.action.version, "0.2.2");
+  const attention = response({ attention: release("0.3.0"), last });
+  assert.equal(logic.deriveState(attention, { failure: last }), "attention");
+  assert.equal(logic.popover("attention", attention, { now: NOW, failure: last }).failed, "0.2.1 failed: migrate failed. 0.2.0 runs again.");
+  // While the failed version is still offered, the failure comes first.
+  const still = response({ available: release("0.2.1"), attention: release("0.3.0"), last });
+  assert.equal(logic.deriveState(still, { failure: last }), "failed");
+  assert.equal(logic.popover("available", response({ available: release("0.2.2") }), { now: NOW }).failed, "");
 });
 
 test("a status, a check or a refusal that reports an installation is followed", () => {
@@ -375,4 +465,226 @@ test("the popovers of Updater 0.2's answers", () => {
   assert.equal(preview.action.version, "0.1.3");
   const installing = logic.popover("installing", sampleResponse("status-installing.json"), { now: NOW });
   assert.equal(installing.meta, "Downloading");
+});
+
+// The page script (iam/static/iam/updates.js) with a small fake page, a fake
+// fetch and fake timers: the wait's own timers, whatever the requests do.
+const SCRIPT = fs.readFileSync(path.join(__dirname, "..", "..", "iam", "static", "iam", "updates.js"), "utf8");
+const STORAGE_KEY = "iam.updates.installing";
+
+class FakeNode {
+  constructor(tag = "div") {
+    this.tagName = tag.toUpperCase();
+    this.children = [];
+    this.dataset = {};
+    this.attributes = {};
+    this.listeners = {};
+    this.parts = {};
+    this.hidden = false;
+    this.className = "";
+    this.own = "";
+  }
+
+  get textContent() {
+    return this.own + this.children.map((child) => (typeof child === "string" ? child : child.textContent)).join(" ");
+  }
+
+  set textContent(value) {
+    this.own = String(value);
+    this.children = [];
+  }
+
+  append(...nodes) {
+    this.children.push(...nodes);
+  }
+
+  replaceChildren(...nodes) {
+    this.own = "";
+    this.children = nodes;
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+
+  addEventListener(type, listener) {
+    (this.listeners[type] ||= []).push(listener);
+  }
+
+  dispatch(type, event = {}) {
+    for (const listener of this.listeners[type] || []) listener(event);
+  }
+
+  click() {
+    this.dispatch("click");
+  }
+
+  focus() {}
+
+  querySelector(selector) {
+    return this.parts[selector] || null;
+  }
+
+  // The button with this label, anywhere below.
+  find(label) {
+    for (const child of this.children) {
+      if (typeof child === "string") continue;
+      if (child.tagName === "BUTTON" && child.textContent === label) return child;
+      const found = child.find(label);
+      if (found) return found;
+    }
+    return null;
+  }
+}
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+// Moves the fake clock in small steps, letting answers arrive in between.
+async function advance(t, ms) {
+  for (let done = 0; done < ms; done += 250) {
+    t.mock.timers.tick(Math.min(250, ms - done));
+    await flush();
+  }
+}
+
+// handle(request) answers {status, body, type}, an Error (no answer) or
+// "hang" (no answer until the request is aborted). `storage`: the tab's
+// sessionStorage, to load the page again.
+function openPage(t, handle, storage = new Map()) {
+  if (!storage.size) t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: NOW });
+  const root = new FakeNode();
+  root.dataset = { app: "Meldgrove IAM", csrf: "token", statusUrl: "/status", checkUrl: "/check", installUrl: "/install" };
+  const button = new FakeNode("button");
+  const panel = new FakeNode();
+  panel.hidden = true;
+  root.parts = { ".updates-button": button, ".updates-tooltip": new FakeNode("span"), ".updates-popover": panel };
+  const dialog = new FakeNode("dialog");
+  for (const name of ["title", "text", "notes", "ok"]) dialog.parts[`.updates-confirm-${name}`] = new FakeNode();
+  dialog.showModal = () => (dialog.open = true);
+  const toast = new FakeNode();
+  const document = new FakeNode("document");
+  document.parts = { "[data-updates]": root, ".updates-confirm": dialog, ".updates-toast": toast };
+  document.createElement = (tag) => new FakeNode(tag);
+  const window = new FakeNode("window");
+  window.reloads = 0;
+  window.location = { reload: () => window.reloads++ };
+  const sessionStorage = {
+    getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: (key) => storage.delete(key),
+  };
+  const requests = [];
+  async function fetch(url, options) {
+    requests.push({ url, method: options.method || "GET", at: Date.now() });
+    const reply = handle({ url, method: options.method || "GET" });
+    if (reply === "hang") {
+      return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted"))));
+    }
+    if (reply instanceof Error) throw reply;
+    const { status = 200, body = null, type = "application/json" } = reply;
+    return { type: "basic", status, headers: { get: () => type }, json: async () => body };
+  }
+  new Function("document", "window", "sessionStorage", "fetch", "IamUpdates", SCRIPT)(document, window, sessionStorage, fetch, logic);
+  return { button, panel, dialog, toast, window, storage, requests };
+}
+
+// Install now, confirmed in the dialog.
+async function installNow(page) {
+  page.button.click();
+  page.panel.find("Install now").click();
+  page.dialog.returnValue = "install";
+  page.dialog.onclose();
+  await flush();
+}
+
+const offer = response({ available: release("0.2.1") });
+
+test("page: the deadline ends an unconfirmed attempt while every request stalls", async (t) => {
+  let stalled = false;
+  const page = openPage(t, (request) => (stalled || request.method === "POST" ? "hang" : { body: offer }));
+  await flush();
+  stalled = true;
+  await installNow(page);
+  await advance(t, 59_750);
+  assert.equal(page.storage.has(STORAGE_KEY), true, "still waiting");
+  assert.match(page.panel.textContent, /Installing 0\.2\.1…/);
+  // The install request was bounded (25 s), then polls every 2 s (10 s each).
+  assert.ok(page.requests.filter((request) => request.method === "GET").length >= 3);
+  await advance(t, 250);
+  assert.equal(page.storage.has(STORAGE_KEY), false);
+  assert.match(page.panel.textContent, /The installation could not be confirmed\. No answer from the server\./);
+});
+
+test("page: the deadline says the installation did not start when the status answers without it", async (t) => {
+  const page = openPage(t, (request) => (request.method === "POST" ? { status: 502, type: "text/html" } : { body: offer }));
+  await flush();
+  await installNow(page);
+  await advance(t, 59_750);
+  assert.equal(page.storage.has(STORAGE_KEY), true);
+  await advance(t, 250);
+  assert.equal(page.storage.has(STORAGE_KEY), false);
+  assert.match(page.panel.textContent, /The installation did not start\. The server answered HTTP 502\./);
+});
+
+test("page: a sign-in redirect stops every automatic request and keeps the attempt", async (t) => {
+  const installing = { version: "0.2.1", stage: "pulling", startedAt: "2026-11-19T12:00:00Z", manual: true };
+  const running = response({ available: release("0.2.1"), installing });
+  let phase = "offer";
+  const page = openPage(t, (request) => {
+    if (request.method === "POST") return { status: 202, body: running };
+    if (phase === "signed-out") return { body: "<html>Sign in</html>", type: "text/html; charset=utf-8" };
+    return { body: { offer, running }[phase] };
+  });
+  await flush();
+  phase = "running";
+  await installNow(page);
+  await advance(t, 2000);
+  phase = "signed-out";
+  await advance(t, 2000);
+  const seen = page.requests.length;
+  await advance(t, 6 * 60_000);
+  page.window.dispatch("focus");
+  page.window.dispatch("pageshow", { persisted: true });
+  await advance(t, 10_000);
+  assert.equal(page.requests.length, seen, "no request after the sign-in redirect");
+  assert.equal(JSON.parse(page.storage.get(STORAGE_KEY)).version, "0.2.1", "the attempt is kept");
+  assert.match(page.panel.textContent, /Sign in again\./);
+  assert.doesNotMatch(page.panel.textContent, /reloads/);
+});
+
+test("page: Stop waiting while the updater is unreachable ignores that installation when it returns", async (t) => {
+  const installing = { version: "0.2.1", stage: "pulling", startedAt: "2026-11-19T12:00:00Z", manual: true };
+  const running = response({ available: release("0.2.1"), installing });
+  const unreachable = { app: { version: "0.2.0" }, reachable: false, updater: null, error: "No connection to http://updater:8080." };
+  let phase = "offer";
+  const page = openPage(t, (request) => {
+    if (request.method === "POST") return { status: 202, body: running };
+    return { body: { offer, running, unreachable }[phase] };
+  });
+  await flush();
+  phase = "running";
+  await installNow(page);
+  await advance(t, 2000);
+  phase = "unreachable";
+  // The 15 minutes run on their own timer.
+  await advance(t, 15 * 60_000 - 2000);
+  const stop = page.panel.find("Stop waiting");
+  assert.ok(stop, "Stop waiting after 15 minutes");
+  stop.click();
+  await flush();
+  assert.equal(page.storage.has(STORAGE_KEY), false);
+  phase = "running";
+  await advance(t, 5 * 60_000);
+  const since = page.requests.length;
+  await advance(t, 10_000);
+  assert.equal(page.requests.length, since, "no install polls every 2 s");
+  assert.equal(page.storage.has(STORAGE_KEY), false, "not followed again");
+  assert.equal(page.button.dataset.state, "installing");
+  page.button.click();
+  assert.doesNotMatch(page.panel.textContent, /reloads/);
+  // Also after a reload of the page.
+  const reloaded = openPage(t, () => ({ body: running }), page.storage);
+  await advance(t, 10_000);
+  assert.equal(reloaded.requests.length, 1);
+  assert.equal(reloaded.storage.has(STORAGE_KEY), false);
 });
