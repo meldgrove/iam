@@ -1,9 +1,9 @@
 # Coolify
 
 Meldgrove IAM is made for a Linux server ([deployment.md](deployment.md)). It
-also runs on [Coolify](https://coolify.io), from `compose.coolify.yaml`: the
-services of `compose.yaml`, without a host port, pulling the images at every
-deploy, and with an `updater` that calls Coolify's deploy link. Health
+also runs on Coolify, from `compose.coolify.yaml`: the services of
+`compose.yaml`, with `expose` instead of a host port, pulling the images at
+every deploy, and with an `updater` that calls Coolify's deploy link. Health
 checks, the first steps, read-only mode and backups are the same as on a
 server.
 

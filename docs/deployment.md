@@ -53,12 +53,13 @@ server first.
 
 4. **Database:** set `DATABASE_URL` to a PostgreSQL 16 or newer of your own
    that the containers can reach (`localhost` would be the container
-   itself), or run one next to the app. For that, add to `.env`:
+   itself), or run one next to the app. For that, add to `.env`, with the
+   same `openssl rand -hex 32` value in both places:
 
    ```sh
    COMPOSE_FILE=compose.yaml:compose.postgres.yaml
-   POSTGRES_PASSWORD=<openssl rand -hex 32>
-   DATABASE_URL=postgresql://iam:<the same password>@postgres:5432/iam
+   POSTGRES_PASSWORD=REPLACE_WITH_RANDOM_HEX_PASSWORD
+   DATABASE_URL=postgresql://iam:REPLACE_WITH_RANDOM_HEX_PASSWORD@postgres:5432/iam
    ```
 
    With `COMPOSE_FILE` in `.env`, every `docker compose` command in
