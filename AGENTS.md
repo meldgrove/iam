@@ -16,6 +16,11 @@ processes: `migrate`, `web` (gunicorn) and `worker` (`manage.py run_worker`).
   only writer of Account rows), `iam/sync.py` (reads), `iam/schedule.py`.
 - Every change by a person or the worker writes an audit event without secret
   values.
+- Templates render the pages; `iam/static/iam/app.css` styles them with the
+  shared color tokens. The update button and the Updates settings are custom
+  elements from the npm package `@meldgrove/ui`: `npm ci` copies them and the
+  tokens to `iam/static/iam/vendor/` (`docs/development.md`). The app keeps
+  only the routes under `/admin/updates/` (`iam/views/updates.py`).
 - The repository is public and has no license yet. Do not add a license file.
   Use only `example.invalid` in examples; `scripts/check_public_repository.py`
   must pass.
@@ -27,7 +32,6 @@ uv run ruff check . && uv run ruff format --check .
 uv run python manage.py makemigrations --check --dry-run
 uv run pytest
 TEST_DATABASE_URL=postgresql://iam:iam@localhost:55438/iam uv run pytest
-node --test tests/js/updates.test.cjs
 python3 scripts/check_public_repository.py
 ```
 

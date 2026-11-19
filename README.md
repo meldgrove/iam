@@ -36,6 +36,7 @@ now all rights are reserved.
 docker compose -f compose.dev.yaml up -d   # PostgreSQL, Keycloak, Mailpit
 cp .env.example .env
 uv sync
+npm ci                                     # the update button and colors (@meldgrove/ui)
 uv run python manage.py migrate
 uv run python manage.py runserver          # http://localhost:8000
 uv run python manage.py run_worker         # in a second terminal

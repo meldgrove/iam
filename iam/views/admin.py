@@ -1,6 +1,5 @@
 """Admin section: connections, app users and settings."""
 
-from django.conf import settings
 from django.contrib import messages
 from django.db import transaction
 from django.http import Http404
@@ -8,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .. import audit, updates
+from .. import audit
 from ..adapters import AdapterKind, adapter_classes, get_adapter_class
 from ..adapters.base import AdapterError
 from ..crypto import SecretUnreadable
@@ -310,24 +309,4 @@ def settings_form(request):
         )
         messages.success(request, "Saved the settings.")
         return redirect("settings")
-    return render(request, "iam/admin/settings.html", {"form": form, "updates": _updates_section()})
-
-
-def _updates_section() -> dict:
-    """The "Updates" section: installed version, channel, automatic installs."""
-    result = updates.status()
-    updater = result.updater or {}
-    # An updater that failed to answer its status counts as unreachable: the
-    # form must not offer a channel it does not know.
-    reachable = result.reachable and result.updater is not None
-    channel = updater.get("channel") if updater.get("channel") in updates.CHANNELS else "stable"
-    return {
-        "installed": settings.APP_VERSION or "development",
-        "reachable": reachable,
-        "error": result.error,
-        "channel": channel,
-        "channel_label": channel.capitalize(),
-        "locked": updater.get("channelLocked") or "",
-        "cooldown": updates.describe_duration(updater.get("cooldown")),
-        "automatic": updates.automatic_installs(updater) if reachable else "",
-    }
+    return render(request, "iam/admin/settings.html", {"form": form})

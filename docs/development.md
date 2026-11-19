@@ -21,10 +21,22 @@ needs), groups under
 docker compose -f compose.dev.yaml up -d
 cp .env.example .env
 uv sync
+npm ci                                   # Node.js 26; the files from @meldgrove/ui
 uv run python manage.py migrate
 uv run python manage.py runserver        # http://localhost:8000
 uv run python manage.py run_worker       # second terminal
 ```
+
+The update button, the Updates settings and the colors come from the npm
+package `@meldgrove/ui`, which the Meldgrove apps share. `npm ci` copies two
+of its files to `iam/static/iam/vendor/` (ignored by git):
+`meldgrove-updates.js` (the custom elements `<meldgrove-update-button>` and
+`<meldgrove-updates-settings>`) and `tokens.css` (the colors, light and dark).
+Run `npm ci` again after an update of the package; the Docker image copies
+them in its `ui` stage. `app.css` uses the tokens' names (`--background`,
+`--foreground`, `--muted-foreground`, `--primary`, …) and sets IAM's accent
+(`--mg-accent`). Dark mode is the class `dark` on `<html>`, which
+`static/iam/theme.js` sets from the device's setting.
 
 `manage.py` reads `.env`. To try the app with the development Keycloak as a
 connection: Admin › Connections › Add › Keycloak with URL
@@ -44,7 +56,6 @@ uv run ruff check . && uv run ruff format --check .
 uv run python manage.py makemigrations --check --dry-run
 uv run pytest                                               # SQLite
 TEST_DATABASE_URL=postgresql://iam:iam@localhost:55438/iam uv run pytest
-node --test tests/js/updates.test.cjs                       # the update button's logic
 python3 scripts/check_public_repository.py
 ```
 
