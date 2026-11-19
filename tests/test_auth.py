@@ -146,6 +146,11 @@ def test_existing_user_matches_by_subject_then_verified_email():
     assert list(backend.filter_users_by_claims(claims(email="other@example.invalid"))) == [invited]
 
 
+@pytest.mark.parametrize("value", [1, ["true"], {"verified": True}])
+def test_email_verification_rejects_malformed_claim_types(value):
+    assert not auth.email_verified(claims(email_verified=value))
+
+
 def test_first_sign_in_rechecks_the_current_identity():
     backend = auth.OIDCBackend()
     invited = User.objects.create_user(email="ada@example.invalid", role=Role.APPROVER)

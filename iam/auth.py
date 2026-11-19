@@ -174,7 +174,8 @@ def email_verified(claims: dict) -> bool:
     value = claims.get("email_verified")
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes"}
-    return bool(value)
+    # A malformed claim must not authorize linking an app user by email.
+    return value is True
 
 
 def claim_groups(claims: dict) -> set[str]:
