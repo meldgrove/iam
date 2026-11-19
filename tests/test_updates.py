@@ -8,6 +8,7 @@ import re
 
 import httpx
 import pytest
+from django.conf import settings
 from django.test import Client
 from django.urls import reverse
 
@@ -349,6 +350,9 @@ def test_the_button_is_for_admins_only(client_for, admin_user, viewer_user, upda
         "project": "iam",
         "locale": "en",
         "guide-url": "https://github.com/meldgrove/iam/blob/main/docs/updates.md#switch-it-on",
+        # Dates as everywhere in IAM: 19.11.2026, in the server's time zone.
+        "date-locale": "de-DE",
+        "time-zone": settings.TIME_ZONE,
     }
     assert '<script type="module" src="/static/iam/vendor/meldgrove-updates.js">' in page
     assert updater.requests == [], "The page itself never waits for the updater."
