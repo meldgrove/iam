@@ -14,17 +14,22 @@ and cached, so the app starts even while the provider is down.
 from __future__ import annotations
 
 import logging
+import re
 import time
-from urllib.parse import urlencode
+from hashlib import sha256
+from ipaddress import IPv6Address
+from urllib.parse import urlencode, urlsplit
 
 import jwt
 import requests
 from django.conf import settings
 from django.contrib.auth.backends import BaseBackend
 from django.core.cache import cache
-from django.core.exceptions import ImproperlyConfigured, SuspiciousOperation
+from django.core.exceptions import DisallowedRedirect, ImproperlyConfigured, SuspiciousOperation
+from django.http.response import MAX_URL_REDIRECT_LENGTH
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils.encoding import iri_to_uri
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from mozilla_django_oidc.views import OIDCAuthenticationCallbackView, OIDCAuthenticationRequestView
 
@@ -36,10 +41,70 @@ logger = logging.getLogger(__name__)
 DISCOVERY_CACHE_SECONDS = 3600
 # Allowed difference between this server's clock and the provider's.
 CLOCK_SKEW_SECONDS = 60
+DNS_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.IGNORECASE)
 
 
 class ProviderUnavailable(Exception):
     pass
+
+
+def _is_endpoint_url(value: object, *, redirect: bool = False) -> bool:
+    if not isinstance(value, str) or any(
+        c in "\\#" or c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value
+    ):
+        return False
+    try:
+        # Requests applies the same IDNA rules here as when sending a request.
+        prepared_url = requests.Request("GET", value).prepare().url
+        url = urlsplit(value)
+        # Accessing port also validates its syntax and range.
+        if not (
+            url.scheme in {"http", "https"}
+            and url.hostname
+            and url.username is None
+            and url.port != 0
+        ):
+            return False
+        if redirect and not _fits_redirect(value):
+            return False
+        if url.netloc.startswith("["):
+            IPv6Address(url.hostname)
+            suffix = url.netloc.partition("]")[2]
+            return not suffix or suffix.startswith(":")
+        hostname = urlsplit(prepared_url).hostname.removesuffix(".")
+        return len(hostname) <= 253 and all(
+            DNS_LABEL.fullmatch(label) for label in hostname.split(".")
+        )
+    except (requests.RequestException, ValueError):
+        return False
+
+
+def _fits_redirect(url: str) -> bool:
+    return len(iri_to_uri(url)) <= MAX_URL_REDIRECT_LENGTH
+
+
+def _validate_discovery(document, overrides: dict[str, str]) -> dict:
+    if not isinstance(document, dict):
+        raise ProviderUnavailable("The discovery document must be a JSON object.")
+    issuer = document.get("issuer")
+    if not isinstance(issuer, str) or issuer.rstrip("/") != settings.OIDC_ISSUER:
+        raise ProviderUnavailable("The discovery document names a different issuer.")
+
+    endpoints = {"issuer": issuer}
+    required = ["authorization_endpoint", "token_endpoint", "userinfo_endpoint"]
+    # The OIDC backend only fetches signing keys for RSA and EC algorithms.
+    if settings.OIDC_RP_SIGN_ALGO.startswith(("RS", "ES")):
+        required.append("jwks_uri")
+    for name in required:
+        value = overrides.get(name) or document.get(name)
+        if not _is_endpoint_url(value, redirect=name == "authorization_endpoint"):
+            raise ProviderUnavailable(f"The sign-in provider has no valid {name}.")
+        endpoints[name] = value
+
+    logout = document.get("end_session_endpoint")
+    if _is_endpoint_url(logout, redirect=True):
+        endpoints["end_session_endpoint"] = logout
+    return endpoints
 
 
 def discovery() -> dict:
@@ -52,24 +117,31 @@ def discovery() -> dict:
         "userinfo_endpoint": settings.OIDC_OP_USER_ENDPOINT,
         "jwks_uri": settings.OIDC_OP_JWKS_ENDPOINT,
     }
-    key = f"oidc-discovery:{settings.OIDC_ISSUER}"
-    document = cache.get(key)
-    if document is None:
-        url = f"{settings.OIDC_ISSUER}/.well-known/openid-configuration"
-        try:
-            response = requests.get(url, timeout=settings.OIDC_TIMEOUT)
-            response.raise_for_status()
-            document = response.json()
-        except (requests.RequestException, ValueError) as exc:
-            if all(overrides.values()):
-                # A provider without a discovery document: the settings name
-                # every endpoint sign-in needs (sign-out stays local).
-                return {"issuer": settings.OIDC_ISSUER, **overrides}
-            raise ProviderUnavailable(f"Could not read {url}") from exc
-        if document.get("issuer", "").rstrip("/") != settings.OIDC_ISSUER:
-            raise ProviderUnavailable("The discovery document names a different issuer.")
-        cache.set(key, document, DISCOVERY_CACHE_SECONDS)
-    return {**document, **{k: v for k, v in overrides.items() if v}}
+    cache_scope = (settings.OIDC_ISSUER, settings.OIDC_RP_SIGN_ALGO, overrides)
+    key = f"oidc-discovery:{sha256(repr(cache_scope).encode()).hexdigest()}"
+    endpoints = cache.get(key)
+    if endpoints is not None:
+        return endpoints
+
+    url = f"{settings.OIDC_ISSUER}/.well-known/openid-configuration"
+    try:
+        response = requests.get(url, timeout=settings.OIDC_TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException:
+        if all(overrides.values()):
+            # Sign-in can use explicit endpoints while discovery is unavailable.
+            # Retry discovery on the next request so provider logout can recover.
+            return _validate_discovery({"issuer": settings.OIDC_ISSUER}, overrides)
+        raise ProviderUnavailable("Could not read the discovery document.") from None
+
+    try:
+        document = response.json()
+    except (ValueError, RecursionError):
+        raise ProviderUnavailable("The discovery document is not valid JSON.") from None
+
+    endpoints = _validate_discovery(document, overrides)
+    cache.set(key, endpoints, DISCOVERY_CACHE_SECONDS)
+    return endpoints
 
 
 def provider_logout_url(request) -> str:
@@ -84,7 +156,10 @@ def provider_logout_url(request) -> str:
     id_token = request.session.get("oidc_id_token")
     if id_token:
         query["id_token_hint"] = id_token
-    return f"{endpoint}?{urlencode(query)}"
+    url = urlsplit(endpoint)
+    combined_query = "&".join(filter(None, [url.query, urlencode(query)]))
+    redirect_url = url._replace(query=combined_query).geturl()
+    return redirect_url if _fits_redirect(redirect_url) else post_logout
 
 
 def account_url() -> str:
@@ -318,10 +393,10 @@ class AuthenticationRequestView(OIDCAuthenticationRequestView):
     def get(self, request):
         try:
             self.OIDC_OP_AUTH_ENDPOINT = discovery()["authorization_endpoint"]
-        except (ProviderUnavailable, ImproperlyConfigured, KeyError):
+            return super().get(request)
+        except (ProviderUnavailable, ImproperlyConfigured, DisallowedRedirect):
             logger.warning("Sign-in provider unavailable", exc_info=True)
             return render(request, "iam/login_unavailable.html", status=503)
-        return super().get(request)
 
 
 class CallbackView(OIDCAuthenticationCallbackView):

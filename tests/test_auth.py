@@ -1,8 +1,10 @@
 import time
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from django.core.cache import cache
 from django.core.exceptions import SuspiciousOperation
+from django.http.response import MAX_URL_REDIRECT_LENGTH
 from django.test import RequestFactory
 
 from iam import auth
@@ -67,6 +69,70 @@ def test_discovery_rejects_another_issuer(monkeypatch):
     )
     with pytest.raises(auth.ProviderUnavailable):
         auth.discovery()
+
+
+@pytest.mark.parametrize(
+    "invalid_document",
+    [
+        [],
+        {**DISCOVERY, "issuer": None},
+        {**DISCOVERY, "token_endpoint": None},
+        {**DISCOVERY, "userinfo_endpoint": "/userinfo"},
+        {**DISCOVERY, "authorization_endpoint": f"{ISSUER}/\ud800"},
+        {**DISCOVERY, "token_endpoint": "https://-sso.example.invalid/token"},
+        {**DISCOVERY, "token_endpoint": "https://☕.example.invalid/token"},
+        {**DISCOVERY, "authorization_endpoint": f"{ISSUER}/" + "a" * MAX_URL_REDIRECT_LENGTH},
+        {**DISCOVERY, "jwks_uri": "https://sso.example.invalid:invalid/keys"},
+        {key: value for key, value in DISCOVERY.items() if key != "jwks_uri"},
+    ],
+)
+def test_invalid_discovery_returns_503_and_is_retried(client, monkeypatch, invalid_document):
+    answers = iter([invalid_document, DISCOVERY])
+    monkeypatch.setattr(auth.requests, "get", lambda url, timeout: FakeResponse(next(answers)))
+
+    response = client.get("/oidc/authenticate/")
+    assert response.status_code == 503
+    assert b"cannot be reached" in response.content
+    response = client.get("/oidc/authenticate/")
+    assert response.status_code == 302
+    assert response["Location"].startswith(DISCOVERY["authorization_endpoint"])
+
+
+def test_missing_endpoint_can_be_supplied_by_an_override(settings, monkeypatch):
+    document = {**DISCOVERY, "token_endpoint": None}
+    monkeypatch.setattr(auth.requests, "get", lambda url, timeout: FakeResponse(document))
+    settings.OIDC_OP_TOKEN_ENDPOINT = f"{ISSUER}/override"
+    assert auth.discovery()["token_endpoint"] == settings.OIDC_OP_TOKEN_ENDPOINT
+
+
+def test_symmetric_signing_does_not_require_jwks(settings, monkeypatch):
+    settings.OIDC_RP_SIGN_ALGO = "HS256"
+    document = {key: value for key, value in DISCOVERY.items() if key != "jwks_uri"}
+    monkeypatch.setattr(auth.requests, "get", lambda url, timeout: FakeResponse(document))
+    assert auth.discovery()["authorization_endpoint"] == DISCOVERY["authorization_endpoint"]
+
+
+def test_sign_in_redirect_over_the_length_limit_returns_503(client, monkeypatch):
+    endpoint = f"{ISSUER}/".ljust(MAX_URL_REDIRECT_LENGTH, "a")
+    document = {**DISCOVERY, "authorization_endpoint": endpoint}
+    monkeypatch.setattr(auth.requests, "get", lambda url, timeout: FakeResponse(document))
+    assert client.get("/oidc/authenticate/").status_code == 503
+
+
+@pytest.mark.parametrize(
+    "bad_logout", ["/logout", f"{ISSUER}/\ud800", f"{ISSUER}/".ljust(MAX_URL_REDIRECT_LENGTH, "a")]
+)
+def test_invalid_optional_logout_endpoint_leaves_sign_in_available_and_logout_local(
+    client, monkeypatch, settings, bad_logout
+):
+    document = {**DISCOVERY, "end_session_endpoint": bad_logout}
+    monkeypatch.setattr(auth.requests, "get", lambda url, timeout: FakeResponse(document))
+
+    assert client.get("/oidc/authenticate/").status_code == 302
+    settings.ALLOWED_HOSTS = ["iam.example.invalid"]
+    request = RequestFactory().post("/logout/", HTTP_HOST="iam.example.invalid")
+    request.session = {"oidc_id_token": "id-token"}
+    assert auth.provider_logout_url(request) == "http://iam.example.invalid/login/"
 
 
 def test_existing_user_matches_by_subject_then_verified_email():
@@ -218,6 +284,17 @@ def test_logout_url_ends_the_provider_session():
     assert "id_token_hint=id-token" in url and "client_id=iam" in url
 
 
+def test_logout_keeps_the_providers_existing_query(monkeypatch):
+    document = {**DISCOVERY, "end_session_endpoint": f"{ISSUER}/logout?tenant=team"}
+    monkeypatch.setattr(auth.requests, "get", lambda url, timeout: FakeResponse(document))
+    request = RequestFactory().post("/logout/")
+    request.session = {"oidc_id_token": "id-token"}
+    query = parse_qs(urlsplit(auth.provider_logout_url(request)).query)
+    assert query["tenant"] == ["team"]
+    assert query["client_id"] == ["iam"]
+    assert query["id_token_hint"] == ["id-token"]
+
+
 def test_sign_in_redirects_to_the_provider(client):
     response = client.get("/oidc/authenticate/")
     assert response.status_code == 302
@@ -274,6 +351,23 @@ def test_endpoint_settings_keep_the_sign_out_of_a_discovery_document(settings):
     document = auth.discovery()
     assert document["token_endpoint"] == f"{ISSUER}/token"
     assert document["end_session_endpoint"] == DISCOVERY["end_session_endpoint"]
+
+
+@pytest.mark.parametrize("decode_error", [ValueError, RecursionError])
+def test_explicit_endpoints_do_not_mask_malformed_discovery_json(
+    client, settings, monkeypatch, decode_error
+):
+    class InvalidJson(FakeResponse):
+        def json(self):
+            raise decode_error("invalid JSON")
+
+    settings.OIDC_OP_AUTHORIZATION_ENDPOINT = f"{ISSUER}/auth"
+    settings.OIDC_OP_TOKEN_ENDPOINT = f"{ISSUER}/token"
+    settings.OIDC_OP_USER_ENDPOINT = f"{ISSUER}/userinfo"
+    settings.OIDC_OP_JWKS_ENDPOINT = f"{ISSUER}/certs"
+    monkeypatch.setattr(auth.requests, "get", lambda url, timeout: InvalidJson(None))
+
+    assert client.get("/oidc/authenticate/").status_code == 503
 
 
 def test_role_changes_from_group_claims_are_audited(settings):
