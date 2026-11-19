@@ -275,6 +275,18 @@ def test_connection_secrets_are_write_only(client_for, admin_user):
     assert "realm" in changed and "client_secret" not in changed
 
 
+def test_invalid_connection_form_keeps_multiline_secrets_write_only(client_for, admin_user):
+    client = client_for(admin_user)
+    response = client.post(
+        reverse("connection_create", args=["google_workspace"]),
+        {"cfg_service_account_json": "submitted-key-placeholder"},
+    )
+    assert response.status_code == 200
+    assert b'name="cfg_service_account_json"' in response.content
+    assert b"submitted-key-placeholder" not in response.content
+    assert not Connection.objects.exists()
+
+
 def test_saved_secrets_do_not_follow_a_changed_url(client_for, admin_user, fake_connection):
     # Otherwise an admin session could send a stored secret to any server.
     client = client_for(admin_user)

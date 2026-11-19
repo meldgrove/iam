@@ -146,6 +146,24 @@ def test_existing_user_matches_by_subject_then_verified_email():
     assert list(backend.filter_users_by_claims(claims(email="other@example.invalid"))) == [invited]
 
 
+@pytest.mark.parametrize("value", [1, ["true"], {"verified": True}])
+def test_email_verification_rejects_malformed_claim_types(value):
+    assert not auth.email_verified(claims(email_verified=value))
+
+
+def test_first_sign_in_rechecks_the_current_identity():
+    backend = auth.OIDCBackend()
+    invited = User.objects.create_user(email="ada@example.invalid", role=Role.APPROVER)
+    stale = User.objects.get(pk=invited.pk)
+    backend.update_user(invited, claims())
+
+    # The earlier match still has no subject when the first sign-in commits.
+    with pytest.raises(SuspiciousOperation, match="identity changed"):
+        backend.update_user(stale, claims(sub="subject-2"))
+    invited.refresh_from_db()
+    assert invited.oidc_subject == "subject-1"
+
+
 def test_unknown_people_get_no_user():
     assert auth.OIDCBackend().create_user(claims()) is None
     assert not User.objects.exists()
@@ -320,6 +338,19 @@ def test_pages_need_sign_in(client):
     assert response.status_code == 302 and response["Location"].startswith("/login/")
     assert client.get("/login/").status_code == 200
     assert client.get("/-/healthz").status_code == 200
+
+
+def test_sign_in_error_without_matching_state_keeps_the_current_session(client_for, admin_user):
+    client = client_for(admin_user)
+    session = client.session
+    session["oidc_states"] = {"pending": {"nonce": "sample-nonce"}}
+    session.save()
+
+    response = client.get("/oidc/callback/", {"error": "access_denied", "state": "unrelated"})
+    assert response.status_code == 302
+    assert response.url == "/login/denied/"
+    assert client.session["_auth_user_id"] == str(admin_user.pk)
+    assert "pending" in client.session["oidc_states"]
 
 
 def test_dev_login_is_off_unless_enabled(client):

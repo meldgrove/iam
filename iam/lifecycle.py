@@ -289,7 +289,10 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
         )
 
 
+@transaction.atomic
 def archive_person(person: Person, *, actor: User) -> None:
+    # Serialize with workflow transitions before checking eligibility.
+    person.refresh_from_db(from_queryset=Person.objects.select_for_update(no_key=True))
     if person.status not in ARCHIVABLE:
         raise LifecycleError("Only planned or offboarded people can be archived.")
     if _has_open_workflow(person):

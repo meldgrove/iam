@@ -64,22 +64,81 @@ def test_set_variables_win_over_the_defaults():
     assert settings["OIDC_PROVIDER_NAME"] == "Staff login"
 
 
-def test_sentry_gets_no_local_variables_or_request_bodies():
-    # Both hold decrypted connection secrets and initial passwords.
-    code = (
-        "import json, config.settings, sentry_sdk; o = sentry_sdk.get_client().options;"
-        " print(json.dumps([o['send_default_pii'], o['include_local_variables'],"
-        " o['max_request_body_size']]))"
+def test_sentry_omits_sensitive_request_and_provider_metadata():
+    code = """
+import io
+import json
+import logging
+from wsgiref.util import setup_testing_defaults
+
+import django
+import sentry_sdk
+from django.test import RequestFactory
+from sentry_sdk.integrations.wsgi import SentryWsgiMiddleware
+from sentry_sdk.transport import Transport
+
+django.setup()
+events = {}
+
+class Sink(Transport):
+    def capture_envelope(self, envelope):
+        for item in envelope.items:
+            if item.type in {"event", "transaction"}:
+                events.setdefault(item.type, []).append(item.payload.json)
+
+client = sentry_sdk.get_client()
+client.transport = Sink(client.options)
+request = RequestFactory().get("/oidc/callback/?code=sample-code")
+
+def app(environ, start_response):
+    logging.getLogger("django.security.SuspiciousOperation").error(
+        "Invalid state", extra={"request": request}
     )
+    logging.getLogger("django.security.csrf").warning("Rejected referrer: sample-referrer")
+    logging.getLogger("django.request").error("Request failed", extra={"request": request})
+    sentry_sdk.capture_message("Synthetic error event")
+    start_response("200 OK", [])
+    return [b""]
+
+environ = {
+    "wsgi.input": io.BytesIO(), "wsgi.url_scheme": "https", "SERVER_NAME": "iam.example.invalid",
+    "SERVER_PORT": "443", "PATH_INFO": "/oidc/callback/", "REQUEST_METHOD": "GET",
+    "QUERY_STRING": "code=sample-code", "HTTP_X_HEALTH_TOKEN": "sample-header",
+}
+setup_testing_defaults(environ)
+response = SentryWsgiMiddleware(app)(environ, lambda status, headers: None)
+list(response)
+response.close()
+
+print(json.dumps({
+    "events": events,
+    "privacy_options": [client.options[key] for key in (
+        "send_default_pii", "include_local_variables", "max_request_body_size"
+    )],
+    "integrations": list(client.integrations),
+}))
+"""
     env = {
         "PATH": os.environ.get("PATH", ""),
         **PRODUCTION,
+        "DJANGO_SETTINGS_MODULE": "config.settings",
         "SENTRY_DSN": "https://public@sentry.example.invalid/1",
+        "SENTRY_TRACES_SAMPLE_RATE": "1",
     }
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True, check=True
     )
-    assert json.loads(result.stdout) == [False, False, "never"]
+    data = json.loads(result.stdout)
+    assert set(data["events"]) == {"event", "transaction"}
+    for events in data["events"].values():
+        (event,) = events
+        assert event["request"] == {
+            "url": "https://iam.example.invalid/oidc/callback/",
+            "method": "GET",
+        }
+    assert "sample-" not in result.stdout
+    assert data["privacy_options"] == [False, False, "never"]
+    assert not {"httpx", "stdlib"} & set(data["integrations"])
 
 
 def load_database(url: str) -> dict:

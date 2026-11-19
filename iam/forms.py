@@ -124,6 +124,12 @@ class SettingsForm(forms.ModelForm):
 KEEP_SECRET_HELP = "Saved. Leave empty to keep it."
 
 
+class SecretTextarea(forms.Textarea):
+    def format_value(self, value):
+        # Like PasswordInput, never echo a submitted secret on validation errors.
+        return None
+
+
 class ConnectionForm(forms.Form):
     """Generated from the adapter's fields. Secret values are write-only."""
 
@@ -195,7 +201,7 @@ class ConnectionForm(forms.Form):
                 common["required"] = False
                 common["help_text"] = " ".join(filter(None, [spec.help, KEEP_SECRET_HELP]))
             widget = (
-                forms.Textarea(attrs={"rows": 4, "autocomplete": "off", "spellcheck": "false"})
+                SecretTextarea(attrs={"rows": 4, "autocomplete": "off", "spellcheck": "false"})
                 if spec.kind == "secret_text"
                 else forms.PasswordInput(attrs={"autocomplete": "new-password"}, render_value=False)
             )

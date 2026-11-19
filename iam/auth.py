@@ -26,6 +26,7 @@ from django.conf import settings
 from django.contrib.auth.backends import BaseBackend
 from django.core.cache import cache
 from django.core.exceptions import DisallowedRedirect, ImproperlyConfigured, SuspiciousOperation
+from django.db import transaction
 from django.http.response import MAX_URL_REDIRECT_LENGTH
 from django.shortcuts import render
 from django.urls import reverse
@@ -173,7 +174,8 @@ def email_verified(claims: dict) -> bool:
     value = claims.get("email_verified")
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes"}
-    return bool(value)
+    # A malformed claim must not authorize linking an app user by email.
+    return value is True
 
 
 def claim_groups(claims: dict) -> set[str]:
@@ -326,11 +328,21 @@ class OIDCBackend(OIDCAuthenticationBackend):
         )
         return user
 
+    @transaction.atomic
     def update_user(self, user, claims):
+        # A concurrent sign-in or admin edit may have changed the match.
+        user.refresh_from_db(from_queryset=User.objects.select_for_update(no_key=True))
+        subject = claims["sub"]
+        if user.oidc_subject != subject and (
+            user.oidc_subject is not None
+            or not email_verified(claims)
+            or user.email.lower() != (claims.get("email") or "").strip().lower()
+        ):
+            raise SuspiciousOperation("App user identity changed during sign-in.")
         changed = []
         before = {"role": user.role, "is_active": user.is_active}
-        if user.oidc_subject != claims["sub"]:
-            user.oidc_subject = claims["sub"]
+        if user.oidc_subject != subject:
+            user.oidc_subject = subject
             changed.append("oidc_subject")
         name = self._name(claims)
         if name and name != user.display_name:
@@ -401,6 +413,12 @@ class AuthenticationRequestView(OIDCAuthenticationRequestView):
 
 class CallbackView(OIDCAuthenticationCallbackView):
     def get(self, request):
+        # The library logs out the current user on an error callback. Require
+        # the same session-bound state as a successful sign-in before doing so.
+        if request.GET.get("error") and request.GET.get("state") not in request.session.get(
+            "oidc_states", {}
+        ):
+            return self.login_failure()
         try:
             return super().get(request)
         except ProviderUnavailable:

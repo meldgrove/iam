@@ -275,11 +275,16 @@ def user_form(request, pk=None):
             if edited.pk == request.user.pk and (not edited.is_active or edited.role != Role.ADMIN):
                 messages.error(request, "You cannot remove your own admin access.")
                 return redirect("user_list")
+            changed = list(form.changed_data)
+            if "role" in changed:
+                edited.role_source = User.RoleSource.LOCAL
+                changed.append("role_source")
             if user is None:
                 edited.set_unusable_password()
-            if "role" in form.changed_data:
-                edited.role_source = User.RoleSource.LOCAL
-            edited.save()
+                edited.save()
+            else:
+                # Keep the subject bound by a sign-in during this edit.
+                edited.save(update_fields=changed)
             audit.record(
                 "user.saved",
                 f"Saved app user {edited.email} ({edited.get_role_display()})",

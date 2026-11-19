@@ -16,7 +16,7 @@ from iam.jobs import (
     retry_job,
     run_job,
 )
-from iam.lifecycle import LifecycleError, cancel_workflow, start_workflow
+from iam.lifecycle import LifecycleError, archive_person, cancel_workflow, start_workflow
 from iam.models import (
     Account,
     AppSettings,
@@ -72,6 +72,18 @@ def test_onboarding_creates_the_account_with_groups(person, fake_store, fake_con
     assert account.status == Account.Status.ACTIVE and account.created_by_app
     assert sorted(fake_store.accounts[account.external_id]["groups"]) == ["g-eng", "g-staff"]
     assert account.observed_groups == ["g-eng", "g-staff"]
+
+
+def test_archiving_rechecks_status_after_a_workflow_finishes(person, approver_user):
+    stale = Person.objects.get(pk=person.pk)
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+
+    with pytest.raises(LifecycleError, match="Only planned or offboarded"):
+        archive_person(stale, actor=approver_user)
+    person.refresh_from_db()
+    assert person.status == Person.Status.ACTIVE
+    assert not AuditEvent.objects.filter(action="person.archived").exists()
 
 
 def test_onboarding_needs_an_access_profile(person):
