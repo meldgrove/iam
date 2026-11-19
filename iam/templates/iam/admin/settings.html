@@ -1,4 +1,5 @@
 {% extends "iam/base.html" %}
+{% load static %}
 {% block title %}Settings{% endblock %}
 {% block content %}
 <div class="page-head"><div><h1>Settings</h1><p class="sub">Lifecycle rules and notifications. Sign-in and deployment settings are environment variables (docs/configuration.md).</p></div></div>
@@ -9,25 +10,8 @@
 
 <section class="card" id="updates">
   <h2>Updates</h2>
-  <dl class="facts">
-    <dt>Installed</dt><dd>{{ updates.installed }}</dd>
-    <dt>Channel</dt><dd>{{ updates.channel_label }}</dd>
-    {% if updates.reachable %}<dt>Automatic installs</dt><dd>{{ updates.automatic }}</dd>{% endif %}
-  </dl>
-  {% if not updates.reachable %}
-  <div class="notice gap-above">The update service is not reachable. Automatic updates need the updater service from compose.yaml (<a href="https://github.com/meldgrove/iam/blob/main/docs/updates.md">deployment guide</a>).{% if updates.error %}<br><span class="small">{{ updates.error }}</span>{% endif %}</div>
-  {% endif %}
-  <form method="post" action="{% url 'updates_channel' %}" class="gap-above-large">{% csrf_token %}
-    <fieldset class="choices"{% if updates.locked or not updates.reachable %} disabled{% endif %}>
-      <legend>Channel</legend>
-      <label class="choice"><input type="radio" name="channel" value="stable"{% if updates.channel == "stable" %} checked{% endif %}>
-        <span><strong>Stable</strong> <span class="badge ok">recommended</span><span class="help">Releases. Updates that need no action install automatically{% if updates.cooldown %} after {{ updates.cooldown }}{% endif %}.</span></span></label>
-      <label class="choice"><input type="radio" name="channel" value="preview"{% if updates.channel == "preview" %} checked{% endif %}>
-        <span><strong>Preview</strong><span class="help">Unstable: every change on main as soon as its checks pass, before it is released. New features first, and now and then a new bug. Previews have no release notes.</span></span></label>
-    </fieldset>
-    <p class="muted small gap-above-small">Switching back to Stable keeps this version until a release is newer.</p>
-    {% if updates.locked %}<p class="notice info">{{ updates.locked }}</p>{% endif %}
-    {% if updates.reachable and not updates.locked %}<div class="form-actions"><button class="btn primary" type="submit">Save channel</button></div>{% endif %}
-  </form>
+  {# The base template loads the script too when the update button shows; it runs once. #}
+  <script type="module" src="{% static 'iam/vendor/meldgrove-updates.js' %}"></script>
+  <meldgrove-updates-settings plain {% include "iam/includes/updates_attributes.html" %}></meldgrove-updates-settings>
 </section>
 {% endblock %}

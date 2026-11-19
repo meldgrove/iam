@@ -7,4 +7,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 node_modules/
+# Copied from @meldgrove/ui by npm ci (package.json).
+iam/static/iam/vendor/
 test-results/

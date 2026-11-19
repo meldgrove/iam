@@ -117,37 +117,3 @@ def _json(response: httpx.Response):
         return response.json()
     except ValueError:
         return None
-
-
-def describe_duration(value: str | None) -> str:
-    """'3d' -> '3 days', '12h' -> '12 hours', '90' (seconds) -> '90 seconds';
-    '' for none."""
-    match = re.fullmatch(r"\s*(\d+)\s*([dhms]?)\s*", str(value or ""))
-    if not match:
-        return str(value or "")
-    number, unit = int(match.group(1)), match.group(2) or "s"
-    if number == 0:
-        return ""
-    word = {"d": "day", "h": "hour", "m": "minute", "s": "second"}[unit]
-    return f"{number} {word}{'' if number == 1 else 's'}"
-
-
-def automatic_installs(updater: dict) -> str:
-    """The settings section's line on automatic installs."""
-    mode = updater.get("mode")
-    if mode == "platform":
-        return "The platform installs them (deploy link)."
-    if mode == "off" or not updater.get("automatic"):
-        return "Off on this server: nothing installs automatically."
-    if updater.get("channel") == "preview":
-        text = "On: previews and releases install automatically"
-    else:
-        text = "On: releases install automatically"
-        cooldown = describe_duration(updater.get("cooldown"))
-        if cooldown:
-            text += f" after {cooldown}"
-    window = updater.get("window") or ""
-    if "-" in window:
-        start, end = window.split("-", 1)
-        text += f", between {start.strip()} and {end.strip()} ({updater.get('timezone') or 'UTC'})"
-    return text + "."

@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{% endblock %} · {{ organization_name|default:"Meldgrove IAM" }}</title>
+  <script src="{% static 'iam/theme.js' %}"></script>
+  <link rel="stylesheet" href="{% static 'iam/vendor/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'iam/app.css' %}">
   <link rel="icon" href="{% static 'iam/icon.svg' %}" type="image/svg+xml">
-  {% if updates_button %}<script src="{% static 'iam/updates-state.js' %}" defer></script>
-  <script src="{% static 'iam/updates.js' %}" defer></script>{% endif %}
+  {% if updates_button %}<script type="module" src="{% static 'iam/vendor/meldgrove-updates.js' %}"></script>{% endif %}
 </head>
 <body>
 <div class="layout">
@@ -33,7 +34,7 @@
   </aside>
   <div class="main">
     <header class="topbar">
-      {% if updates_button %}{% include "iam/includes/updates_button.html" %}{% endif %}
+      {% if updates_button %}<meldgrove-update-button {% include "iam/includes/updates_attributes.html" %}></meldgrove-update-button>{% endif %}
       <span class="who">{{ user }} · {{ user.get_role_display }}</span>
       {% if account_url %}<a class="btn small" href="{{ account_url }}">My account</a>{% endif %}
       <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn small" type="submit">Sign out</button></form>

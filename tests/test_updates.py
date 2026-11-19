@@ -1,15 +1,17 @@
-"""In-app updates: the admin routes in front of the Meldgrove Updater, the
-update button's place in the page, and the settings section (docs/updates.md)."""
+"""In-app updates: the admin routes in front of the Meldgrove Updater, and the
+places of the update button and the settings section (@meldgrove/ui's custom
+elements) in the pages (docs/updates.md)."""
 
 import copy
 import json
+import re
 
 import httpx
 import pytest
+from django.conf import settings
 from django.test import Client
 from django.urls import reverse
 
-from iam import updates
 from iam.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
@@ -156,7 +158,7 @@ def test_an_empty_updater_url_switches_updates_off(admin, updater, settings):
     response = admin.get(reverse("updates"))
     assert response.status_code == 200 and response.json()["reachable"] is False
     assert updater.requests == []
-    assert b"data-updates" not in admin.get(reverse("dashboard")).content
+    assert b"<meldgrove-update-button" not in admin.get(reverse("dashboard")).content
 
 
 @pytest.mark.parametrize(
@@ -323,85 +325,67 @@ def test_posts_need_the_csrf_token(admin_user, updater):
     url = reverse("updates_check")
     assert client.post(url, "{}", content_type="application/json").status_code == 403
     page = client.get(reverse("dashboard")).content.decode()
-    token = page.split('data-csrf="', 1)[1].split('"', 1)[0]
+    token = page.split('csrf-token="', 1)[1].split('"', 1)[0]
     response = client.post(
         url, "{}", content_type="application/json", headers={"X-CSRFToken": token}
     )
     assert response.status_code == 200
 
 
+def attributes(page, element):
+    """The attributes of the first <element …> in the page; True for one without a value."""
+    tag = re.search(rf"<{element}\s([^>]*)>", page)
+    assert tag, f"no <{element}> in the page"
+    found = re.findall(r'([a-z-]+)(="([^"]*)")?', tag.group(1))
+    return {name: value if equals else True for name, equals, value in found}
+
+
 def test_the_button_is_for_admins_only(client_for, admin_user, viewer_user, updater):
     page = client_for(admin_user).get(reverse("dashboard")).content.decode()
-    assert "data-updates" in page and "iam/updates.js" in page
+    button = attributes(page, "meldgrove-update-button")
+    assert button.pop("csrf-token")
+    assert button == {
+        "url": reverse("updates"),
+        "app-name": "Meldgrove IAM",
+        "project": "iam",
+        "locale": "en",
+        "guide-url": "https://github.com/meldgrove/iam/blob/main/docs/updates.md#switch-it-on",
+        # Dates as everywhere in IAM: 19.11.2026, in the server's time zone.
+        "date-locale": "de-DE",
+        "time-zone": settings.TIME_ZONE,
+    }
+    assert '<script type="module" src="/static/iam/vendor/meldgrove-updates.js">' in page
     assert updater.requests == [], "The page itself never waits for the updater."
     page = client_for(viewer_user).get(reverse("dashboard")).content.decode()
-    assert "data-updates" not in page and "updates.js" not in page
+    assert "meldgrove-update-button" not in page and "meldgrove-updates.js" not in page
+
+
+def test_every_page_takes_the_shared_colors_and_follows_dark_mode(admin, updater):
+    for page in [Client().get(reverse("login")), admin.get(reverse("dashboard"))]:
+        assert page.status_code == 200
+        head = page.content.decode().split("</head>", 1)[0]
+        # The class "dark" is set before the styles apply; app.css comes after the tokens.
+        assert head.index("iam/theme.js") < head.index("iam/vendor/tokens.css")
+        assert head.index("iam/vendor/tokens.css") < head.index("iam/app.css")
 
 
 def test_the_settings_section(admin, updater):
-    updater.handler = answer({})
     page = admin.get(reverse("settings")).content.decode()
-    assert 'id="updates"' in page
-    assert "On: releases install automatically after 3 days, between 02:00 and 05:00" in page
-    assert "(Europe/Berlin)." in page
-    assert 'value="stable" checked' in page
-    assert "install automatically after 3 days." in page
-    assert "Switching back to Stable keeps this version until a release is newer." in page
-    assert "Save channel" in page and "disabled" not in page.split('id="updates"', 1)[1]
-
-
-def test_the_settings_section_with_a_locked_channel(admin, updater):
-    reason = "The platform's image tag latest decides which updates install. Change it there."
-    updater.handler = answer(
-        {"GET /v1/status": (200, STATUS | {"mode": "platform", "channelLocked": reason})}
-    )
-    section = admin.get(reverse("settings")).content.decode().split('id="updates"', 1)[1]
-    assert '<fieldset class="choices" disabled>' in section
-    assert reason.replace("'", "&#x27;") in section
-    assert "The platform installs them (deploy link)." in section
-    assert "Save channel" not in section
+    section = page.split('id="updates"', 1)[1]
+    settings_element = attributes(section, "meldgrove-updates-settings")
+    # Without a card of its own: the section is IAM's card with its heading.
+    assert settings_element.pop("plain") is True
+    assert settings_element == attributes(page, "meldgrove-update-button")
+    assert section.startswith(">\n  <h2>Updates</h2>")
+    assert "/static/iam/vendor/meldgrove-updates.js" in section
+    assert updater.requests == [], "The settings page never waits for the updater."
 
 
 def test_the_settings_section_without_an_updater(admin, updater, settings):
-    settings.APP_VERSION = ""
-    section = admin.get(reverse("settings")).content.decode().split('id="updates"', 1)[1]
-    assert "The update service is not reachable." in section
-    assert "<dd>development</dd>" in section
-    assert '<fieldset class="choices" disabled>' in section
-
-
-def test_the_settings_section_when_the_updater_fails_its_status(admin, updater):
-    updater.handler = answer({"GET /v1/status": (500, {"error": "registry unreachable"})})
-    section = admin.get(reverse("settings")).content.decode().split('id="updates"', 1)[1]
-    assert "The update service is not reachable." in section
-    assert "registry unreachable" in section
-    assert '<fieldset class="choices" disabled>' in section
-    assert "Save channel" not in section
-
-
-@pytest.mark.parametrize(
-    ("value", "text"),
-    [
-        ("3d", "3 days"),
-        ("1d", "1 day"),
-        ("12h", "12 hours"),
-        ("30m", "30 minutes"),
-        ("90", "90 seconds"),
-        ("0", ""),
-        (None, ""),
-    ],
-)
-def test_describe_duration(value, text):
-    assert updates.describe_duration(value) == text
-
-
-def test_automatic_installs():
-    assert updates.automatic_installs(STATUS | {"window": None}) == (
-        "On: releases install automatically after 3 days."
-    )
-    assert updates.automatic_installs(STATUS | {"channel": "preview", "cooldown": None}) == (
-        "On: previews and releases install automatically, between 02:00 and 05:00 (Europe/Berlin)."
-    )
-    assert updates.automatic_installs(STATUS | {"mode": "off", "automatic": False}) == (
-        "Off on this server: nothing installs automatically."
-    )
+    # No update button; the section still says that there is no update service.
+    settings.UPDATER_URL = ""
+    page = admin.get(reverse("settings")).content.decode()
+    assert "<meldgrove-update-button" not in page
+    section = page.split('id="updates"', 1)[1]
+    assert "<meldgrove-updates-settings" in section
+    assert '<script type="module" src="/static/iam/vendor/meldgrove-updates.js">' in section

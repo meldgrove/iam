@@ -32,7 +32,6 @@ def test_every_sample_is_here():
 def test_status_passes_the_sample_on(updater, name):
     expected = answering(updater, name)
     assert updates.status() == updates.Result(200, True, expected)
-    assert updates.automatic_installs(expected)
 
 
 def test_install_keeps_the_202(updater):

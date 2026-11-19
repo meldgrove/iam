@@ -8,6 +8,7 @@ __pycache__
 .pytest_cache
 .ruff_cache
 node_modules
+iam/static/iam/vendor
 tests/browser/node_modules
 test-results
 *.sqlite3

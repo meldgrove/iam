@@ -25,6 +25,8 @@ PUBLIC_HOSTS = {
     "files.pythonhosted.org",
     "github.com",
     "oauth2.googleapis.com",
+    # A funding link in package-lock.json (class-variance-authority).
+    "polar.sh",
     "pypi.org",
     "registry.npmjs.org",
     "slack.com",

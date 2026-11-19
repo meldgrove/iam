@@ -38,9 +38,6 @@ jobs:
       - name: Check public repository contents
         run: python3 scripts/check_public_repository.py
 
-      - name: Test the update button's logic
-        run: node --test tests/js/updates.test.cjs
-
       - name: Build test image
         run: docker build --target test --tag iam:test .
 
