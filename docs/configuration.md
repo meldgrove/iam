@@ -46,6 +46,10 @@ can read the database, and the sign-in settings.
 | `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | empty | Error reporting without personal data. The release defaults to `iam@<version>`. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0` | Performance tracing share. |
 
+Gunicorn access logs include request paths and omit query strings and
+referrers, which can carry sign-in parameters or personal data. Configure
+reverse proxy access logs separately.
+
 ## Development only
 
 | Variable | Meaning |

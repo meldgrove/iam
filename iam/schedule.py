@@ -80,14 +80,7 @@ def start_due_offboarding() -> list[Workflow]:
         ):
             continue
         try:
-            started.append(
-                start_workflow(
-                    person,
-                    Workflow.Kind.OFFBOARDING,
-                    automatic=True,
-                    reason=f"last day was {person.end_date:%d.%m.%Y}",
-                )
-            )
+            started.append(start_workflow(person, Workflow.Kind.OFFBOARDING, automatic=True))
         except LifecycleError as exc:
             logger.info("Offboarding of person %s not started: %s", person.pk, exc)
         except Exception:  # noqa: BLE001 - one person must not stop the schedule

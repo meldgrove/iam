@@ -6,7 +6,14 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .. import audit
-from ..lifecycle import LifecycleError, archive_person, can_archive, can_start, start_workflow
+from ..lifecycle import (
+    LifecycleError,
+    archive_person,
+    can_archive,
+    can_start,
+    higher_role_app_user,
+    start_workflow,
+)
 from ..models import Connection, Job, Person, Team, Workflow
 from ..permissions import approver_required, viewer_required
 from ..policy import entitled_access
@@ -124,7 +131,14 @@ def person_edit(request, pk):
         # status a workflow changed meanwhile.
         person = get_object_or_404(Person.objects.select_for_update(no_key=True), pk=pk)
         form = PersonForm(request.POST, instance=person)
-        if not form.is_valid():
+        # Changing the last day can cause the worker to turn off the linked app user.
+        if (
+            form.is_valid()
+            and "end_date" in form.changed_data
+            and higher_role_app_user(person, request.user)
+        ):
+            form.add_error("end_date", "Only an admin can change this person's last day.")
+        if form.errors:
             return render(request, "iam/people/form.html", {"form": form, "person": person})
         if {"start_date", "access_profile"} & set(form.changed_data):
             form.instance.onboarding_paused = False

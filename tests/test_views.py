@@ -156,6 +156,32 @@ def test_end_date_before_start_is_refused(client_for, approver_user):
     assert response.status_code == 200 and b"cannot be before" in response.content
 
 
+def test_only_an_admin_can_change_the_last_day_of_a_person_linked_to_an_admin(
+    client_for, approver_user, admin_user, person
+):
+    admin_user.person = person
+    admin_user.save(update_fields=["person"])
+    edit = reverse("person_edit", args=[person.pk])
+    fields = {
+        "first_name": person.first_name,
+        "last_name": person.last_name,
+        "person_type": person.person_type,
+        "notes": "Updated notes",
+    }
+    client = client_for(approver_user)
+    assert client.post(edit, fields).status_code == 302
+
+    fields["end_date"] = "2030-01-01"
+    response = client.post(edit, fields)
+    assert "end_date" in response.context["form"].errors
+    person.refresh_from_db()
+    assert person.end_date is None and person.notes == "Updated notes"
+
+    assert client_for(admin_user).post(edit, fields).status_code == 302
+    person.refresh_from_db()
+    assert person.end_date.isoformat() == fields["end_date"]
+
+
 def test_start_workflow_from_the_person_page(client_for, approver_user, person, fake_store):
     client = client_for(approver_user)
     response = client.post(reverse("person_start", args=[person.pk, "onboarding"]))
