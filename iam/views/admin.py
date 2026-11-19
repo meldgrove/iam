@@ -317,14 +317,17 @@ def _updates_section() -> dict:
     """The "Updates" section: installed version, channel, automatic installs."""
     result = updates.status()
     updater = result.updater or {}
+    # An updater that failed to answer its status counts as unreachable: the
+    # form must not offer a channel it does not know.
+    reachable = result.reachable and result.updater is not None
     channel = updater.get("channel") if updater.get("channel") in updates.CHANNELS else "stable"
     return {
         "installed": settings.APP_VERSION or "development",
-        "reachable": result.reachable,
+        "reachable": reachable,
         "error": result.error,
         "channel": channel,
         "channel_label": channel.capitalize(),
         "locked": updater.get("channelLocked") or "",
         "cooldown": updates.describe_duration(updater.get("cooldown")),
-        "automatic": updates.automatic_installs(updater) if result.reachable else "",
+        "automatic": updates.automatic_installs(updater) if reachable else "",
     }

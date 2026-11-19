@@ -370,6 +370,15 @@ def test_the_settings_section_without_an_updater(admin, updater, settings):
     assert '<fieldset class="choices" disabled>' in section
 
 
+def test_the_settings_section_when_the_updater_fails_its_status(admin, updater):
+    updater.handler = answer({"GET /v1/status": (500, {"error": "registry unreachable"})})
+    section = admin.get(reverse("settings")).content.decode().split('id="updates"', 1)[1]
+    assert "The update service is not reachable." in section
+    assert "registry unreachable" in section
+    assert '<fieldset class="choices" disabled>' in section
+    assert "Save channel" not in section
+
+
 @pytest.mark.parametrize(
     ("value", "text"),
     [
