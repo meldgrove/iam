@@ -10,43 +10,18 @@ from `compose.yaml`:
 | `worker` | `manage.py run_worker` | Runs jobs, the schedule and reads from connections. One is enough; with a second, one runs jobs while the other reads a big directory. |
 | `updater` | Meldgrove Updater | Checks for and installs updates; the admins' update button talks to it ([updates.md](updates.md)). |
 
-PostgreSQL 16 or newer runs separately (a managed database, its own Coolify
-resource, or a PostgreSQL server of your own). Nothing else is needed: no
-Redis, no message queue. The stack runs on [Coolify](#coolify) or on a
-[Debian server](#debian).
+PostgreSQL 16 or newer runs separately (a managed database or a PostgreSQL
+server of your own), or next to the app with `compose.postgres.yaml`.
+Nothing else is needed: no Redis, no message queue. The stack is made for a
+Linux server, such as a VPS with Debian or Ubuntu ([Setup](#setup)). To run
+it on Coolify instead, see [Coolify](coolify.md); it uses
+`compose.coolify.yaml`.
 
-## Coolify
+## Setup
 
-1. Create a PostgreSQL resource and note its internal URL.
-2. Create a Docker Compose resource from this repository, branch `stable`
-   (it always holds the `compose.yaml` of the newest release). Under
-   Advanced, set Auto deploy to "Manual deployments only" so only the updater
-   deploys. Turn on "Connect To Predefined Network" to reach the database.
-3. Assign the domain to `web`, port 8000.
-4. Set the environment variables:
-
-   | Variable | Value |
-   | --- | --- |
-   | `IAM_VERSION` | `0.1` (a release series, or `preview`; see [updates.md](updates.md#on-coolify)) |
-   | `DJANGO_SECRET_KEY` | random, 50+ characters |
-   | `ENCRYPTION_KEY` | `docker run --rm -e DJANGO_DEBUG=1 ghcr.io/meldgrove/iam:0.1 python manage.py generate_key`; keep a copy with the backups |
-   | `DATABASE_URL` | the PostgreSQL resource's internal URL |
-   | `ALLOWED_HOSTS` | `iam.example.invalid` |
-   | `CSRF_TRUSTED_ORIGINS` | `https://iam.example.invalid` |
-   | `HEALTHCHECK_TOKEN` | random |
-   | `KEYCLOAK_URL`, `KEYCLOAK_REALM` or `OIDC_ISSUER` | the sign-in provider ([authentication.md](authentication.md)) |
-   | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | the sign-in client |
-   | `BOOTSTRAP_ADMIN_EMAILS` or `OIDC_ADMIN_GROUPS` | the first admin |
-
-5. Deploy. Sign in, then continue with "First steps" below.
-6. **Automatic updates:** set them up [on Coolify](updates.md#on-coolify).
-
-## Debian
-
-On a server with Debian 12 or later, or a similar system such as Ubuntu,
-run the commands as root (`sudo -i`). `compose.yaml` has no database: use
-a PostgreSQL 16 or newer of your own, such as a managed database, that the
-containers can reach.
+On a server with Debian 12 or later, or a similar system such as Ubuntu
+24.04, run the commands as root (`sudo -i`). Point a domain name at the
+server first.
 
 1. **Docker:** install Docker Engine and the Compose plugin from Docker's
    apt repository ([Debian](https://docs.docker.com/engine/install/debian/),
@@ -59,23 +34,36 @@ containers can reach.
    cd /srv/iam
    ```
 
-3. **Create `.env`** next to `compose.yaml` with the variables from the table
-   under [Coolify](#coolify), with `DATABASE_URL` pointing to the database,
-   and make it readable for root only: `chmod 600 .env`. `.env.example`
-   holds development settings; do not copy it. Once automatic updates are on,
-   the updater writes the installed version into `IAM_VERSION` there.
-4. **Publish `web` on the server:** `compose.yaml` only exposes port 8000 to
-   the Docker network, where Coolify's proxy reaches it. Docker Compose also
-   reads `compose.override.yaml` next to it:
+3. **Create `.env`** next to `compose.yaml` with these variables, and make it
+   readable for root only: `chmod 600 .env`. `.env.example` holds development
+   settings; do not copy it.
+
+   | Variable | Value |
+   | --- | --- |
+   | `IAM_VERSION` | `0.1` (a release series; with [automatic updates](updates.md), the server writes the exact version it installs here) |
+   | `DJANGO_SECRET_KEY` | random, 50+ characters |
+   | `ENCRYPTION_KEY` | `docker run --rm -e DJANGO_DEBUG=1 ghcr.io/meldgrove/iam:0.1 python manage.py generate_key`; keep a copy with the backups |
+   | `DATABASE_URL` | your PostgreSQL, or the container below |
+   | `ALLOWED_HOSTS` | `iam.example.invalid` |
+   | `CSRF_TRUSTED_ORIGINS` | `https://iam.example.invalid` |
+   | `HEALTHCHECK_TOKEN` | random |
+   | `KEYCLOAK_URL`, `KEYCLOAK_REALM` or `OIDC_ISSUER` | the sign-in provider ([authentication.md](authentication.md)) |
+   | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | the sign-in client |
+   | `BOOTSTRAP_ADMIN_EMAILS` or `OIDC_ADMIN_GROUPS` | the first admin |
+
+4. **Database:** set `DATABASE_URL` to a PostgreSQL 16 or newer of your own
+   that the containers can reach (`localhost` would be the container
+   itself), or run one next to the app. For that, add to `.env`, with the
+   same `openssl rand -hex 32` value in both places:
 
    ```sh
-   cat > compose.override.yaml << 'EOF'
-   services:
-     web:
-       ports:
-         - "127.0.0.1:8000:8000"
-   EOF
+   COMPOSE_FILE=compose.yaml:compose.postgres.yaml
+   POSTGRES_PASSWORD=REPLACE_WITH_RANDOM_HEX_PASSWORD
+   DATABASE_URL=postgresql://iam:REPLACE_WITH_RANDOM_HEX_PASSWORD@postgres:5432/iam
    ```
+
+   With `COMPOSE_FILE` in `.env`, every `docker compose` command in
+   `/srv/iam` uses both files. The data lives in the volume `postgres`.
 
 5. **Start.** The second command adds the first admin; leave it out when
    `BOOTSTRAP_ADMIN_EMAILS` or `OIDC_ADMIN_GROUPS` makes one
@@ -87,7 +75,9 @@ containers can reach.
    ```
 
 6. **HTTPS:** point the domain's DNS at the server, install Caddy
-   (`apt install caddy`), and replace `/etc/caddy/Caddyfile` with:
+   (`apt install caddy`), and put this site into `/etc/caddy/Caddyfile`, in
+   place of the package's example site `:80` and next to the sites of other
+   apps:
 
    ```text
    iam.example.invalid {
@@ -96,9 +86,15 @@ containers can reach.
    ```
 
    Then `systemctl reload caddy`. Caddy gets the certificate itself.
+   `compose.yaml` publishes `web` on `127.0.0.1:8000` only; `IAM_PORT`
+   changes the host port. With several apps on one server, give each its
+   own port and its own site in the Caddyfile. Caddy's requests reach the
+   container from the Docker network's gateway, which is why `compose.yaml`
+   trusts forwarded headers from any address (`FORWARDED_ALLOW_IPS=*`):
+   nothing outside the server reaches the port.
 
 7. Sign in, then continue with "First steps" below.
-8. **Automatic updates:** set them up [on Debian](updates.md#on-debian).
+8. **Automatic updates:** [switch them on](updates.md#switch-it-on).
 
 ## Health
 
@@ -176,14 +172,17 @@ To leave read-only mode:
 Releases that need operator action list their steps under "Upgrade steps
 needed" in the release notes ([releases.md](releases.md)); the update button
 shows such a release as needing upgrade steps. Take the steps, then move to
-the new series ([updates.md](updates.md#channels)):
+the new series ([updates.md](updates.md#channels)): in `/srv/iam`, run
+`git pull` (the newest release's `compose.yaml`), then install the release
+with the update button ("Install anyway…"). Without the host setup: change
+`IAM_VERSION` in `.env` and run `docker compose up -d --pull always`.
 
-- **Coolify:** change `IAM_VERSION` in the resource's environment variables
-  and redeploy. Coolify reads `compose.yaml` from `stable`, which is at the
-  newest release.
-- **Debian:** in `/srv/iam`, run `git pull` (the newest release's
-  `compose.yaml`), then install the release with the update button
-  ("Install anyway…"). Without the host setup: change `IAM_VERSION` in
-  `.env` and run `docker compose up -d --pull always`.
+Servers set up before `compose.yaml` published the port have a
+`compose.override.yaml` that publishes `127.0.0.1:8000:8000`. It does no
+harm: Docker Compose merges the identical entry. To remove it after the
+`git pull` that brings the new `compose.yaml`, delete it if it holds nothing
+else, and run `docker compose up -d --force-recreate updater`: the host setup
+runs Docker Compose with the files that started the updater, so it fails
+while those name a deleted file.
 
 Database migrations run automatically in `migrate`.
