@@ -147,24 +147,171 @@ test("the attention, failed, off and installing popovers", () => {
   assert.deepEqual(model.text, ["Meldgrove IAM restarts. This page reloads when it is back."]);
   assert.equal(model.message, "");
   assert.equal(logic.popover("installing", installing, { pending, now: NOW, restarting: true }).meta, "Restarting…");
+  assert.equal(model.stop, "");
   const slow = logic.popover("installing", installing, { pending, now: NOW + 16 * 60_000 });
   assert.match(slow.message, /^This takes longer than expected\. Check the server \(journalctl -u meldgrove-updater-iam\)\.$/);
+  assert.equal(slow.stop, "Stop waiting");
 });
 
 test("an installation ends when the new version answers", () => {
   const before = response({ available: release("0.2.1") });
-  const pending = logic.pendingInstall("0.2.1", before, NOW);
+  const pending = logic.pendingInstall("0.2.1", before, NOW, { confirmed: true });
   assert.equal(logic.installOutcome(before, pending, NOW), "waiting");
   assert.equal(logic.installOutcome(response({}, { version: "0.2.1" }), pending, NOW), "done");
   const installed = { version: "0.2.1", result: "installed", message: null, finishedAt: hoursAgo(0) };
   assert.equal(logic.installOutcome(response({ last: installed }), pending, NOW), "done");
+  // Platform: done once the app answers with the version, or, without an app
+  // version, once it answers again after an outage.
   const accepted = { ...installed, result: "accepted" };
   assert.equal(logic.installOutcome(response({ last: accepted }), pending, NOW), "waiting");
-  assert.equal(logic.installOutcome(response({ last: accepted }), { ...pending, outage: true }, NOW), "done");
-  assert.equal(logic.installOutcome(response({ last: accepted }, { version: "0.2.0-1" }), pending, NOW), "done");
+  assert.equal(logic.installOutcome(response({ last: accepted }), { ...pending, outage: true }, NOW), "waiting");
+  assert.equal(logic.installOutcome(response({ last: accepted }, { version: "0.2.1" }), pending, NOW), "done");
+  assert.equal(logic.installOutcome(response({ last: accepted }, { version: null }), pending, NOW), "waiting");
+  assert.equal(logic.installOutcome(response({ last: accepted }, { version: null }), { ...pending, outage: true }, NOW), "done");
   const rolledBack = { ...installed, result: "rolled-back" };
   assert.equal(logic.installOutcome(response({ last: rolledBack }), pending, NOW), "failed");
   assert.equal(logic.installOutcome(before, pending, NOW + 16 * 60_000), "slow");
+});
+
+test("the app's new version is not enough while the updater still installs it", () => {
+  const pending = logic.pendingInstall("0.2.1", response({ available: release("0.2.1") }), NOW, { confirmed: true });
+  const starting = { version: "0.2.1", stage: "starting", startedAt: hoursAgo(0), manual: true };
+  const answer = response({ available: release("0.2.1"), installing: starting }, { version: "0.2.1" });
+  assert.equal(logic.installOutcome(answer, pending, NOW), "waiting");
+  assert.equal(logic.deriveState(answer), "installing");
+  // The updater restarts too: no status, no result yet.
+  const unreachable = { app: { version: "0.2.1" }, reachable: false, updater: null, error: "No connection." };
+  assert.equal(logic.installOutcome(unreachable, pending, NOW), "waiting");
+  // It rolls back after all.
+  const rolledBack = { version: "0.2.1", result: "rolled-back", message: "worker is unhealthy. 0.2.0 runs again.", finishedAt: hoursAgo(0) };
+  assert.equal(logic.installOutcome(response({ last: rolledBack }, { version: "0.2.0" }), pending, NOW), "failed");
+});
+
+test("a failure is shown from last.message, also when no offer is marked failed", () => {
+  const pending = logic.pendingInstall("0.2.1", response({ available: release("0.2.1") }), NOW, { confirmed: true });
+  const last = { version: "0.2.1", result: "failed", message: "The server did not take the request within 2 minutes.", finishedAt: hoursAgo(0) };
+  const answer = response({ available: release("0.2.1"), last });
+  assert.equal(logic.installOutcome(answer, pending, NOW), "failed");
+  assert.equal(logic.deriveState(answer), "available", "without the followed failure");
+  assert.equal(logic.deriveState(answer, { failure: last }), "failed");
+  const model = logic.popover("failed", answer, { now: NOW, failure: last });
+  assert.equal(model.title, "Update to 0.2.1 failed");
+  assert.equal(model.message, "The server did not take the request within 2 minutes.");
+  assert.equal(model.action.label, "Try again");
+  assert.equal(model.action.version, "0.2.1");
+  // Try again only while the version is still offered.
+  const gone = response({ last });
+  assert.equal(logic.deriveState(gone, { failure: last }), "failed");
+  assert.equal(logic.popover("failed", gone, { now: NOW, failure: last }).action, null);
+  // The attention offer keeps its upgrade-steps confirmation.
+  const attention = response({ attention: release("0.3.0"), last: { ...last, version: "0.3.0" } });
+  const retry = logic.popover("failed", attention, { now: NOW, failure: attention.updater.last }).action;
+  assert.equal(retry.confirm.title, "Install 0.3.0 without its upgrade steps?");
+});
+
+test("a result from before the attempt is ignored", () => {
+  const failed = { version: "0.2.1", result: "rolled-back", message: "migrate failed", finishedAt: hoursAgo(0.5) };
+  const installed = { ...failed, result: "installed", message: null };
+  const pending = logic.pendingInstall("0.2.1", response(), NOW, { confirmed: true });
+  assert.equal(logic.installOutcome(response({ available: failedRelease, last: failed }), pending, NOW), "waiting");
+  assert.equal(logic.installOutcome(response({ last: installed }), pending, NOW), "waiting");
+  // The updater's own start time counts too (the browser's clock may run ahead).
+  const startedAt = hoursAgo(1);
+  const followed = logic.follow(pending, response({ installing: { version: "0.2.1", stage: "pulling", startedAt, manual: true } }), NOW);
+  assert.equal(followed.serverStartedAt, Date.parse(startedAt));
+  assert.equal(logic.installOutcome(response({ last: installed }), followed, NOW), "done");
+});
+
+test("an upgrade the image tag does not reach offers no install", () => {
+  const locked = "The image tag 0.2 set where the app is deployed decides which updates install. Change it there.";
+  const answer = response({ mode: "platform", channelLocked: locked, attention: release("0.3.0") });
+  assert.equal(logic.deriveState(answer), "attention");
+  const model = logic.popover("attention", answer, { now: NOW, app: "Meldgrove IAM" });
+  assert.equal(model.title, "0.3.0 needs upgrade steps");
+  assert.equal(model.action, null);
+  assert.deepEqual(model.text, [
+    "The image tag set where Meldgrove IAM is deployed does not reach 0.3.0. Take the upgrade steps from its release notes, then change the tag there.",
+  ]);
+  // A release in the tag's series still installs through the deploy link.
+  const both = logic.popover("available", response({ mode: "platform", channelLocked: locked, available: release("0.2.1"), attention: release("0.3.0") }), { now: NOW });
+  assert.equal(both.action.label, "Install now");
+  const failed = { version: "0.3.0", result: "failed", message: "not offered", finishedAt: hoursAgo(0) };
+  const retry = response({ mode: "platform", channelLocked: locked, attention: release("0.3.0"), last: failed });
+  assert.equal(logic.popover("failed", retry, { now: NOW, failure: failed }).action, null);
+});
+
+test("the answer to the install request decides whether the attempt is kept", () => {
+  const before = response({ available: release("0.2.1") });
+  const pending = logic.pendingInstall("0.2.1", before, NOW);
+  assert.equal(pending.confirmed, false);
+  const running = response({ available: release("0.2.1"), installing: { version: "0.2.1", stage: "requested", startedAt: hoursAgo(0), manual: true } });
+
+  const accepted = logic.answerInstall(pending, { status: 202, body: running }, NOW);
+  assert.equal(accepted.pending.confirmed, true);
+  assert.equal(accepted.error, "");
+
+  // Unclear: the updater may have accepted it before the answer got lost.
+  const unclear = [
+    [{ status: 0, body: null }, "No answer from the server."],
+    [{ status: 502, body: null }, "The server answered HTTP 502."],
+    [{ status: 200, body: { app: { version: "0.2.0" }, reachable: false, updater: null, error: "The update service did not answer within 10 s." } }, "The update service did not answer within 10 s."],
+  ];
+  for (const [answer, reason] of unclear) {
+    const result = logic.answerInstall(pending, answer, NOW);
+    assert.equal(result.pending.version, "0.2.1", reason);
+    assert.equal(result.pending.confirmed, false, reason);
+    assert.equal(result.pending.reason, reason);
+    assert.equal(result.error, "");
+  }
+
+  const refused = logic.answerInstall(pending, { status: 409, body: { ...before, error: "0.2.1 is not offered; check again." } }, NOW);
+  assert.equal(refused.pending, null);
+  assert.equal(refused.error, "0.2.1 is not offered; check again.");
+
+  // Another admin or an automatic install was faster: follow that one.
+  const automatic = response({ available: release("0.2.2"), installing: { version: "0.2.2", stage: "pulling", startedAt: hoursAgo(0), manual: false } });
+  const faster = logic.answerInstall(pending, { status: 409, body: { ...automatic, error: "0.2.2 is being installed." } }, NOW);
+  assert.equal(faster.pending.version, "0.2.2");
+  assert.equal(faster.pending.confirmed, true);
+  assert.equal(faster.error, "");
+
+  const signedOut = logic.answerInstall(pending, { status: 0, body: null, signedOut: true }, NOW);
+  assert.equal(signedOut.pending, null);
+  assert.equal(signedOut.error, logic.SIGNED_OUT);
+});
+
+test("an unclear request is settled by the status within a minute", () => {
+  const before = response({ available: release("0.2.1") });
+  const pending = { ...logic.pendingInstall("0.2.1", before, NOW), reason: "No answer from the server." };
+  assert.equal(logic.installOutcome(before, pending, NOW + 30_000), "waiting");
+  assert.equal(logic.installOutcome(before, pending, NOW + 61_000), "not-started");
+  // Also without the updater; but while the app does not answer, or once it
+  // restarted, nothing is settled.
+  const unreachable = { app: { version: "0.2.0" }, reachable: false, updater: null, error: "No connection." };
+  assert.equal(logic.installOutcome(unreachable, pending, NOW + 61_000), "not-started");
+  assert.equal(logic.installOutcome(null, pending, NOW + 61_000), "waiting");
+  assert.equal(logic.installOutcome(unreachable, { ...pending, outage: true }, NOW + 61_000), "waiting");
+  // The status reports it: follow it.
+  const running = response({ available: release("0.2.1"), installing: { version: "0.2.1", stage: "pulling", startedAt: hoursAgo(0), manual: true } });
+  const followed = logic.follow(pending, running, NOW + 2000);
+  assert.equal(followed.confirmed, true);
+  assert.equal(logic.installOutcome(running, followed, NOW + 61_000), "waiting");
+  // Or a fresh result for it.
+  const last = { version: "0.2.1", result: "installed", message: null, finishedAt: new Date(NOW + 5000).toISOString() };
+  assert.equal(logic.follow(pending, response({ last }), NOW + 6000).confirmed, true);
+  assert.equal(logic.installOutcome(response({ last }), pending, NOW + 61_000), "done");
+});
+
+test("a status, a check or a refusal that reports an installation is followed", () => {
+  const automatic = response({ available: release("0.2.1"), installing: { version: "0.2.1", stage: "pulling", startedAt: hoursAgo(0), manual: false } });
+  const followed = logic.follow(null, automatic, NOW);
+  assert.equal(followed.version, "0.2.1");
+  assert.equal(followed.confirmed, true);
+  assert.equal(followed.installedBefore, "0.2.0");
+  assert.equal(logic.follow(null, response({ available: release("0.2.1") }), NOW), null);
+  assert.equal(logic.follow(followed, automatic, NOW), followed, "unchanged while it runs");
+  const unreachable = { app: { version: "0.2.0" }, reachable: false, updater: null, error: "x" };
+  assert.equal(logic.follow(null, unreachable, NOW), null);
 });
 
 test("trying again ignores the earlier failure until a new result", () => {

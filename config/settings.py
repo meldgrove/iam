@@ -213,7 +213,8 @@ READ_ONLY = _read_only in {"1", "true", "yes", "on"}
 
 # In-app updates (docs/updates.md): the Meldgrove Updater next to the app.
 # Unlike the other variables, an empty value means something: no updater, no
-# update button.
+# update button. compose.yaml never passes it empty: there an empty value falls
+# back to http://updater:8080.
 UPDATER_URL = os.getenv("UPDATER_URL", "http://updater:8080").strip().rstrip("/")
 if UPDATER_URL and (
     urlsplit(UPDATER_URL).scheme not in {"http", "https"} or not urlsplit(UPDATER_URL).netloc

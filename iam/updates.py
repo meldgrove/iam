@@ -65,7 +65,11 @@ def install(version: str) -> Result:
 def set_channel(channel: str) -> Result:
     if channel not in CHANNELS:
         return refused("The channel is stable or preview.")
-    return _call("POST", "/v1/channel", timeout=CHANNEL_TIMEOUT, payload={"channel": channel})
+    result = _call("POST", "/v1/channel", timeout=CHANNEL_TIMEOUT, payload={"channel": channel})
+    # Saved only when the updater's status names the chosen channel.
+    if result.accepted and (result.updater or {}).get("channel") != channel:
+        return Result(409, True, result.updater, "The update service did not switch the channel.")
+    return result
 
 
 def refused(error: str) -> Result:

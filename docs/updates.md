@@ -31,17 +31,18 @@ take the steps from its release notes, then install it from the update button
 ("Install anyway…"; [deployment.md](deployment.md#upgrades)).
 
 On [Coolify](#on-coolify), the image tag in `IAM_VERSION` decides instead of the
-channel, and the settings say so.
+channel, and the settings say so. A new series then needs a new tag: the update button
+shows it without "Install anyway…".
 
 ## The update button
 
 Admins (and only they) see an update icon in the top bar. A click checks for updates.
 An available update shows a dot; the button then shows its changes, when it installs
 automatically, and **Install now**. While it installs, the button shows the progress;
-Meldgrove IAM restarts, and the page reloads once the new version answers. When an
-installation fails, the server goes back to the version before, and the button says
-why. Admin › Settings › Updates shows the installed version, the channel, and when
-updates install automatically.
+Meldgrove IAM restarts, and the page reloads once the installation has finished (on a
+Debian server: once every service is healthy). When an installation fails, the server
+goes back to the version before, and the button says why. Admin › Settings › Updates
+shows the installed version, the channel, and when updates install automatically.
 
 The app reaches the updater at `UPDATER_URL` ([configuration.md](configuration.md));
 `compose.yaml` sets it. Read-only mode (`READ_ONLY=1`) does not hold back updates of
@@ -120,16 +121,18 @@ steps say to run `git pull` in `/srv/iam` first.
 
 **Servers set up before the update button** (updater 0.1) keep following the tag in
 `IAM_VERSION`, and the app says that the channel needs the host setup again. As root
-in `/srv/iam`:
+in `/srv/iam`, run `git pull`, set `IAM_VERSION` in `.env` to the release that brings
+the update button (or a newer one), then:
 
 ```sh
-git pull
-docker compose up -d
-docker compose run --rm -T --pull always updater host-setup > updater-setup.sh && sudo sh updater-setup.sh
+docker compose up -d --pull always
+docker compose run --rm -T --pull always updater host-setup > updater-setup.sh
+sh updater-setup.sh
 ```
 
 `git pull` brings the `compose.yaml` of the newest release from the branch `stable`
-(with updater 0.2); the last command replaces the host setup.
+(with updater 0.2). `docker compose up -d --pull always` starts that release of the
+app, not only the new updater; the last command replaces the host setup.
 
 ## Backups
 

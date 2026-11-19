@@ -35,7 +35,7 @@ can read the database, and the sign-in settings.
 | `SECURE_SSL_REDIRECT` | `1` | Redirect HTTP to HTTPS (health checks under `/-/` are exempt). |
 | `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `1` | Send HSTS for subdomains too. |
 | `HEALTHCHECK_TOKEN` | empty | Shows details on `/-/readyz` for requests with `X-Health-Token`. |
-| `UPDATER_URL` | `http://updater:8080` | The `updater` service that the admins' update button and Admin › Settings › Updates talk to ([updates.md](updates.md)). Empty: no update button. The `updater` service's own variables (`UPDATE_*`) are in updates.md. |
+| `UPDATER_URL` | `http://updater:8080` | The `updater` service that the admins' update button and Admin › Settings › Updates talk to ([updates.md](updates.md)). Under `compose.yaml`, an empty value falls back to this default; empty switches the update button off only where the app reads its environment directly, such as `manage.py` with `.env` in development. The `updater` service's own variables (`UPDATE_*`) are in updates.md. |
 | `READ_ONLY` | `0` | `1`: read-only mode. The app reads connected apps but changes nothing in them and sends no email; jobs only check what they would change ([architecture.md](architecture.md#read-only-mode)). Set it for web and worker alike (`compose.yaml` does). Any value other than `1`/`0` (or `true`/`false`, `yes`/`no`, `on`/`off`) stops the app from starting. |
 | `TZ` | `UTC` | Time zone for dates, start and end days, and the schedule. |
 | `WEB_WORKERS`, `WEB_THREADS` | `2`, `4` | gunicorn processes and threads. |

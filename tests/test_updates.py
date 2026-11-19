@@ -279,6 +279,24 @@ def test_switching_the_channel_from_the_settings_form(admin, updater):
     assert AuditEvent.objects.filter(action="updates.channel").count() == 1
 
 
+def test_a_channel_counts_as_saved_only_when_the_status_names_it(admin, updater):
+    # The updater answered, but its status still names the old channel.
+    updater.handler = answer({"POST /v1/channel": (200, STATUS)})
+    response = admin.post(
+        reverse("updates_channel"),
+        json.dumps({"channel": "preview"}),
+        content_type="application/json",
+    )
+    assert response.status_code == 409
+    assert response.json()["error"] == "The update service did not switch the channel."
+    assert response.json()["updater"]["channel"] == "stable"
+    page = admin.post(reverse("updates_channel"), {"channel": "preview"}, follow=True)
+    content = page.content.decode()
+    assert "The update service did not switch the channel." in content
+    assert "Switched the update channel" not in content
+    assert not AuditEvent.objects.filter(action="updates.channel").exists()
+
+
 def test_posts_need_the_csrf_token(admin_user, updater):
     updater.handler = answer({})
     client = Client(enforce_csrf_checks=True)

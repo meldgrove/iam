@@ -23,9 +23,17 @@
   let restarting = false;
   let actionError = "";
   let pending = loadPending();
+  // The `last` of the installation that the button followed until it failed.
+  let failure = null;
   let lastFetch = 0;
   let installTimer = null;
+  let reloadTimer = null;
+  let pollTimer = null;
   let slowShown = false;
+  // Signed out or no admin any more: no more polling on this page.
+  let stopped = false;
+  // The installation an admin stopped waiting for: not followed again.
+  let dismissed = "";
 
   function loadPending() {
     try {
@@ -45,9 +53,10 @@
     }
   }
 
-  // {status, body}: status 0 when the app did not answer; body null unless JSON.
+  // {status, body, signedOut}: status 0 when the app did not answer; body
+  // null unless JSON; signedOut for a sign-in redirect, 401 or 403.
   async function call(url, payload) {
-    const options = { headers: { Accept: "application/json" }, credentials: "same-origin" };
+    const options = { headers: { Accept: "application/json" }, credentials: "same-origin", redirect: "manual" };
     if (payload !== undefined) {
       options.method = "POST";
       options.headers["Content-Type"] = "application/json";
@@ -56,15 +65,19 @@
     }
     try {
       const answer = await fetch(url, options);
+      // These routes redirect only to the sign-in.
+      if (answer.type === "opaqueredirect" || answer.status === 401 || answer.status === 403) {
+        return { status: answer.status, body: null, signedOut: true };
+      }
       const json = (answer.headers.get("Content-Type") || "").includes("application/json");
-      return { status: answer.status, body: json ? await answer.json() : null };
+      return { status: answer.status, body: json ? await answer.json() : null, signedOut: false };
     } catch {
-      return { status: 0, body: null };
+      return { status: 0, body: null, signedOut: false };
     }
   }
 
   function state() {
-    return logic.deriveState(response, { pending, checking });
+    return logic.deriveState(response, { pending, checking, failure });
   }
 
   function render() {
@@ -99,6 +112,7 @@
       app,
       checking,
       error: actionError,
+      failure,
     });
     const parts = [];
     const head = element("div", "updates-head");
@@ -126,6 +140,12 @@
       action.type = "button";
       action.addEventListener("click", () => confirmInstall(model.action));
       parts.push(action);
+    }
+    if (model.stop) {
+      const stop = element("button", "btn", model.stop);
+      stop.type = "button";
+      stop.addEventListener("click", stopWaiting);
+      parts.push(stop);
     }
     const footer = element("div", "updates-footer");
     const checked = element("span", "", model.footer.checked);
@@ -161,37 +181,61 @@
     showToast.timer = setTimeout(() => (toast.hidden = true), 4000);
   }
 
+  // Takes a status answer (from a poll, a check or a refusal) and follows an
+  // installation that it reports: automatic, from another admin or tab.
   function adopt(body) {
-    if (body && body.app && body.updater !== undefined) response = body;
+    if (!body || !body.app || body.updater === undefined) return;
+    response = body;
+    const installing = response.updater && response.updater.installing;
+    if (!pending && installing && dismissed === `${installing.version} ${installing.startedAt}`) return;
+    const followed = logic.follow(pending, response, Date.now());
+    if (followed !== pending) {
+      pending = followed;
+      failure = null;
+      savePending();
+    }
+    if (pending && !installTimer && !stopped) waitForInstall();
+  }
+
+  // A sign-in redirect, 401 or 403: stop polling; a page load after signing
+  // in again keeps waiting for a saved installation.
+  function signedOut() {
+    stopped = true;
+    restarting = false;
+    clearTimeout(installTimer);
+    installTimer = null;
+    actionError = logic.SIGNED_OUT;
+    render();
+    if (pending) showToast(logic.SIGNED_OUT, "danger");
   }
 
   async function refresh() {
+    if (stopped) return;
     lastFetch = Date.now();
     const answer = await call(urls.statusUrl);
+    if (answer.signedOut) return signedOut();
     adopt(answer.body);
-    const installing = response && response.updater && response.updater.installing;
-    if (!pending && installing) {
-      // An installation started elsewhere (automatic, or another tab): wait for it too.
-      pending = logic.pendingInstall(installing.version, response, Date.now());
-      savePending();
-      waitForInstall();
-    }
     render();
   }
 
   async function runCheck({ openAfter }) {
-    if (checking) return;
+    if (checking || stopped) return;
     checking = true;
     actionError = "";
     render();
     const answer = await call(urls.checkUrl, {});
     checking = false;
+    if (answer.signedOut) return signedOut();
     adopt(answer.body);
-    const error = (answer.body && answer.body.error) || (response && response.updater && response.updater.error);
+    // A refused or unreachable check says why; a check that failed at the
+    // registry says so instead of "Up to date".
+    const refused = (answer.body && answer.body.error) || (answer.body ? "" : "The check did not finish.");
+    const failed = response && response.updater && response.updater.error;
+    actionError = refused;
     render();
     const current = state();
     if (openAfter && logic.hasPopover(current)) openPanel();
-    else if (openAfter && error) showToast(error, "danger");
+    else if (openAfter && (refused || failed)) showToast(refused || `Last check failed: ${failed}`, "danger");
     else if (openAfter && current === "current") showToast(logic.tooltip(current, response, pending));
   }
 
@@ -215,24 +259,27 @@
 
   async function install(version) {
     actionError = "";
+    failure = null;
+    stopped = false;
+    // Remembered before the request: a lost answer must not lose the installation.
     pending = logic.pendingInstall(version, response, Date.now());
     savePending();
     render();
     openPanel();
     const answer = await call(urls.installUrl, { version });
-    if (answer.status === 202) {
-      adopt(answer.body);
-      render();
-      waitForInstall();
-      return;
-    }
-    // Refused (409, 400) or no update service: nothing installs.
-    pending = null;
+    // A poll meanwhile ended it, or follows another installation.
+    if (!pending || pending.version !== version) return render();
+    if (answer.body && answer.body.app && answer.body.updater !== undefined) response = answer.body;
+    // Accepted, refused (forget it), another installation (follow that one),
+    // or unclear (keep it; the status settles it within a minute).
+    const result = logic.answerInstall(pending, answer, Date.now());
+    pending = result.pending;
+    actionError = result.error;
     savePending();
-    adopt(answer.body);
-    actionError = (answer.body && answer.body.error) || "The installation could not start.";
+    if (answer.signedOut) stopped = true;
     render();
     openPanel();
+    if (pending) waitForInstall();
   }
 
   function waitForInstall() {
@@ -240,10 +287,30 @@
     installTimer = setTimeout(pollInstall, INSTALL_POLL_MS);
   }
 
+  function forget() {
+    pending = null;
+    savePending();
+    clearTimeout(installTimer);
+    installTimer = null;
+    restarting = false;
+    slowShown = false;
+  }
+
+  function stopWaiting() {
+    const installing = response && response.updater && response.updater.installing;
+    dismissed = installing ? `${installing.version} ${installing.startedAt}` : "";
+    forget();
+    closePanel();
+    refresh();
+  }
+
   async function pollInstall() {
-    if (!pending) return;
+    installTimer = null;
+    if (!pending || stopped) return;
     const answer = await call(urls.statusUrl);
-    if (!answer.body || answer.status >= 500) {
+    if (!pending) return;
+    if (answer.signedOut) return signedOut();
+    if (!answer.body || !answer.body.app || answer.status >= 500) {
       // The app restarts: expected; keep asking.
       restarting = true;
       pending.outage = true;
@@ -252,22 +319,30 @@
       waitForInstall();
       return;
     }
-    restarting = false;
     adopt(answer.body);
+    // The updater restarts as well: expected.
+    restarting = !(response && response.reachable);
     const outcome = logic.installOutcome(response, pending, Date.now());
     if (outcome === "done") {
       const version = pending.version;
-      pending = null;
-      savePending();
+      forget();
       closePanel();
       render();
       showToast(`Updated to ${version}`);
-      setTimeout(() => window.location.reload(), 1500);
+      reloadTimer = setTimeout(() => window.location.reload(), 1500);
       return;
     }
     if (outcome === "failed") {
-      pending = null;
-      savePending();
+      failure = response.updater.last;
+      forget();
+      render();
+      openPanel();
+      return;
+    }
+    if (outcome === "not-started") {
+      const reason = pending.reason;
+      forget();
+      actionError = reason ? `The installation did not start. ${reason}` : "The installation did not start.";
       render();
       openPanel();
       return;
@@ -301,15 +376,32 @@
   window.addEventListener("focus", () => {
     if (!pending && Date.now() - lastFetch >= FOCUS_MIN_MS) refresh();
   });
-  setInterval(() => {
-    if (!pending) refresh();
-  }, POLL_MS);
+
+  function start() {
+    clearInterval(pollTimer);
+    pollTimer = setInterval(() => {
+      if (!pending) refresh();
+    }, POLL_MS);
+    if (pending) {
+      // A reload during an installation: keep waiting for it.
+      pollInstall();
+    } else {
+      refresh();
+    }
+  }
+
+  // Leaving the page stops every timer, also the reload after an update; a
+  // page restored from the back-forward cache starts again.
+  window.addEventListener("pagehide", () => {
+    clearInterval(pollTimer);
+    clearTimeout(installTimer);
+    clearTimeout(reloadTimer);
+    installTimer = null;
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) start();
+  });
 
   render();
-  if (pending) {
-    // A reload during an installation: keep waiting for it.
-    pollInstall();
-  } else {
-    refresh();
-  }
+  start();
 })();
