@@ -65,6 +65,22 @@ jobs:
           -e DATABASE_URL=sqlite:////tmp/check.sqlite3
           iam:ci python manage.py check --deploy --fail-level WARNING
 
+      # Production serves static files through their manifest; the end-to-end
+      # job runs in debug mode and would not notice a missing one.
+      - name: Render the sign-in page with production settings
+        run: |
+          docker run --rm \
+            -e DJANGO_SECRET_KEY=ci-only-secret-key-ci-only-secret-key-ci-only-secret-key \
+            -e ENCRYPTION_KEY=$(python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())") \
+            -e ALLOWED_HOSTS=iam.example.invalid \
+            -e DATABASE_URL=sqlite:////tmp/check.sqlite3 \
+            iam:ci sh -c 'python manage.py migrate --noinput -v 0 && python manage.py shell -c "
+          from django.test import Client
+          response = Client().get(\"/login/\", HTTP_HOST=\"iam.example.invalid\", secure=True)
+          assert response.status_code == 200, response.status_code
+          assert b\"/static/iam/app.\" in response.content
+          "'
+
   end-to-end:
     name: End-to-end with Keycloak
     runs-on: ubuntu-24.04

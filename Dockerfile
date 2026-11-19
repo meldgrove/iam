@@ -18,8 +18,9 @@ CMD ["sh", "-c", "ruff check . && ruff format --check . && python manage.py make
 FROM base AS runtime
 RUN uv sync --locked --no-dev
 COPY . .
-# Static files need only development defaults, whatever build arguments Coolify passes.
-RUN env -i PATH="$PATH" PYTHONDONTWRITEBYTECODE=1 DJANGO_DEBUG=1 DEPLOYMENT_ENV=development \
+# Static files need only development defaults, whatever build arguments Coolify
+# passes, but the manifest of production (STATIC_MANIFEST=1).
+RUN env -i PATH="$PATH" PYTHONDONTWRITEBYTECODE=1 DJANGO_DEBUG=1 DEPLOYMENT_ENV=development STATIC_MANIFEST=1 \
     /app/.venv/bin/python manage.py collectstatic --noinput \
     && mkdir -p var && chown -R iam:iam /app/var
 # The release workflow sets the version; images built from source have none.
