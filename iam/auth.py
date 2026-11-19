@@ -413,6 +413,12 @@ class AuthenticationRequestView(OIDCAuthenticationRequestView):
 
 class CallbackView(OIDCAuthenticationCallbackView):
     def get(self, request):
+        # The library logs out the current user on an error callback. Require
+        # the same session-bound state as a successful sign-in before doing so.
+        if request.GET.get("error") and request.GET.get("state") not in request.session.get(
+            "oidc_states", {}
+        ):
+            return self.login_failure()
         try:
             return super().get(request)
         except ProviderUnavailable:

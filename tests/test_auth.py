@@ -340,6 +340,19 @@ def test_pages_need_sign_in(client):
     assert client.get("/-/healthz").status_code == 200
 
 
+def test_sign_in_error_without_matching_state_keeps_the_current_session(client_for, admin_user):
+    client = client_for(admin_user)
+    session = client.session
+    session["oidc_states"] = {"pending": {"nonce": "sample-nonce"}}
+    session.save()
+
+    response = client.get("/oidc/callback/", {"error": "access_denied", "state": "unrelated"})
+    assert response.status_code == 302
+    assert response.url == "/login/denied/"
+    assert client.session["_auth_user_id"] == str(admin_user.pk)
+    assert "pending" in client.session["oidc_states"]
+
+
 def test_dev_login_is_off_unless_enabled(client):
     assert client.get("/login/dev/").status_code == 404
 
