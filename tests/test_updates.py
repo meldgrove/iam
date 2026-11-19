@@ -332,10 +332,11 @@ def test_posts_need_the_csrf_token(admin_user, updater):
 
 
 def attributes(page, element):
-    """The attributes of the first <element …> in the page."""
+    """The attributes of the first <element …> in the page; True for one without a value."""
     tag = re.search(rf"<{element}\s([^>]*)>", page)
     assert tag, f"no <{element}> in the page"
-    return dict(re.findall(r'([a-z-]+)="([^"]*)"', tag.group(1)))
+    found = re.findall(r'([a-z-]+)(="([^"]*)")?', tag.group(1))
+    return {name: value if equals else True for name, equals, value in found}
 
 
 def test_the_button_is_for_admins_only(client_for, admin_user, viewer_user, updater):
@@ -350,7 +351,6 @@ def test_the_button_is_for_admins_only(client_for, admin_user, viewer_user, upda
         "guide-url": "https://github.com/meldgrove/iam/blob/main/docs/updates.md#switch-it-on",
     }
     assert '<script type="module" src="/static/iam/vendor/meldgrove-updates.js">' in page
-    assert '<script type="module" src="/static/iam/updates-csp.js">' in page
     assert updater.requests == [], "The page itself never waits for the updater."
     page = client_for(viewer_user).get(reverse("dashboard")).content.decode()
     assert "meldgrove-update-button" not in page and "meldgrove-updates.js" not in page
@@ -369,7 +369,10 @@ def test_the_settings_section(admin, updater):
     page = admin.get(reverse("settings")).content.decode()
     section = page.split('id="updates"', 1)[1]
     settings_element = attributes(section, "meldgrove-updates-settings")
+    # Without a card of its own: the section is IAM's card with its heading.
+    assert settings_element.pop("plain") is True
     assert settings_element == attributes(page, "meldgrove-update-button")
+    assert section.startswith(">\n  <h2>Updates</h2>")
     assert "/static/iam/vendor/meldgrove-updates.js" in section
     assert updater.requests == [], "The settings page never waits for the updater."
 

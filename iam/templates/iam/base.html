@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="{% static 'iam/vendor/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'iam/app.css' %}">
   <link rel="icon" href="{% static 'iam/icon.svg' %}" type="image/svg+xml">
-  {% if updates_button %}{% include "iam/includes/updates_scripts.html" %}{% endif %}
+  {% if updates_button %}<script type="module" src="{% static 'iam/vendor/meldgrove-updates.js' %}"></script>{% endif %}
 </head>
 <body>
 <div class="layout">

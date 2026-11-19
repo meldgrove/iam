@@ -1,4 +1,5 @@
 {% extends "iam/base.html" %}
+{% load static %}
 {% block title %}Settings{% endblock %}
 {% block content %}
 <div class="page-head"><div><h1>Settings</h1><p class="sub">Lifecycle rules and notifications. Sign-in and deployment settings are environment variables (docs/configuration.md).</p></div></div>
@@ -7,8 +8,10 @@
   <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
 </form>
 
-<div id="updates">
-  {% include "iam/includes/updates_scripts.html" %}
-  <meldgrove-updates-settings {% include "iam/includes/updates_attributes.html" %}></meldgrove-updates-settings>
-</div>
+<section class="card" id="updates">
+  <h2>Updates</h2>
+  {# The base template loads the script too when the update button shows; it runs once. #}
+  <script type="module" src="{% static 'iam/vendor/meldgrove-updates.js' %}"></script>
+  <meldgrove-updates-settings plain {% include "iam/includes/updates_attributes.html" %}></meldgrove-updates-settings>
+</section>
 {% endblock %}
