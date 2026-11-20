@@ -240,6 +240,18 @@ describe("sign-in with OpenID Connect", () => {
     expect(bound!.lastLogin).not.toBeNull();
   });
 
+  it("exchanges the code for the callback URL of APP_URL, wherever a proxy forwards the callback", async () => {
+    overrideConfigForTests({ APP_URL: "http://iam.example.invalid" });
+    await createUser("viewer", "ada@example.invalid");
+    provider.userInfo = claims();
+    const { callback, session } = await signIn(provider, {
+      callbackOrigin: "http://web.example.invalid:8000",
+    });
+    expect(callback.headers.get("location")).toBe("/");
+    expect(session).toBeTruthy();
+    expect(provider.lastTokenRequest?.get("redirect_uri")).toBe("http://iam.example.invalid/oidc/callback/");
+  });
+
   it("signs one user in several times at once", async () => {
     await createUser("viewer", "ada@example.invalid");
     provider.userInfo = claims();

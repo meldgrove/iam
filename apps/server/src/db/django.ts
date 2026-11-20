@@ -122,6 +122,22 @@ export async function adoptDjangoDatabase(client: pg.Client, migrationsFolder: s
   return true;
 }
 
+/**
+ * Ends the sessions of the Django version. This version never reads them,
+ * and signing out here does not end them: after a rollback to 0.2, a browser
+ * that signed out of this version would still be signed in there. Runs at
+ * every migration, so sessions of a rollback before end at the next upgrade.
+ * The table stays for the version before.
+ */
+export async function endDjangoSessions(client: pg.Client): Promise<void> {
+  const { rows } = await client.query<{ present: boolean }>(
+    "select to_regclass('public.django_session') is not null as present",
+  );
+  if (!rows[0]!.present) return;
+  const { rowCount } = await client.query("delete from django_session");
+  if (rowCount) logger.info({ sessions: rowCount }, "ended the sessions of the Django version");
+}
+
 const TYPES: [RegExp, string][] = [
   [/^bigint\b/, "bigint"],
   [/^integer\b/, "integer"],

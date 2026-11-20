@@ -3,7 +3,13 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { config } from "../config";
 import { logger } from "../logger";
 import type { AppEnv } from "./env";
-import { authorizationUrl, completeSignIn, ProviderUnavailable, type SignInState } from "../auth/oidc";
+import {
+  authorizationUrl,
+  callbackUrl,
+  completeSignIn,
+  ProviderUnavailable,
+  type SignInState,
+} from "../auth/oidc";
 import { userForClaims, SignInRefused } from "../auth/claims";
 import { cookieName, secureCookies, sign, startSession, unsign } from "../auth/session";
 
@@ -100,11 +106,11 @@ export function signInRoutes() {
     if (!state || c.req.query("error")) return toSignIn(c, "denied");
     let signedIn: { claims: Record<string, unknown>; idToken: string };
     try {
-      const current = new URL(c.req.url);
-      const callback = new URL(`${config().APP_URL}/oidc/callback/`);
-      // The provider redirected to APP_URL; behind a proxy the request URL may differ.
-      current.protocol = callback.protocol;
-      current.host = callback.host;
+      // The provider redirected to the callback URL of APP_URL; behind a
+      // proxy the request's own URL may differ (scheme, host, port). The code
+      // exchange must name the callback URL the sign-in started with.
+      const current = new URL(callbackUrl());
+      current.search = new URL(c.req.url).search;
       signedIn = await completeSignIn(current, state);
     } catch (error) {
       if (error instanceof ProviderUnavailable || isNetworkError(error)) {

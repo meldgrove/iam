@@ -483,6 +483,13 @@ describe("Google Workspace", () => {
     expect(busy.requests).toHaveLength(3);
   });
 
+  it.each([408, 429, 500, 503, 504])("tries the token exchange again after a %i", async (status) => {
+    const config = { service_account_json: serviceAccountJson(), domain: "example.invalid" };
+    const fetch = transport(answers(answer(status), json(200, { access_token: "token", expires_in: 3600 })));
+    expect(await new SignIn(config, { fetch }).signIn()).toBe("token");
+    expect(fetch.requests).toHaveLength(2);
+  });
+
   it("does not try a refusal again that only mentions a temporary error", async () => {
     const config = { service_account_json: serviceAccountJson(), domain: "example.invalid" };
     const fetch = transport(() =>

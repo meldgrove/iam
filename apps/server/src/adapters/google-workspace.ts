@@ -174,7 +174,7 @@ function base64url(value: string): string {
 const TEMPORARY_OAUTH_ERRORS = new Set(["temporarily_unavailable", "server_error", "internal_failure"]);
 
 /** Statuses google-auth retries (DEFAULT_RETRYABLE_STATUS_CODES). */
-const RETRY_STATUSES = new Set([408, 429, 500, 503]);
+const RETRY_STATUSES = new Set([408, 429, 500, 503, 504]);
 
 /** Tries of the token exchange while Google's token endpoint is busy. */
 const TOKEN_TRIES = 3;

@@ -112,8 +112,12 @@ export class FakeProvider {
     return Response.json(value);
   }
 
+  /** The form of the last token request. */
+  lastTokenRequest: URLSearchParams | undefined;
+
   private token(init: RequestInit): Response {
     const form = new URLSearchParams(init.body as URLSearchParams | string);
+    this.lastTokenRequest = form;
     const authorization = this.authorizations.get(form.get("code") ?? "");
     this.authorizations.delete(form.get("code") ?? "");
     const verifier = form.get("code_verifier") ?? "";
@@ -194,7 +198,11 @@ export function setCookie(response: Response, name: string): string | undefined 
  * state cookie), the provider's approval, then /oidc/callback/ with the
  * state cookie. Returns both responses and the session cookie, if one was set.
  */
-export async function signIn(provider: FakeProvider, options: { cookie?: string; next?: string } = {}) {
+export async function signIn(
+  provider: FakeProvider,
+  /** callbackOrigin: where the callback arrives, as a proxy forwards it (default: the test origin). */
+  options: { cookie?: string; next?: string; callbackOrigin?: string } = {},
+) {
   const query = options.next ? `?next=${encodeURIComponent(options.next)}` : "";
   const headers: Record<string, string> = options.cookie ? { cookie: options.cookie } : {};
   const start = await testApp().request(`/oidc/authenticate/${query}`, { headers });
@@ -206,7 +214,7 @@ export async function signIn(provider: FakeProvider, options: { cookie?: string;
   const { code, state } = provider.authorize(location);
   const cookies = [`iam_oidc=${stateCookie}`, ...(options.cookie ? [options.cookie] : [])].join("; ");
   const callback = await testApp().request(
-    `/oidc/callback/?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
+    `${options.callbackOrigin ?? ""}/oidc/callback/?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
     { headers: { cookie: cookies } },
   );
   return {

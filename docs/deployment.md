@@ -243,7 +243,8 @@ automatic updates do not install it.
    in one transaction: it keeps every table and row, adds the session table,
    and gives the foreign keys the rules on delete Django applied itself.
    Django's own tables stay, so going back works (step 6).
-5. **Sign in again:** sessions of the Django version end. The sign-in client
+5. **Sign in again:** `migrate` ends the sessions of the Django version, at
+   every start, so none survives for a rollback. The sign-in client
    needs no change: the callback stays `/oidc/callback/` and the address
    after sign-out `/login/`.
 6. **Going back:** set `IAM_VERSION=0.2`, check out the release's files

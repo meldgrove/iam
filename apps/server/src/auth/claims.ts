@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { ROLE_LABELS } from "@iam/shared/labels";
 import { config } from "../config";
 import { sessions, users, type Role, type User } from "../db/schema";
@@ -86,10 +86,16 @@ async function usersForClaims(claims: Claims): Promise<User[]> {
   if (bySubject.length > 0) return bySubject;
   const email = emailOf(claims);
   if (email && emailVerified(claims)) {
+    // Also a user a concurrent first sign-in just bound to this subject.
     return q()
       .select()
       .from(users)
-      .where(and(sql`lower(${users.email}) = ${email}`, isNull(users.oidcSubject)));
+      .where(
+        and(
+          sql`lower(${users.email}) = ${email}`,
+          or(isNull(users.oidcSubject), eq(users.oidcSubject, subject)),
+        ),
+      );
   }
   return [];
 }

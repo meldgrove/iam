@@ -2,10 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { adoptDjangoDatabase } from "./django";
+import { migrateWith } from "./migrate";
 import { databaseUrl, MIGRATIONS, recreateDatabase } from "../test/databases";
 import { TEST_DATABASE_URL } from "../test/env";
 import { decrypt } from "../core/crypto";
@@ -38,11 +36,7 @@ async function loadFixture() {
 
 /** Takes over and migrates as the migrate role does. */
 async function upgrade(url: string) {
-  return withClient(url, async (client) => {
-    const adopted = await adoptDjangoDatabase(client, MIGRATIONS);
-    await migrate(drizzle(client), { migrationsFolder: MIGRATIONS });
-    return adopted;
-  });
+  return withClient(url, (client) => migrateWith(client, MIGRATIONS));
 }
 
 /** Columns, constraints and indexes of the app's tables, for comparing two databases. */
@@ -114,6 +108,28 @@ describe("taking over the database of the Django version", () => {
     expect(after.rows).toEqual(before.rows);
     expect(Number(before.rows[0].people)).toBe(4);
     expect(Number(before.rows[0].jobs)).toBeGreaterThan(0);
+  });
+
+  it("ends Django's sessions at every migration, and keeps their table", async () => {
+    const addSession = () =>
+      withClient(DJANGO, (client) =>
+        client.query(
+          "insert into django_session (session_key, session_data, expire_date) values ($1, 'data', now() + interval '1 day')",
+          [`key-${Math.random().toString(36).slice(2)}`],
+        ),
+      );
+    const count = () =>
+      withClient(DJANGO, async (client) =>
+        Number((await client.query("select count(*) from django_session")).rows[0].count),
+      );
+    await loadFixture();
+    await addSession();
+    expect(await upgrade(DJANGO)).toBe(true);
+    expect(await count()).toBe(0);
+    // A session of 0.2 after a rollback ends at the next upgrade.
+    await addSession();
+    expect(await upgrade(DJANGO)).toBe(false);
+    expect(await count()).toBe(0);
   });
 
   it("does nothing the second time", async () => {
