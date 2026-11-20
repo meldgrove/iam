@@ -93,6 +93,11 @@ async function fillConnection(page, values) {
     send_setup_email: true,
     enabled: true,
   });
+  // A secret stays hidden until the eye button shows it.
+  const secret = page.locator('[name="cfg_client_secret"]');
+  assert.equal(await secret.getAttribute("type"), "password");
+  await page.getByRole("button", { name: "Show" }).click();
+  assert.equal(await secret.getAttribute("type"), "text");
   await page.getByRole("button", { name: "Save" }).click();
   await page.getByRole("button", { name: "Test connection" }).click();
   await page.waitForSelector(".messages li");

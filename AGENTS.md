@@ -22,9 +22,10 @@ processes: `migrate`, `web` (gunicorn) and `worker` (`manage.py run_worker`).
 - Every change by a person or the worker writes an audit event without secret
   values.
 - Templates render the pages; `iam/static/iam/app.css` styles them with the
-  shared color tokens. The update button and the Updates settings are custom
-  elements from the npm package `@meldgrove/ui`: `npm ci` copies them and the
-  tokens to `iam/static/iam/vendor/` (`docs/development.md`). The app keeps
+  shared color tokens. The update button, the Updates settings and the eye
+  button of secret fields are custom elements from the npm package
+  `@meldgrove/ui`: `npm ci` copies them and the tokens to
+  `iam/static/iam/vendor/` (`docs/development.md`). The app keeps
   only the routes under `/admin/updates/` (`iam/views/updates.py`).
 - The repository is public and has no license yet. Do not add a license file.
   Use only `example.invalid` in examples; `scripts/check_public_repository.py`

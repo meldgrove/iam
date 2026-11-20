@@ -27,11 +27,13 @@ uv run python manage.py runserver        # http://localhost:8000
 uv run python manage.py run_worker       # second terminal
 ```
 
-The update button, the Updates settings and the colors come from the npm
-package `@meldgrove/ui`, which the Meldgrove apps share. `npm ci` copies two
-of its files to `iam/static/iam/vendor/` (ignored by git):
-`meldgrove-updates.js` (the custom elements `<meldgrove-update-button>` and
-`<meldgrove-updates-settings>`) and `tokens.css` (the colors, light and dark).
+The update button, the Updates settings, the eye button of secret fields and
+the colors come from the npm package `@meldgrove/ui`, which the Meldgrove apps
+share. `npm ci` copies three of its files to `iam/static/iam/vendor/` (ignored
+by git): `meldgrove-updates.js` (the custom elements
+`<meldgrove-update-button>` and `<meldgrove-updates-settings>`),
+`meldgrove-secret-input.js` (`<meldgrove-secret-input>`, around the secret
+fields of the connection form) and `tokens.css` (the colors, light and dark).
 Run `npm ci` again after an update of the package; the Docker image copies
 them in its `ui` stage. `app.css` uses the tokens' names (`--background`,
 `--foreground`, `--muted-foreground`, `--primary`, …) and sets IAM's accent

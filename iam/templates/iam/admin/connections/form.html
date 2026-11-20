@@ -1,6 +1,9 @@
 {% extends "iam/base.html" %}
+{% load static %}
 {% block title %}{% if connection %}Edit {{ connection }}{% else %}Add {{ adapter.name }}{% endif %}{% endblock %}
 {% block content %}
+{# The eye button of the secret fields (iam/widgets/secret_input.html). #}
+<script type="module" src="{% static 'iam/vendor/meldgrove-secret-input.js' %}"></script>
 <div class="page-head"><div><h1>{% if connection %}Edit {{ connection }}{% else %}Add {{ adapter.name }}{% endif %}</h1><p class="sub">{{ adapter.description }}</p></div></div>
 <form method="post" class="card" autocomplete="off">{% csrf_token %}
   {% if form.non_field_errors %}<div class="notice danger">{{ form.non_field_errors|join:" " }}</div>{% endif %}

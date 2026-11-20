@@ -82,7 +82,7 @@ class GoogleWorkspaceAdapter(Adapter):
         Field(
             "service_account_json",
             "Service account key (JSON)",
-            kind="secret_text",
+            kind="secret",
             required=True,
             help=(
                 "The JSON key of a service account with domain-wide delegation for the "
