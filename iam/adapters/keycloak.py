@@ -421,21 +421,10 @@ class KeycloakAdapter(Adapter):
         username = self._username(spec)
         user = self._search("username", username)
         if user is not None:
-            self._check_same_email(user, spec, username)
+            self.check_same_email(username, [user.get("email")], spec)
         elif spec.email:
             user = self._search("email", spec.email)
         return self._remember(user) if user is not None else None
-
-    @staticmethod
-    def _check_same_email(user: dict, spec: AccountSpec, username: str) -> None:
-        """A username can belong to someone else (another J. Smith); a
-        different email shows it does."""
-        existing = str(user.get("email") or "").strip().lower()
-        if existing and spec.email and existing != spec.email.strip().lower():
-            raise AdapterError(
-                f"The Keycloak username {username} belongs to a user with a different email. "
-                "Nothing was changed. Check the person's username and work email."
-            )
 
     def create_account(self, spec: AccountSpec) -> EnsureResult:
         username = self._username(spec)
@@ -493,7 +482,7 @@ class KeycloakAdapter(Adapter):
                 "Keycloak reports that the user exists but finds no user with this "
                 "username or email."
             )
-        self._check_same_email(user, spec, username)
+        self.check_same_email(username, [user.get("email")], spec)
         account = self._remember(user)
         result = EnsureResult(account=account, notes=["Keycloak already had this user."])
         if not account.active:

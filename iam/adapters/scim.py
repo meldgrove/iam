@@ -270,6 +270,10 @@ class ScimAdapter(Adapter):
         if user_name:
             resource = self._find_user("userName", user_name, tolerate_unsupported=False)
             if resource:
+                emails = [
+                    e.get("value") for e in resource.get("emails") or [] if isinstance(e, dict)
+                ]
+                self.check_same_email(user_name, emails, spec)
                 return self._account(resource)
         # Also when the userName is the email: the user may have another userName.
         if spec.email:

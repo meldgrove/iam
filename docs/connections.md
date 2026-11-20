@@ -140,7 +140,8 @@ own client (docs/authentication.md).
 **Behavior**
 
 - Finding an account: by stored ID, then exact username, then exact email.
-  Several matches stop the job.
+  Several matches stop the job, and so does a user with that username whose
+  email differs from the work email.
 - If Keycloak already has the user (HTTP 409), the app links it and enables it
   again, unless its email differs from the work email.
 - A failed setup email or temporary password only adds a note to the job; the
@@ -212,8 +213,11 @@ token. Note the SCIM base URL that `/Users` and `/Groups` follow.
   proves the token. It warns when the app reports no PATCH support, because
   deactivation and group changes need PATCH.
 - Finding an account: by stored ID, then `userName eq`, then `emails.value eq`
-  (skipped if the app does not support that filter).
-- If the user already exists (HTTP 409), the app links it and activates it.
+  (skipped if the app does not support that filter). Several matches stop the
+  job, and so does a user with that `userName` whose emails do not include the
+  work email.
+- If the user already exists (HTTP 409), the app links it and activates it,
+  unless that user is someone else's by the rule above.
 - Deactivation sends a PATCH on `active`; if the app refuses that form, the app
   retries with the value form. In delete mode it deletes the user.
 - Group memberships change with PATCH on `/Groups/{id}`.
@@ -324,8 +328,9 @@ organization UUID.
   Access updates still add and remove managed groups.
 - New users need a work email. The app never creates groups and never sets a
   password.
-- Lookups page through all users of the organization; several matches stop the
-  job.
+- Lookups page through all users of the organization, by work email, then by
+  login name. Several matches stop the job, and so does a user found by login
+  name whose email differs from the work email.
 - A locked user counts as not active; activating it fails with a note that it
   may be locked.
 - After every change the app reads the user or its memberships again and fails
@@ -437,6 +442,9 @@ email connection that is turned on. Notification recipients are set in
    `manual_instructions`. The base class combines them into `ensure_account`
    and `disable_account`; both must be safe to run again. A people import
    implements `list_people()`, an email adapter `send()`.
+   `find_account` returns only an account that is the person's: after a match
+   by username, call `check_same_email`, which stops at a user whose email is
+   not the person's work email.
 4. Make HTTP calls with `self.http()` and `self.call()`. They map timeouts,
    429 and 5xx to `TransientError` (the job retries) and 401/403 to
    `ConfigurationError`; other errors are `AdapterError` (the job fails and

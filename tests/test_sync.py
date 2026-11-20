@@ -45,6 +45,32 @@ def test_failed_reads_are_recorded_not_raised(fake_connection, fake_store):
     assert run.error == "Token refused."
 
 
+@pytest.mark.parametrize(
+    ("username", "email", "linked"),
+    [
+        ("ada", "ada.byron@example.invalid", False),
+        ("ADA@example.invalid", "ada.byron@example.invalid", False),
+        ("ada", "", True),
+        ("ada", "Ada@Example.invalid", True),
+    ],
+)
+def test_account_comparison_never_links_a_username_with_another_email(
+    fake_connection, fake_store, person, username, email, linked
+):
+    """As a job decides: a username can belong to someone else (another
+    J. Smith), and an email that is not the person's shows it does."""
+    Person.objects.filter(pk=person.pk).update(username="ada")
+    fake_store.accounts["x1"] = {
+        "username": username,
+        "email": email,
+        "active": True,
+        "groups": set(),
+    }
+    run = compare_accounts(fake_connection)
+    assert (Account.objects.get(external_id="x1").person_id == person.pk) is linked
+    assert run.summary["new_links"] == int(linked)
+
+
 def test_account_comparison_links_by_email_and_reports_drift(fake_connection, fake_store, person):
     fake_store.accounts["x1"] = {
         "username": "ada",

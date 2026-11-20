@@ -127,7 +127,9 @@ when a deploy stops it, and web 40 seconds to finish its requests.
    they get. Mark the default profile per person type.
 3. **Teams:** with the groups their members join.
 4. **Accounts:** run "Compare accounts now" on each connection. It links
-   existing accounts to people by work email or username and lists drift.
+   existing accounts to people by work email or username and lists drift. An
+   account whose username matches but whose email is someone else's stays
+   unlinked.
 5. **People:** add them, or connect Personio to import them.
 6. **Admin › Settings:** onboarding lead time, automatic onboarding and
    offboarding, the daily removal limit, who gets task emails, and the update

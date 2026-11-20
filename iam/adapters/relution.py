@@ -309,7 +309,12 @@ class RelutionAdapter(Adapter):
             raise AdapterError(
                 "Several Relution users match this person. Link the right one in Relution."
             )
-        return matches[0] if matches else None
+        if not matches:
+            return None
+        # A match by login name must also have the person's email, if any.
+        user = matches[0]
+        self.check_same_email(str(user.get("name") or ""), [user.get("email")], spec)
+        return user
 
     def find_account(self, spec: AccountSpec, external_id: str = "") -> ExternalAccount | None:
         if external_id:

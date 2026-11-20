@@ -285,3 +285,47 @@ def test_roles_are_not_group_memberships(fake, adapter):
     )
     assert fake.members["u-1"] == {"g-1"}
     assert result.groups_removed == ["g-2"]
+
+
+SOMEONE_ELSES = (
+    "The Relution username {} belongs to a user with a different email. Nothing was "
+    "changed. Check the person's username and work email."
+)
+
+
+@pytest.mark.parametrize("name", ["ada", "ada@example.invalid"])
+def test_a_username_of_someone_with_another_email_is_never_changed(fake, adapter, name):
+    """As at Keycloak: a login name can belong to someone else (another
+    J. Smith), and an email that is not the person's shows it does."""
+    fake.add_user("u-7", "ada.byron@example.invalid", activated=False)
+    fake.users["u-7"]["name"] = name
+    with pytest.raises(AdapterError) as exc:
+        adapter.ensure_account(SPEC, groups={"g-1"}, managed_groups={"g-1"})
+    assert str(exc.value) == SOMEONE_ELSES.format(name)
+    with pytest.raises(AdapterError) as exc:
+        adapter.disable_account(SPEC, managed_groups={"g-1"})
+    assert str(exc.value) == SOMEONE_ELSES.format(name)
+    assert fake.writes == []
+
+
+def test_a_create_whose_answer_was_lost_never_takes_over_someone_elses_username(
+    fake, mock_transport
+):
+    def flaky(request):
+        if request.method == "POST":
+            # Someone else's user holds the login name meanwhile.
+            fake.add_user("u-7", "ada.byron@example.invalid")
+            fake.users["u-7"]["name"] = "ada@example.invalid"
+            return httpx.Response(504)
+        return fake(request)
+
+    adapter = RelutionAdapter(CONFIG, transport=mock_transport(flaky))
+    with pytest.raises(AdapterError) as exc:
+        adapter.create_account(SPEC)
+    assert str(exc.value) == SOMEONE_ELSES.format("ada@example.invalid")
+
+
+def test_a_username_match_without_an_email_is_theirs(fake, adapter):
+    fake.add_user("u-1", "")
+    fake.users["u-1"]["name"] = "ada"
+    assert adapter.find_account(SPEC).external_id == "u-1"

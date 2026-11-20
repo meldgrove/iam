@@ -348,6 +348,17 @@ class Adapter:
             )
         raise AdapterError(f"{self.name} answered {status} while trying to {what}.")
 
+    def check_same_email(self, username: str, emails: Iterable, spec: AccountSpec) -> None:
+        """Stop at a user found by username whose emails are known and none
+        is the person's work email. A username can belong to someone else
+        (another J. Smith); a different email shows it does."""
+        known = {str(email or "").strip().lower() for email in emails} - {""}
+        if known and spec.email and spec.email.strip().lower() not in known:
+            raise AdapterError(
+                f"The {self.name} username {username} belongs to a user with a different "
+                "email. Nothing was changed. Check the person's username and work email."
+            )
+
     def call(
         self, client: httpx.Client, method: str, url: str, what: str, **kwargs
     ) -> httpx.Response:

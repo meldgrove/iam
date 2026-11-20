@@ -44,12 +44,12 @@ connection in automatic mode it calls the adapter:
   add the wanted managed groups and remove the managed groups no longer
   wanted.
 
-  An account found without its saved ID must be the person's. A Keycloak
-  username whose user has another email, or several SCIM users with that
-  userName or email, stop the job with nothing changed. A Google address
-  that is an alias of another user is not the person's account (creating
-  it stops the job). The job then changes exactly the account whose owner
-  it checked.
+  An account found without its saved ID must be the person's. A user found
+  by username whose email is not the person's work email (Keycloak, SCIM,
+  Relution), or several users with that username or email, stop the job
+  with nothing changed. A Google address that is an alias of another user
+  is not the person's account (creating it stops the job). The job then
+  changes exactly the account whose owner it checked.
 - *Disable account*: remove the managed groups (unless the adapter keeps
   them, e.g. Relution) and disable the account. No account found counts as
   done.
@@ -138,7 +138,8 @@ None of these change anything in a connected app.
   nor removes memberships of a missing group until an import lists it again:
   an answer that only seems empty must not strip people of their groups.
 - **Account comparison** reads all accounts, links unlinked accounts to people
-  by work email or username (only on a unique match), marks accounts it no
+  by work email or username (only on a unique match, and never by username to
+  an account whose email is not the person's work email), marks accounts it no
   longer sees as missing, and reports drift: people who should have an
   account but have none, and active accounts the person's access does not
   grant (including planned people, e.g. after a cancelled onboarding, and

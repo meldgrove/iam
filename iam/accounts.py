@@ -217,5 +217,10 @@ def _match_person(connection: Connection, external: ExternalAccount) -> Person |
     if len(candidates) != 1:
         return None
     person = candidates[0]
+    email = external.email.strip().lower()
+    if email and person.work_email and email != person.work_email.strip().lower():
+        # Matched by username alone: as for a job, an email that is not the
+        # person's shows that the username belongs to someone else.
+        return None
     linked = Account.objects.filter(connection=connection, person=person).exclude(external_id="")
     return None if linked.exists() else person
