@@ -472,7 +472,7 @@ describe("Google Workspace", () => {
     const recovering = transport(
       answers(
         answer(503),
-        json(400, { error: "invalid_grant", error_description: "temporarily_unavailable: try again" }),
+        json(400, { error: "invalid_request", error_description: "temporarily_unavailable" }),
         json(200, { access_token: "token", expires_in: 3600 }),
       ),
     );
@@ -481,6 +481,22 @@ describe("Google Workspace", () => {
     const busy = transport(() => answer(503));
     expect(await failure(new SignIn(config, { fetch: busy }).signIn())).toBeInstanceOf(TransientError);
     expect(busy.requests).toHaveLength(3);
+  });
+
+  it("does not try a refusal again that only mentions a temporary error", async () => {
+    const config = { service_account_json: serviceAccountJson(), domain: "example.invalid" };
+    const fetch = transport(() =>
+      json(400, { error: "invalid_grant", error_description: "temporarily_unavailable: try again" }),
+    );
+    expect(await failure(new SignIn(config, { fetch }).signIn())).toBeInstanceOf(ConfigurationError);
+    expect(fetch.requests).toHaveLength(1);
+  });
+
+  it("tries a gateway error once, like google-auth, and takes it for a passing failure", async () => {
+    const config = { service_account_json: serviceAccountJson(), domain: "example.invalid" };
+    const fetch = transport(() => answer(502));
+    expect(await failure(new SignIn(config, { fetch }).signIn())).toBeInstanceOf(TransientError);
+    expect(fetch.requests).toHaveLength(1);
   });
 
   it.each([

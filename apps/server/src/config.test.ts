@@ -107,6 +107,13 @@ describe("config", () => {
   it("writes the scheme and host of APP_URL in lower case", () => {
     const settings = configWith({ APP_URL: "HTTPS://IAM.Example.invalid/" })();
     expect(settings.APP_URL).toBe("https://iam.example.invalid");
+    // As openid-client sends the callback URL at the code exchange.
+    expect(configWith({ APP_URL: "https://iam.example.invalid:443" })().APP_URL).toBe(
+      "https://iam.example.invalid",
+    );
+    expect(configWith({ APP_URL: "https://iam.example.invalid:8443" })().APP_URL).toBe(
+      "https://iam.example.invalid:8443",
+    );
   });
 
   it("checks the time zone", () => {

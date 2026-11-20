@@ -44,7 +44,10 @@ export async function startSession(c: Context, user: Pick<User, "id">, idToken =
       .select({ id: users.id })
       .from(users)
       .where(and(eq(users.id, user.id), eq(users.isActive, true)))
-      .for("share");
+      // Not "share": two sign-ins of one user would both hold it, then
+      // deadlock on last_login. This one waits for the other, and for a
+      // deactivation, before writing its session.
+      .for("no key update");
     if (!active) return false;
     await tx.insert(sessions).values({ id: hash(token), userId: user.id, expiresAt, idToken });
     await tx.update(users).set({ lastLogin: new Date() }).where(eq(users.id, user.id));

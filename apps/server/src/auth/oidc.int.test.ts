@@ -240,6 +240,15 @@ describe("sign-in with OpenID Connect", () => {
     expect(bound!.lastLogin).not.toBeNull();
   });
 
+  it("signs one user in several times at once", async () => {
+    await createUser("viewer", "ada@example.invalid");
+    provider.userInfo = claims();
+    const signIns = await Promise.all(Array.from({ length: 8 }, () => signIn(provider)));
+    expect(signIns.map(({ location }) => location)).toEqual(Array(8).fill("/"));
+    expect(signIns.every(({ session }) => session)).toBe(true);
+    expect(await getDb().$count(sessions)).toBe(8);
+  });
+
   it("goes back only to a path of this app after sign-in", async () => {
     await createUser("viewer", "ada@example.invalid");
     for (const next of [

@@ -200,7 +200,11 @@ export function config(): Config {
     legacyOrigin ??
     (isDevelopment ? `http://localhost:${value.PORT}` : "");
   appUrl = appUrl.replace(/\/+$/, "");
-  // Scheme and host in lower case (HTTPS://… counts as https), no slash at the end.
+  // Scheme and host in lower case (HTTPS://… counts as https), no default
+  // port, no slash at the end. The callback URL built from it must match the
+  // redirect_uri openid-client sends at the code exchange, which it takes
+  // from a parsed URL; the Django version built it from the browser's Host
+  // header, which never names a default port either.
   if (appUrl && URL.canParse(appUrl)) appUrl = new URL(appUrl).href.replace(/\/+$/, "");
   if (!appUrl) problems.push("APP_URL: Set the public URL, e.g. https://iam.example.invalid");
   else if (!z.url({ protocol: /^https?$/ }).safeParse(appUrl).success) {

@@ -173,16 +173,24 @@ function base64url(value: string): string {
 /** OAuth errors google-auth retries: the token endpoint was busy, not the key wrong. */
 const TEMPORARY_OAUTH_ERRORS = new Set(["temporarily_unavailable", "server_error", "internal_failure"]);
 
+/** Statuses google-auth retries (DEFAULT_RETRYABLE_STATUS_CODES). */
+const RETRY_STATUSES = new Set([408, 429, 500, 503]);
+
 /** Tries of the token exchange while Google's token endpoint is busy. */
 const TOKEN_TRIES = 3;
 
-/** Whether the answer names a temporary OAuth error, in `error` or, as google-auth reads it, `error_description`. */
-function oauthErrorIsTemporary(response: HttpResponse): boolean {
+/**
+ * Whether google-auth would try the token exchange again: a status it
+ * retries, or one of the temporary OAuth errors as the whole `error` or
+ * `error_description`.
+ */
+function tokenRequestIsRetried(response: HttpResponse): boolean {
+  if (response.status === 200) return false;
+  if (RETRY_STATUSES.has(response.status)) return true;
   try {
     const body = asRecord(response.json());
     return [body.error, body.error_description].some(
-      (value) =>
-        typeof value === "string" && [...TEMPORARY_OAUTH_ERRORS].some((code) => value.includes(code)),
+      (value) => typeof value === "string" && TEMPORARY_OAUTH_ERRORS.has(value),
     );
   } catch {
     return false;
@@ -350,16 +358,13 @@ export class GoogleWorkspaceAdapter extends Adapter {
         }
         throw error;
       }
-      const busy =
-        response.status === 408 ||
-        response.status === 429 ||
-        response.status >= 500 ||
-        oauthErrorIsTemporary(response);
-      if (!busy) break;
-      if (attempt >= TOKEN_TRIES) {
-        throw new TransientError("Could not reach Google to sign in the service account.");
-      }
+      if (!tokenRequestIsRetried(response) || attempt >= TOKEN_TRIES) break;
       await timing.pause(attempt);
+    }
+    // A busy or failing token endpoint is no reason to check the key (google-auth
+    // raised a RefreshError either way; the Django version called it refused).
+    if (tokenRequestIsRetried(response) || response.status >= 500) {
+      throw new TransientError("Could not reach Google to sign in the service account.");
     }
     let token: unknown;
     if (response.status === 200) {
