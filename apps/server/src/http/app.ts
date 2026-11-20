@@ -79,6 +79,7 @@ export function createApp() {
         objectSrc: ["'none'"],
       },
       referrerPolicy: "same-origin",
+      xFrameOptions: "DENY",
       crossOriginEmbedderPolicy: false,
       strictTransportSecurity: config().APP_URL.startsWith("https://")
         ? `max-age=31536000${config().SECURE_HSTS_INCLUDE_SUBDOMAINS ? "; includeSubDomains" : ""}`
