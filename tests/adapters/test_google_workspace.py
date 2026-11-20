@@ -187,6 +187,92 @@ def test_email_outside_domain_is_refused(mock_transport):
         )
 
 
+def test_every_configured_domain_is_accepted(mock_transport):
+    directory = Directory()
+    adapter = make_adapter(
+        mock_transport(directory), domain="example.invalid, @Extern.Example.invalid"
+    )
+    assert adapter.domains == ("example.invalid", "extern.example.invalid")
+    result = adapter.ensure_account(
+        spec(email="ada@extern.example.invalid"), groups=set(), managed_groups=set()
+    )
+    assert result.created
+    assert directory.created[0]["primaryEmail"] == "ada@extern.example.invalid"
+    with pytest.raises(AdapterError, match="one of the domains example.invalid, extern"):
+        adapter.ensure_account(
+            spec(email="ada@elsewhere.example.invalid"), groups=set(), managed_groups=set()
+        )
+
+
+def test_without_admin_user_the_service_account_acts_as_itself(monkeypatch):
+    from google.oauth2 import service_account
+
+    seen = {}
+
+    class Credentials:
+        token = "token"
+
+        def refresh(self, request):
+            pass
+
+    def from_info(info, scopes, subject):
+        seen["subject"] = subject
+        return Credentials()
+
+    monkeypatch.setattr(
+        service_account.Credentials, "from_service_account_info", staticmethod(from_info)
+    )
+    config = {"service_account_json": "{}", "domain": "example.invalid"}
+    assert GoogleWorkspaceAdapter(config)._access_token() == "token"
+    assert seen["subject"] is None
+    GoogleWorkspaceAdapter({**config, "admin_email": "admin@example.invalid"})._access_token()
+    assert seen["subject"] == "admin@example.invalid"
+
+
+def test_without_admin_user_the_customer_is_looked_up_once(mock_transport):
+    def directory(request):
+        if request.url.params.get("domain"):
+            return httpx.Response(200, json={"users": [{"customerId": "C0abc"}]})
+        return httpx.Response(200, json={"users": [user()]})
+
+    transport = mock_transport(directory)
+    adapter = make_adapter(
+        transport, admin_email="", domain="example.invalid, extern.example.invalid"
+    )
+    assert adapter.test_connection().ok
+    list(adapter.list_accounts())
+    lookups = [r for r in transport.requests if r.url.params.get("domain")]
+    assert len(lookups) == 1
+    assert lookups[0].url.params["domain"] == "example.invalid"
+    assert lookups[0].url.params["fields"] == "users(customerId)"
+    listings = [r for r in transport.requests if not r.url.params.get("domain")]
+    assert [r.url.params["customer"] for r in listings] == ["C0abc", "C0abc"]
+
+
+def test_a_configured_customer_id_needs_no_lookup(mock_transport):
+    transport = mock_transport(lambda r: httpx.Response(200, json={"users": [user()]}))
+    adapter = make_adapter(transport, admin_email="", customer_id="C0xyz")
+    assert adapter.test_connection().ok
+    assert [r.url.params["customer"] for r in transport.requests] == ["C0xyz"]
+
+
+def test_an_unknown_customer_is_a_configuration_error(mock_transport):
+    adapter = make_adapter(mock_transport(lambda r: httpx.Response(200, json={})), admin_email="")
+    with pytest.raises(ConfigurationError, match="customer ID"):
+        adapter.test_connection()
+
+
+def test_forbidden_without_admin_user_names_the_admin_roles(mock_transport):
+    adapter = make_adapter(
+        mock_transport(lambda r: httpx.Response(403, text="secret body")),
+        admin_email="",
+        customer_id="C0xyz",
+    )
+    with pytest.raises(ConfigurationError, match="User Management Admin") as excinfo:
+        adapter.test_connection()
+    assert "secret body" not in str(excinfo.value)
+
+
 def test_existing_user_on_conflict_gets_no_password(mock_transport):
     directory = Directory([user()])
     adapter = make_adapter(mock_transport(directory))
