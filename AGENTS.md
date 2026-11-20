@@ -8,7 +8,10 @@ processes: `migrate`, `web` (gunicorn) and `worker` (`manage.py run_worker`).
 - Adapters live in `iam/adapters/`, one module per connected app, registered
   in `iam/adapters/__init__.py`. They get their configuration as a dict, never
   touch the database, and never put secrets or provider responses into error
-  messages. Connection settings are configured in the admin UI, not in
+  messages. What a job does at an account is decided from reads in the
+  adapter's plan (`plan_ensure`, `plan_disable`, `plan_groups`); the job
+  follows it and read-only mode rehearses it, so put a new decision or
+  refusal there, not in `ensure_account` or `set_active` alone. Connection settings are configured in the admin UI, not in
   environment variables.
 - The engine: `iam/policy.py` (desired access), `iam/lifecycle.py`
   (starting and cancelling workflows), `iam/jobs.py` (running jobs; the only

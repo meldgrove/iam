@@ -127,7 +127,9 @@ when a deploy stops it, and web 40 seconds to finish its requests.
    they get. Mark the default profile per person type.
 3. **Teams:** with the groups their members join.
 4. **Accounts:** run "Compare accounts now" on each connection. It links
-   existing accounts to people by work email or username and lists drift.
+   existing accounts to people by work email or username and lists drift. An
+   account whose username matches but whose email is someone else's stays
+   unlinked.
 5. **People:** add them, or connect Personio to import them.
 6. **Admin › Settings:** onboarding lead time, automatic onboarding and
    offboarding, the daily removal limit, who gets task emails, and the update
@@ -152,8 +154,10 @@ after sign-in shows that the mode is on.
    go person by person.
 5. Compare accounts on each connection and review the drift. Jobs with the
    status "Checked only (read-only mode)" say what the app would do to each
-   account: create, reactivate or disable it, and which groups it would add
-   or remove. Fix the policy or the data and rehearse again with an access
+   account: create, reactivate, disable or delete it, what else it would
+   change there (such as the name or the sessions), and which groups it
+   would add or remove. A job the connected app would refuse fails with the
+   reason, as it would for real. Fix the policy or the data and rehearse again with an access
    update.
 
 To leave read-only mode:

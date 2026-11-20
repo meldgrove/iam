@@ -7,6 +7,8 @@ import pytest
 from iam.adapters.base import AccountSpec, AdapterError, ConfigurationError, TransientError
 from iam.adapters.keycloak import KeycloakAdapter
 
+from .rehearse import rehearse
+
 BASE = "https://sso.example.invalid"
 REALM = "example"
 ADMIN = f"/admin/realms/{REALM}"
@@ -131,6 +133,14 @@ class FakeKeycloak:
                 else:
                     self.memberships[user_id].discard(group_id)
                 return httpx.Response(204)
+        if parts == ["default-groups"] and method == "GET":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": g, "name": self.groups[g]["name"], "path": self.groups[g]["path"]}
+                    for g in sorted(self.default_groups)
+                ],
+            )
         if parts == ["groups"]:
             return httpx.Response(200, json=self.group_page(None, params))
         if parts[:1] == ["groups"] and parts[2:] == ["children"]:
@@ -546,3 +556,58 @@ def test_keycloak_hands_out_sign_in_unless_both_ways_are_off(keycloak, mock_tran
     assert not adapter_for(
         keycloak, mock_transport, send_setup_email=False, set_temporary_password=False
     ).hands_out_sign_in()
+
+
+# -- rehearsals predict the job ------------------------------------------------
+
+
+def writes(keycloak):
+    return [c for c in keycloak.calls if c[0] != "GET" and c[1] != TOKEN_PATH]
+
+
+def test_a_rehearsal_names_the_name_update(keycloak, mock_transport):
+    keycloak.add_user("ada", "ada@example.invalid", enabled=False, lastName="Byron")
+    adapter = adapter_for(keycloak, mock_transport)
+    plan = rehearse(adapter, "ensure_account", spec())
+    assert (plan.change, plan.also) == ("reactivate", ["update the name"])
+    assert writes(keycloak) == []
+    result = adapter.ensure_account(spec(), groups=set(), managed_groups=set())
+    assert result.reactivated
+    assert "Updated the name in Keycloak." in result.notes
+
+
+def test_a_rehearsal_of_a_current_user_changes_nothing(keycloak, mock_transport):
+    keycloak.add_user("ada", "ada@example.invalid")
+    plan = rehearse(adapter_for(keycloak, mock_transport), "ensure_account", spec())
+    assert (plan.change, plan.also) == ("keep", [])
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("logout", [True, False])
+def test_a_rehearsal_of_offboarding_names_the_logout(keycloak, mock_transport, enabled, logout):
+    keycloak.add_user("ada", "ada@example.invalid", enabled=enabled)
+    adapter = adapter_for(keycloak, mock_transport, logout_on_disable=logout)
+    plan = rehearse(adapter, "disable_account", spec())
+    assert plan.change == ("disable" if enabled else "already disabled")
+    assert plan.also == (["end the user's sessions"] if logout else [])
+    assert writes(keycloak) == []
+    adapter.disable_account(spec(), managed_groups=set())
+    assert bool(keycloak.calls_to("POST", "/logout")) is logout
+
+
+def test_a_rehearsal_counts_the_realms_default_groups(keycloak, mock_transport):
+    """Keycloak puts a new user in the realm's default groups; the job then
+    removes the managed ones the person should not have."""
+    keycloak.default_groups = {"g-sales", "g-wiki"}
+    adapter = adapter_for(keycloak, mock_transport)
+    groups, managed = {"g-wiki", "g-apps"}, {"g-wiki", "g-apps", "g-sales"}
+    plan = rehearse(adapter, "ensure_account", spec(), groups=groups, managed_groups=managed)
+    assert (plan.change, plan.groups_to_add, plan.groups_to_remove) == (
+        "create",
+        ["g-apps"],
+        ["g-sales"],
+    )
+    assert writes(keycloak) == []
+    result = adapter.ensure_account(spec(), groups=groups, managed_groups=managed)
+    assert result.created
+    assert (result.groups_added, result.groups_removed) == (["g-apps"], ["g-sales"])

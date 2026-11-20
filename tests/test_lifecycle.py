@@ -779,6 +779,10 @@ def test_cancelling_a_workflow_keeps_the_result_of_its_running_job(
     assert workflow.status == Workflow.Status.CANCELLED
     assert Account.objects.get(person=person).status == Account.Status.ACTIVE
     assert len(sent) == 1 and "Initial-Pass-123" in sent[0]
+    assert AuditEvent.objects.get(action="job.ensure_account").summary == (
+        "Created the Fake app account of Ada Lovelace. Its workflow was cancelled or "
+        "replaced while it ran, too late to stop the change."
+    )
 
 
 def test_a_job_cancelled_while_it_ran_still_records_its_change(person, fake_store, monkeypatch):
@@ -794,6 +798,92 @@ def test_a_job_cancelled_while_it_ran_still_records_its_change(person, fake_stor
     run_job(job)
     assert Account.objects.get(person=person).status == Account.Status.ACTIVE
     assert len(sent) == 1 and "Initial-Pass-123" in sent[0]
+    # The change was made: the job is not shown as cancelled.
+    job.refresh_from_db()
+    assert job.status == Job.Status.SUCCEEDED
+    assert AuditEvent.objects.get(action="job.ensure_account").summary == (
+        "Created the Fake app account of Ada Lovelace. It was cancelled while it ran, "
+        "too late to stop the change."
+    )
+
+
+def test_a_worker_that_was_only_slow_makes_a_cancel_too_late(person, fake_store):
+    """The lease ran out while the worker still talked to the connection, and
+    a newer workflow replaced the job's: the stale job was cancelled, but the
+    change was made."""
+    start_workflow(person, Workflow.Kind.ONBOARDING)
+    slow = claim_next_job()
+    attempted = attempt(slow)
+    Job.objects.filter(pk=slow.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
+    start_workflow(person, Workflow.Kind.ACCESS_UPDATE)  # restarts the onboarding
+    assert recover_stale_jobs() == 1
+    assert Job.objects.get(pk=slow.pk).status == Job.Status.CANCELLED
+    finish(slow, attempted)
+    job = Job.objects.get(pk=slow.pk)
+    assert job.status == Job.Status.SUCCEEDED
+    assert job.result["created"] is True
+    assert "It was cancelled while it ran, too late to stop the change." in (
+        AuditEvent.objects.get(action="job.ensure_account", target_id=str(job.pk)).summary
+    )
+
+
+TOO_LATE_FOR_THE_ACCOUNT = (
+    "Create or update account at Fake app for Ada Lovelace: an earlier run already did "
+    "the account step, so the cancel stopped only the groups. They are left as they are."
+)
+
+
+@pytest.mark.parametrize("how", ["cancelled", "replaced"])
+@pytest.mark.parametrize("account", ["created", "found active"])
+def test_a_cancel_while_the_groups_wait_comes_too_late_for_the_account(
+    person, fake_store, approver_user, how, account
+):
+    """The account step is done (an account created, or one found active);
+    only the groups wait for another try. The job is done: the cancel stops
+    only the groups."""
+    if account == "created":
+        fake_store.fail_group_with = TransientError("Fake app answered 503.")
+    else:
+        fake_store.accounts["u-ada"] = {
+            "username": "ada",
+            "email": "ada@example.invalid",
+            "active": True,
+            "groups": set(),
+        }
+        fake_store.fail_group_read_with = TransientError("Fake app answered 503.")
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING, actor=approver_user)
+    run_all()
+    job = workflow.jobs.get()
+    assert job.status == Job.Status.QUEUED
+    if how == "cancelled":
+        cancel_workflow(workflow, actor=approver_user)
+    else:
+        start_workflow(person, Workflow.Kind.ACCESS_UPDATE, actor=approver_user)
+    job.refresh_from_db()
+    assert job.status == Job.Status.SUCCEEDED
+    assert (job.result["account"], job.result["created"]) == ("ada", account == "created")
+    assert Account.objects.get(person=person).status == Account.Status.ACTIVE
+    events = AuditEvent.objects.filter(action="job.ensure_account", target_id=str(job.pk))
+    assert events.latest("pk").summary == TOO_LATE_FOR_THE_ACCOUNT
+    assert not Task.objects.filter(job=job, status=Task.Status.OPEN).exists()
+
+
+def test_a_retry_that_fails_after_a_replace_keeps_the_account_step(
+    person, fake_store, approver_user
+):
+    fake_store.fail_group_with = TransientError("Fake app answered 503.")
+    start_workflow(person, Workflow.Kind.ONBOARDING, actor=approver_user)
+    run_all()
+    Job.objects.update(next_attempt_at=timezone.now())
+    retry = claim_next_job()
+    fake_store.fail_with = AdapterError("Fake app answered 400.")
+    attempted = attempt(retry)
+    start_workflow(person, Workflow.Kind.ACCESS_UPDATE, actor=approver_user)
+    finish(retry, attempted)
+    job = Job.objects.get(pk=retry.pk)
+    assert job.status == Job.Status.SUCCEEDED
+    events = AuditEvent.objects.filter(action="job.ensure_account", target_id=str(job.pk))
+    assert events.latest("pk").summary == TOO_LATE_FOR_THE_ACCOUNT
 
 
 def test_job_locks_never_cover_joined_rows(person, admin_user):

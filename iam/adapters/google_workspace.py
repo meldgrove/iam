@@ -11,6 +11,7 @@ import httpx
 
 from .base import (
     SYNC_INTERVAL_FIELD,
+    AccountPlan,
     AccountSpec,
     Adapter,
     AdapterError,
@@ -47,6 +48,25 @@ def _error_reasons(response: httpx.Response) -> set[str]:
 def _lacks_admin_privileges(user: dict) -> bool:
     """Missing flags mean unknown privileges, not a normal user."""
     return all(user.get(flag) is False for flag in ("isAdmin", "isDelegatedAdmin"))
+
+
+def _refusal(user: dict, active: bool) -> str:
+    """Why the app does not reactivate or suspend this user, if it does not."""
+    if active and not _lacks_admin_privileges(user):
+        return (
+            "Suspended Google Workspace administrator accounts are not reactivated "
+            "automatically. Reactivate the account in the Google Admin console."
+        )
+    if not active and user.get("isAdmin") is True:
+        return "Google Workspace super admins are not suspended automatically."
+    return ""
+
+
+def _alias_refusal(email: str) -> str:
+    return (
+        f"{email} is an alias of another Google Workspace user. Nothing was changed. Remove "
+        "the alias in the Google Admin console or use another work email."
+    )
 
 
 class GoogleWorkspaceAdapter(Adapter):
@@ -323,11 +343,7 @@ class GoogleWorkspaceAdapter(Adapter):
         if response.status_code == 409:
             existing = self.find_account(spec)
             if existing is None and self._alias_owner(email):
-                raise AdapterError(
-                    f"{email} is an alias of another Google Workspace user. Nothing was "
-                    "changed. Remove the alias in the Google Admin console or use another "
-                    "work email."
-                )
+                raise AdapterError(_alias_refusal(email))
             if existing is None:
                 raise TransientError("Google reported the user as existing but did not return it.")
             result = EnsureResult(account=existing)
@@ -345,17 +361,36 @@ class GoogleWorkspaceAdapter(Adapter):
             notes=["Created the Google Workspace user."],
         )
 
-    def set_active(self, account: ExternalAccount, active: bool) -> ExternalAccount:
+    def plan_ensure(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_ensure(spec, account)
+        if plan.change == "create":
+            try:
+                email = self._work_email(spec)
+            except AdapterError as exc:
+                plan.refusal = str(exc)
+            else:
+                if self._alias_owner(email):
+                    plan.refusal = _alias_refusal(email)
+        elif plan.change == "reactivate":
+            plan.refusal = _refusal(self._user_of(account), active=True)
+        return plan
+
+    def plan_disable(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_disable(spec, account)
+        if plan.change == "disable":
+            plan.refusal = _refusal(self._user_of(account), active=False)
+        return plan
+
+    def _user_of(self, account: ExternalAccount) -> dict:
         user = getattr(self, "_last_user", None)
         if user is None or str(user.get("id")) != account.external_id:
             user = self._get_user(account.external_id) or {}
-        if active and not _lacks_admin_privileges(user):
-            raise AdapterError(
-                "Suspended Google Workspace administrator accounts are not reactivated "
-                "automatically. Reactivate the account in the Google Admin console."
-            )
-        if not active and user.get("isAdmin") is True:
-            raise AdapterError("Google Workspace super admins are not suspended automatically.")
+        return user
+
+    def set_active(self, account: ExternalAccount, active: bool) -> ExternalAccount:
+        refusal = _refusal(self._user_of(account), active)
+        if refusal:
+            raise AdapterError(refusal)
         response = self._request(
             "PUT",
             f"/users/{quote(account.external_id, safe='')}",

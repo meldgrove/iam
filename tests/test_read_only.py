@@ -130,6 +130,78 @@ def test_someone_elses_account_still_stops_the_job(person, fake_store, fake_conn
     assert fake_store.accounts["u-ada"]["active"]
 
 
+@pytest.fixture
+def relution(fake_connection, monkeypatch, mock_transport):
+    """The connection, pointed at an in-memory Relution."""
+    from tests.adapters.test_relution import CONFIG, FakeRelution
+
+    fake = FakeRelution()
+    fake_connection.adapter = "relution"
+    fake_connection.settings = {k: v for k, v in CONFIG.items() if k != "api_token"}
+    fake_connection.set_secrets({"api_token": CONFIG["api_token"]})
+    fake_connection.save()
+    transport = mock_transport(fake)
+    build = Connection.build_adapter
+    monkeypatch.setattr(
+        Connection, "build_adapter", lambda self, **kw: build(self, transport=transport, **kw)
+    )
+    return fake
+
+
+def test_a_rehearsal_predicts_what_the_adapter_does(person, relution, settings):
+    """Offboarding deactivates a Relution user who is locked but activated:
+    unlocking would let the person in again. The rehearsal says so."""
+    person.status = Person.Status.ACTIVE
+    person.save()
+    relution.add_user("u-1", "ada@example.invalid", locked=True)
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    run_all()
+    job = workflow.jobs.get()
+    assert job.status == Job.Status.REHEARSED
+    assert job.result == {"account": "ada@example.invalid", "would": "disable the account"}
+    assert relution.writes == []
+    settings.READ_ONLY = False
+    job.status = Job.Status.QUEUED
+    job.save()
+    run_all()
+    assert relution.users["u-1"]["activated"] is False
+
+
+def test_a_job_the_connection_would_refuse_fails_its_rehearsal(person, relution):
+    relution.add_user("u-1", "ada@example.invalid", locked=True)
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    run_all()
+    job = workflow.jobs.get()
+    assert job.status == Job.Status.FAILED
+    assert job.last_error.startswith("The Relution user is locked. Nothing was changed.")
+    assert relution.writes == []
+
+
+def test_a_refused_offboarding_names_the_groups_the_job_removes_first(
+    person, fake_store, monkeypatch
+):
+    from iam.adapters.base import Adapter
+    from tests.fakes import FakeAdapter
+
+    def refuse(self, spec, account):
+        plan = Adapter.plan_disable(self, spec, account)
+        plan.refusal = "Fake app does not disable admins."
+        return plan
+
+    monkeypatch.setattr(FakeAdapter, "plan_disable", refuse, raising=False)
+    person.status = Person.Status.ACTIVE
+    person.save()
+    add_account(fake_store, groups={"g-staff", "unmanaged"})
+    workflow = start_workflow(person, Workflow.Kind.OFFBOARDING)
+    run_all()
+    job = workflow.jobs.get()
+    assert job.status == Job.Status.FAILED
+    assert job.last_error == (
+        "Fake app does not disable admins. The job would remove these groups first: Staff."
+    )
+    assert fake_store.accounts["u-ada"]["groups"] == {"g-staff", "unmanaged"}
+
+
 def test_a_group_read_that_fails_fails_the_rehearsal(person, fake_store):
     from tests.fakes import AdapterError
 

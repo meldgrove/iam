@@ -6,6 +6,8 @@ import pytest
 from iam.adapters.base import AccountSpec, AdapterError, TransientError
 from iam.adapters.scim import ScimAdapter
 
+from .rehearse import rehearse
+
 BASE = "https://app.example.invalid/scim/v2"
 TOKEN = "scim-test-token-value"
 
@@ -94,11 +96,12 @@ def test_find_by_user_name_filter_escapes_quotes(mock_transport):
         assert request.url.path == "/scim/v2/Users"
         assert request.url.params["filter"] == 'userName eq "o\\"brien@example.invalid"'
         found = user(groups=["g1", "g2"], user_name='o"brien@example.invalid')
+        found["emails"] = [{"value": 'o"brien@example.invalid', "primary": True}]
         return httpx.Response(200, json=listing(found))
 
     account = adapter(mock_transport(handler)).find_account(spec(email='o"brien@example.invalid'))
     assert account.external_id == "u1"
-    assert account.email == "ada@example.invalid"
+    assert account.email == 'o"brien@example.invalid'
     assert account.active
     assert account.groups == frozenset({"g1", "g2"})
 
@@ -365,3 +368,104 @@ def test_a_listing_with_entries_that_are_no_objects_is_an_error(mock_transport):
 
     with pytest.raises(AdapterError, match="unexpected"):
         list(adapter(mock_transport(handler)).list_accounts())
+
+
+SOMEONE_ELSES = (
+    "The SCIM 2.0 app username {} belongs to a user with a different email. Nothing was "
+    "changed. Check the person's username and work email."
+)
+
+
+@pytest.mark.parametrize("source", ["username", "email"])
+def test_a_user_name_of_someone_with_another_email_is_never_changed(mock_transport, source):
+    """As at Keycloak: a userName can belong to someone else (another J. Smith),
+    and an email that is not the person's shows it does."""
+    user_name = "ada" if source == "username" else "ada@example.invalid"
+    other = user("u7", active=False, user_name=user_name)
+    other["emails"] = [{"value": "ada.byron@example.invalid", "primary": True}]
+
+    def handler(request):
+        assert request.method == "GET"
+        if request.url.params["filter"].startswith("userName"):
+            return httpx.Response(200, json=listing(other))
+        return httpx.Response(200, json=listing())
+
+    scim = adapter(mock_transport(handler), user_name_source=source)
+    with pytest.raises(AdapterError) as exc:
+        scim.ensure_account(spec(), groups={"g1"}, managed_groups={"g1"})
+    assert str(exc.value) == SOMEONE_ELSES.format(user_name)
+    with pytest.raises(AdapterError) as exc:
+        scim.disable_account(spec(), managed_groups={"g1"})
+    assert str(exc.value) == SOMEONE_ELSES.format(user_name)
+
+
+def test_a_create_conflict_never_takes_over_someone_elses_user_name(mock_transport):
+    other = user("u7", active=False, user_name="ada")
+    other["emails"] = [{"value": "ada.byron@example.invalid"}]
+    found = {"userName": listing(), "emails.value": listing()}
+
+    def handler(request):
+        if request.method == "POST":
+            # Created meanwhile, e.g. by someone in the app.
+            found["userName"] = listing(other)
+            return httpx.Response(409, json={"detail": "uniqueness"})
+        assert request.method == "GET"
+        return httpx.Response(200, json=found[request.url.params["filter"].split(" ")[0]])
+
+    transport = mock_transport(handler)
+    with pytest.raises(AdapterError) as exc:
+        adapter(transport, user_name_source="username").ensure_account(
+            spec(), groups=set(), managed_groups=set()
+        )
+    assert str(exc.value) == SOMEONE_ELSES.format("ada")
+    assert [r.method for r in transport.requests if r.method != "GET"] == ["POST"]
+
+
+def test_a_user_name_match_with_the_persons_email_or_none_is_theirs(mock_transport):
+    mine = user("u1", user_name="ada")
+    mine["emails"] = [
+        {"value": "ada.private@example.invalid", "primary": True},
+        {"value": "ADA@example.invalid"},
+    ]
+    without = user("u2", user_name="ada")
+    del without["emails"]
+
+    for resource in (mine, without):
+
+        def handler(request, resource=resource):
+            return httpx.Response(200, json=listing(resource))
+
+        found = adapter(mock_transport(handler), user_name_source="username").find_account(spec())
+        assert found.external_id == resource["id"]
+
+
+# -- rehearsals predict the job ------------------------------------------------
+
+
+@pytest.mark.parametrize(("mode", "change"), [("delete", "delete"), ("active_false", "disable")])
+def test_a_rehearsal_of_offboarding_says_whether_the_user_is_deleted(mock_transport, mode, change):
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=user("u1", groups=[]))
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(200, json=user("u1", active=False, groups=[]))
+
+    transport = mock_transport(handler)
+    scim = adapter(transport, deactivate_mode=mode)
+    plan = rehearse(scim, "disable_account", spec(), external_id="u1")
+    assert plan.change == change
+    assert {r.method for r in transport.requests} == {"GET"}
+    scim.disable_account(spec(), external_id="u1", managed_groups=set())
+    assert transport.requests[-1].method == ("DELETE" if mode == "delete" else "PATCH")
+
+
+def test_a_rehearsal_refuses_a_create_without_a_user_name(mock_transport):
+    transport = mock_transport(lambda request: httpx.Response(200, json=listing()))
+    scim = adapter(transport)
+    nameless = spec(username="", email="")
+    plan = rehearse(scim, "ensure_account", nameless)
+    assert (plan.change, plan.refusal) == ("create", "SCIM accounts need a work email or username.")
+    with pytest.raises(AdapterError) as exc:
+        scim.ensure_account(nameless, groups=set(), managed_groups=set())
+    assert str(exc.value) == plan.refusal

@@ -571,3 +571,45 @@ def test_editing_a_person_keeps_a_status_a_workflow_sets_meanwhile(
     assert response.status_code == 302
     person.refresh_from_db()
     assert person.last_name == "King" and person.status == Person.Status.OFFBOARDING
+
+
+def test_cancelling_a_workflow_never_claims_a_running_job_was_cancelled(
+    client_for, approver_user, person, fake_store
+):
+    from iam.jobs import claim_next_job, run_job
+
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    job = claim_next_job()
+    client = client_for(approver_user)
+    response = client.post(reverse("workflow_cancel", args=[workflow.pk]), follow=True)
+    page = response.content.decode()
+    assert (
+        "Cancelled the workflow. Too late for the job at Fake app: it was already running, "
+        "so its change goes ahead." in page
+    )
+    assert "This workflow was cancelled while jobs ran." in page
+    run_job(job)
+    page = client.get(reverse("job_detail", args=[job.pk])).content.decode()
+    assert ">Done</span>" in page and ">Cancelled</span>" not in page
+    assert "too late to stop the change" in page
+
+
+def test_the_workflow_page_names_the_jobs_a_cancel_came_too_late_for(
+    client_for, approver_user, person, fake_store, fake_connection
+):
+    from iam.jobs import claim_next_job
+    from iam.lifecycle import cancel_workflow
+    from iam.models import Connection, ProfileGrant
+
+    wiki = Connection(adapter="fake", name="Wiki", enabled=True, settings={})
+    wiki.set_secrets({"token": "fake-token"})
+    wiki.save()
+    ProfileGrant.objects.create(profile=person.access_profile, connection=wiki)
+    workflow = start_workflow(person, Workflow.Kind.ONBOARDING)
+    claim_next_job(), claim_next_job()
+    cancel_workflow(workflow, actor=approver_user)
+    page = client_for(approver_user).get(reverse("workflow_detail", args=[workflow.pk]))
+    assert (
+        "Too late for the jobs at Fake app and Wiki: they were already running, so their "
+        "changes go ahead." in page.content.decode()
+    )

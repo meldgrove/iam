@@ -32,9 +32,15 @@ cannot (retry or complete its steps instead). A cancelled onboarding returns
 the person to planned, and the schedule does not start it again until the
 start date or the access profile changes (an approver can still start it).
 Onboarding refuses a last day that has passed: clear or change it first, or
-the schedule would offboard the person right after. A job that is running
-when its workflow ends finishes, and its result (the account, an initial
-password) is kept. Offboarding turns off the person's app user at once.
+the schedule would offboard the person right after. Offboarding turns off the
+person's app user at once.
+
+A cancel comes too late for a job that is already running: its change may
+already have happened in the connected app. The job finishes and its result
+(the account, an initial password) is kept. A change that was made is never
+shown as cancelled: the job ends as done, and its history says that the
+cancel came too late. Cancelling a workflow names the jobs that were already
+running, and the workflow's page names them while they run.
 
 **Jobs.** The worker (`manage.py run_worker`) runs queued jobs. For a
 connection in automatic mode it calls the adapter:
@@ -44,12 +50,12 @@ connection in automatic mode it calls the adapter:
   add the wanted managed groups and remove the managed groups no longer
   wanted.
 
-  An account found without its saved ID must be the person's. A Keycloak
-  username whose user has another email, or several SCIM users with that
-  userName or email, stop the job with nothing changed. A Google address
-  that is an alias of another user is not the person's account (creating
-  it stops the job). The job then changes exactly the account whose owner
-  it checked.
+  An account found without its saved ID must be the person's. A user found
+  by username whose email is not the person's work email (Keycloak, SCIM,
+  Relution), or several users with that username or email, stop the job
+  with nothing changed. A Google address that is an alias of another user
+  is not the person's account (creating it stops the job). The job then
+  changes exactly the account whose owner it checked.
 - *Disable account*: remove the managed groups (unless the adapter keeps
   them, e.g. Relution) and disable the account. No account found counts as
   done.
@@ -66,7 +72,10 @@ and press Retry, or to make the change by hand and complete the task. Error
 messages never contain credentials or provider responses.
 
 **A stopped worker.** A job whose worker stopped mid-run (a deploy, a crash,
-a lost database) runs again once its lease (`JOB_LEASE_SECONDS`) runs out.
+a lost database) runs again once its lease (`JOB_LEASE_SECONDS`) runs out,
+or is cancelled if its workflow was cancelled or replaced meanwhile. A worker
+that was only slow and still makes the change after that cancel ends the job
+as done, and the job's history says the cancel came too late.
 If the app had already created the account, the sign-in details that run
 arranged are lost: when the next run finds an account the app does not know
 as the person's, at an app that hands out sign-in details (Google Workspace,
@@ -78,7 +87,12 @@ password is still sent. Passing errors run the job again for the groups; the
 account change is audited before that. Once retries run out, or
 at once for any other error, the job succeeds and a failure task names the
 groups to fix by hand. A later workflow that plans a job at the same
-connection cancels that task, because that job does the groups again.
+connection cancels that task, because that job does the groups again. A job
+cancelled while it ran is not run again for its groups: it succeeds, and a
+failure task names the groups unless its workflow was cancelled or replaced
+too. A cancel while a job waits to run again for its groups comes too late
+for its account step as well: the job ends as done, its history says so,
+and the groups stay as they are.
 
 **Manual tasks.** A connection in manual mode, a read-only or turned-off
 connection, and apps without write support (Slack, Notion, other apps) get a
@@ -114,10 +128,18 @@ in those apps:
 - **No email** leaves the app: no initial passwords, no task notifications.
 - **Jobs are rehearsed.** The worker finds the account and its groups as
   the job would, checks that the account is the person's, and records what
-  it would change (create, reactivate or disable the account; the groups
-  to add and remove). At connections without automation it records the
-  steps a person would get, without a task. The job ends as "Checked only
-  (read-only mode)". A read that fails is a failed job, as always.
+  it would change (create, reactivate, disable or delete the account; what
+  else the app changes there, such as the name or the sessions; the groups
+  to add and remove). The adapter decides that once, from reads alone, in
+  its plan (`plan_ensure`, `plan_disable`, `plan_groups` in
+  `iam/adapters/base.py`); a real job follows the same plan, so the
+  rehearsal says what the job will do. Where the job would fail (a locked
+  Relution user, a Google super admin, a HubSpot user to reactivate), the
+  rehearsal fails with the same message, and names the groups a disable
+  would remove before it stops. At connections without automation
+  it records the steps a person would get, without a task. The job ends as
+  "Checked only (read-only mode)". A read that fails is a failed job, as
+  always.
 - **Workflows complete** once their jobs are rehearsed, so people become
   active or offboarded in this app. The schedule, imports and account
   comparisons run as usual.
@@ -138,7 +160,8 @@ None of these change anything in a connected app.
   nor removes memberships of a missing group until an import lists it again:
   an answer that only seems empty must not strip people of their groups.
 - **Account comparison** reads all accounts, links unlinked accounts to people
-  by work email or username (only on a unique match), marks accounts it no
+  by work email or username (only on a unique match, and never by username to
+  an account whose email is not the person's work email), marks accounts it no
   longer sees as missing, and reports drift: people who should have an
   account but have none, and active accounts the person's access does not
   grant (including planned people, e.g. after a cancelled onboarding, and
