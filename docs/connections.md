@@ -443,32 +443,33 @@ email connection that is turned on. Notification recipients are set in
 
 ## Writing a new adapter
 
-1. Create a module in `iam/adapters/` with a subclass of `Adapter`
-   (`iam/adapters/base.py`). Set `slug`, `name`, `description`, `kind`
-   (`AdapterKind.PROVISIONING`, `HR_SOURCE` or `EMAIL`) and `fields`. Field
-   kinds: text, url, email, int, bool, choice, textarea, secret.
+1. Create a module in `apps/server/src/adapters/` with a subclass of `Adapter`
+   (`base.ts`). Set the static `slug`, `label`, `description`, `kind`
+   (`AdapterKind.PROVISIONING`, `HR_SOURCE` or `EMAIL`) and `fields` (built
+   with `field()`). Field kinds: text, url, email, int, bool, choice,
+   textarea, secret. Field names are the keys stored in the database.
    Add `SYNC_INTERVAL_FIELD` for account comparisons.
-2. Declare what the app can do: `supports_write`, `supports_groups`,
-   `supports_account_listing`, `manual_groups`, `remove_groups_on_disable`,
-   `group_label`. An adapter that can read only with optional credentials adds
-   `can_read_accounts()`.
-3. Implement `test_connection()` and, for accounts and groups, the primitives
-   `find_account`, `create_account`, `set_active`, `account_groups`,
-   `add_to_group`, `remove_from_group`, `list_groups`, `list_accounts` and
-   `manual_instructions`. The base class combines them into `ensure_account`
-   and `disable_account`; both must be safe to run again. A people import
-   implements `list_people()`, an email adapter `send()`.
-   `find_account` returns only an account that is the person's: after a match
-   by username, call `check_same_email`, which stops at a user whose email is
+2. Declare what the app can do: `supportsWrite`, `supportsGroups`,
+   `supportsAccountListing`, `manualGroups`, `removeGroupsOnDisable`,
+   `groupLabel`. An adapter that can read only with optional credentials
+   overrides `canReadAccounts()`.
+3. Implement `testConnection()` and, for accounts and groups, the primitives
+   `findAccount`, `createAccount`, `setActive`, `accountGroups`,
+   `addToGroup`, `removeFromGroup`, `listGroups`, `listAccounts` and
+   `manualInstructions`. The base class combines them into `ensureAccount`
+   and `disableAccount`; both must be safe to run again. A people import
+   implements `listPeople()`, an email adapter `sendMessage()`.
+   `findAccount` returns only an account that is the person's: after a match
+   by username, call `checkSameEmail`, which stops at a user whose email is
    not the person's work email.
-4. Make HTTP calls with `self.http()` and `self.call()`. They map timeouts,
+4. Make HTTP calls with `this.http()` and `this.call()`. They map timeouts,
    429 and 5xx to `TransientError` (the job retries) and 401/403 to
    `ConfigurationError`; other errors are `AdapterError` (the job fails and
    opens a task).
 5. Never put tokens, passwords or provider response bodies in error messages or
-   results. Adapters never touch the database: they get the configuration as a
-   dict and return plain data.
-6. Register the adapter in `_ADAPTERS` in `iam/adapters/__init__.py`.
-7. Test it without network: pass `transport=` an `httpx.MockTransport` built
-   with the `mock_transport` fixture from `tests/conftest.py`. See
-   `tests/adapters/` for examples.
+   results. Adapters never touch the database: they get the configuration as an
+   object and return plain data.
+6. Register the adapter in `apps/server/src/adapters/registry.ts`.
+7. Test it without network: pass `{ fetch: mockFetch(handler) }` from
+   `apps/server/src/test/mock-fetch.ts` as the adapter's options. See the
+   `*.test.ts` files next to the adapters for examples.

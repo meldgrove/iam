@@ -378,9 +378,12 @@ export async function settleFinishedWorkflows(): Promise<number> {
  * tells people about new tasks once the change commits.
  */
 async function settle(job: Pick<Job, "workflowId">, ...newTasks: (Task | null)[]): Promise<void> {
-  await refreshWorkflow(job.workflowId);
+  await seams.refreshWorkflow(job.workflowId);
   notifyAfterCommit(newTasks);
 }
+
+/** Tests only: settle calls refreshWorkflow through this, so a test can intercept it. */
+export const seams = { refreshWorkflow };
 
 /** Whether a newer workflow replaced the job's (or it was cancelled). */
 async function replaced(job: Pick<Job, "workflowId">): Promise<boolean> {
@@ -413,7 +416,7 @@ export async function lockPerson(personId: number): Promise<Person> {
  * starts, is cancelled or works out its status: with one order everywhere,
  * two changes never wait for each other.
  */
-async function locked(job: Pick<Job, "id" | "personId">): Promise<JobState> {
+export async function locked(job: Pick<Job, "id" | "personId">): Promise<JobState> {
   await lockPerson(job.personId);
   const [row] = await q().select().from(jobs).where(eq(jobs.id, job.id)).for("update");
   if (!row) throw new Error(`Job ${job.id} does not exist`);

@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import type { AuthConfig } from "@iam/shared/api/users";
+import type { AuthConfig } from "@iam/shared/api/iam";
 import { api } from "./api";
 
-/** The app's name when the server names none (APP_NAME). */
-export const DEFAULT_APP_NAME = "Backups";
+export const DEFAULT_APP_NAME = "Meldgrove IAM";
 
 export const authConfigQuery = {
   queryKey: ["auth-config"] as const,

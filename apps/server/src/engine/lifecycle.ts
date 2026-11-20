@@ -129,7 +129,7 @@ export async function startWorkflow(
     if (kind === "onboarding" && person.accessProfileId === null) {
       throw new LifecycleError("Choose an access profile before onboarding.");
     }
-    const superseded = await supersedeOpenWorkflows(person.id, actor);
+    const superseded = await supersedeOpenWorkflows(person.id);
     const during = STATUS_DURING[kind];
     if (during) {
       await q().update(people).set({ status: during, onboardingPaused: false }).where(eq(people.id, person.id));
@@ -170,7 +170,8 @@ export async function startWorkflow(
   });
 }
 
-async function supersedeOpenWorkflows(personId: number, actor: Actor): Promise<number[]> {
+/** Cancels the person's open workflows. As in the Django version, without the actor: the new workflow records who started it. */
+async function supersedeOpenWorkflows(personId: number): Promise<number[]> {
   const open = await q()
     .select({ id: workflows.id })
     .from(workflows)
@@ -178,7 +179,7 @@ async function supersedeOpenWorkflows(personId: number, actor: Actor): Promise<n
     .orderBy(asc(workflows.createdAt), asc(workflows.id));
   const ids: number[] = [];
   for (const workflow of open) {
-    await stopWorkflow(workflow, { actor, note: "Replaced by a newer workflow." });
+    await stopWorkflow(workflow, { note: "Replaced by a newer workflow." });
     ids.push(workflow.id);
   }
   return ids;

@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { config } from "../config";
 import {
   HttpClient,
-  HttpResponse,
+  type HttpResponse,
   HttpTimeoutError,
   HttpTransportError,
   type FetchLike,

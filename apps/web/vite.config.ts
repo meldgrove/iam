@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-const server = process.env.BACKUPS_SERVER_URL ?? "http://localhost:3000";
+const server = process.env.IAM_SERVER_URL ?? "http://localhost:8000";
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
 export default defineConfig({
@@ -13,18 +13,13 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
   server: {
     port: Number(process.env.VITE_PORT ?? 5173),
-    // The API, sign-in, OAuth and MCP for agents, files, Markdown files and
-    // health checks come from the server; keep the Host header so cookies and
-    // origins match APP_URL (http://localhost:5173).
+    // The API, the sign-in redirects and the health checks come from the
+    // server; keep the Host header so cookies and origins match APP_URL
+    // (http://localhost:5173 while developing with Vite).
     proxy: {
       "/api": { target: server, changeOrigin: false },
+      "/oidc": { target: server, changeOrigin: false },
       "/-": { target: server, changeOrigin: false },
-      "/mcp": { target: server, changeOrigin: false },
-      "/oauth": { target: server, changeOrigin: false },
-      "/.well-known": { target: server, changeOrigin: false },
-      "/files": { target: server, changeOrigin: false },
-      "/llms.txt": { target: server, changeOrigin: false },
-      "^/s/[^?#]*\\.md$": { target: server, changeOrigin: false },
     },
   },
   build: {

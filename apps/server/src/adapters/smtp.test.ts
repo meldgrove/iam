@@ -81,7 +81,10 @@ function parse(message: Buffer) {
   const text = message.toString();
   const end = text.indexOf("\r\n\r\n");
   const headers = new Map<string, string>();
-  for (const line of text.slice(0, end).replace(/\r\n[ \t]+/g, " ").split("\r\n")) {
+  for (const line of text
+    .slice(0, end)
+    .replace(/\r\n[ \t]+/g, " ")
+    .split("\r\n")) {
     const colon = line.indexOf(":");
     headers.set(line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim());
   }
@@ -129,7 +132,11 @@ describe("SMTP", () => {
       socketTimeout: 7000,
     });
     // STARTTLS before anything else, with a verified certificate.
-    expect(server.options).toMatchObject({ secure: false, requireTLS: true, tls: { rejectUnauthorized: true } });
+    expect(server.options).toMatchObject({
+      secure: false,
+      requireTLS: true,
+      tls: { rejectUnauthorized: true },
+    });
     expect(server.calls).toEqual(["connect", ["login", "mailer", "mail-secret"], "send", "quit"]);
     const { message, envelope } = server.sent[0]!;
     expect(envelope.from).toBe("it@example.invalid");
@@ -143,7 +150,12 @@ describe("SMTP", () => {
   });
 
   it("uses TLS from the start without a login", async () => {
-    const settings = { host: "smtp.example.invalid", port: 465, security: "ssl", from_address: "it@example.invalid" };
+    const settings = {
+      host: "smtp.example.invalid",
+      port: 465,
+      security: "ssl",
+      from_address: "it@example.invalid",
+    };
 
     await new Smtp(settings).sendMessage({ to: ["a@example.invalid"], subject: "Hi", body: "Body" });
 
@@ -162,7 +174,11 @@ describe("SMTP", () => {
 
   it("treats a failed login as a configuration error", async () => {
     FakeSMTP.failOn = {
-      login: smtpError("Invalid login: 535 bad credentials", { code: "EAUTH", responseCode: 535, command: "AUTH PLAIN" }),
+      login: smtpError("Invalid login: 535 bad credentials", {
+        code: "EAUTH",
+        responseCode: 535,
+        command: "AUTH PLAIN",
+      }),
     };
 
     const error = await failure(new Smtp(CONFIG).sendMessage(MESSAGE));
@@ -174,9 +190,18 @@ describe("SMTP", () => {
 
   it.each([
     ["a timeout", smtpError("Timeout", { code: "ETIMEDOUT" })],
-    ["a refused connection", smtpError("connect ECONNREFUSED", { code: "ESOCKET", originalCode: "ECONNREFUSED" })],
-    ["a broken connection", smtpError("Connection closed unexpectedly", { code: "ECONNECTION", command: "CONN" })],
-    ["a 451 answer", smtpError("Message failed: 451 try later", { code: "EMESSAGE", responseCode: 451, command: "DATA" })],
+    [
+      "a refused connection",
+      smtpError("connect ECONNREFUSED", { code: "ESOCKET", originalCode: "ECONNREFUSED" }),
+    ],
+    [
+      "a broken connection",
+      smtpError("Connection closed unexpectedly", { code: "ECONNECTION", command: "CONN" }),
+    ],
+    [
+      "a 451 answer",
+      smtpError("Message failed: 451 try later", { code: "EMESSAGE", responseCode: 451, command: "DATA" }),
+    ],
   ])("treats %s as transient", async (_name, error) => {
     FakeSMTP.failOn = { send: error };
 
@@ -185,7 +210,11 @@ describe("SMTP", () => {
 
   it("treats an unreachable server as transient", async () => {
     FakeSMTP.failOn = {
-      connect: smtpError("connect EHOSTUNREACH", { code: "ESOCKET", originalCode: "EHOSTUNREACH", command: "CONN" }),
+      connect: smtpError("connect EHOSTUNREACH", {
+        code: "ESOCKET",
+        originalCode: "EHOSTUNREACH",
+        command: "CONN",
+      }),
     };
 
     await expect(new Smtp(CONFIG).sendMessage(MESSAGE)).rejects.toBeInstanceOf(TransientError);
@@ -210,7 +239,11 @@ describe("SMTP", () => {
 
   it("treats a refused sender as an adapter error", async () => {
     FakeSMTP.failOn = {
-      send: smtpError("Mail command failed: 553 not allowed", { code: "EENVELOPE", command: "MAIL FROM", responseCode: 553 }),
+      send: smtpError("Mail command failed: 553 not allowed", {
+        code: "EENVELOPE",
+        command: "MAIL FROM",
+        responseCode: 553,
+      }),
     };
 
     const error = await failure(new Smtp(CONFIG).sendMessage(MESSAGE));
@@ -230,9 +263,9 @@ describe("SMTP", () => {
   });
 
   it("refuses an email without recipients", async () => {
-    await expect(new Smtp(CONFIG).sendMessage({ to: [" "], subject: "Hi", body: "Body" })).rejects.toBeInstanceOf(
-      AdapterError,
-    );
+    await expect(
+      new Smtp(CONFIG).sendMessage({ to: [" "], subject: "Hi", body: "Body" }),
+    ).rejects.toBeInstanceOf(AdapterError);
   });
 
   it("signs in without sending in the connection test", async () => {
@@ -253,10 +286,17 @@ describe("SMTP", () => {
   });
 
   it.each([
-    ["login", smtpError("Invalid login: 454 temporary authentication failure", { code: "EAUTH", responseCode: 454 })],
+    [
+      "login",
+      smtpError("Invalid login: 454 temporary authentication failure", { code: "EAUTH", responseCode: 454 }),
+    ],
     [
       "send",
-      smtpError("Mail command failed: 451 try later", { code: "EENVELOPE", command: "MAIL FROM", responseCode: 451 }),
+      smtpError("Mail command failed: 451 try later", {
+        code: "EENVELOPE",
+        command: "MAIL FROM",
+        responseCode: 451,
+      }),
     ],
     [
       "send",
@@ -311,7 +351,8 @@ async function scriptedServer(script: Script = {}) {
         commands.push(line);
         const verb = line.split(" ")[0]!.toUpperCase();
         if (verb === "EHLO") socket.write("250-smtp.test\r\n250-AUTH PLAIN\r\n250 8BITMIME\r\n");
-        else if (verb === "AUTH") socket.write(line === login ? "235 2.7.0 ok\r\n" : "535 5.7.8 bad credentials\r\n");
+        else if (verb === "AUTH")
+          socket.write(line === login ? "235 2.7.0 ok\r\n" : "535 5.7.8 bad credentials\r\n");
         else if (verb === "MAIL" || verb === "RSET") socket.write("250 ok\r\n");
         else if (verb === "RCPT") socket.write(script.rcpt ?? "250 ok\r\n");
         else if (verb === "DATA") {
@@ -379,7 +420,9 @@ describe("SMTP through a real session", () => {
   it("never goes on without STARTTLS when it is chosen", async () => {
     server = await scriptedServer();
 
-    const error = await failure(new SmtpAdapter(settings(server.port, { security: "starttls" })).sendMessage(MESSAGE));
+    const error = await failure(
+      new SmtpAdapter(settings(server.port, { security: "starttls" })).sendMessage(MESSAGE),
+    );
 
     expect(error).toBeInstanceOf(ConfigurationError);
     expect(error.message).toBe("The SMTP server does not support the chosen encryption or sign-in.");
@@ -389,7 +432,9 @@ describe("SMTP through a real session", () => {
   it("treats a refused password as a configuration error", async () => {
     server = await scriptedServer();
 
-    const error = await failure(new SmtpAdapter(settings(server.port, { password: "wrong" })).sendMessage(MESSAGE));
+    const error = await failure(
+      new SmtpAdapter(settings(server.port, { password: "wrong" })).sendMessage(MESSAGE),
+    );
 
     expect(error).toBeInstanceOf(ConfigurationError);
     expect(error.message).toBe(

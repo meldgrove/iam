@@ -17,7 +17,7 @@ const generic = defineMessages({
     tooMany: "At most {max}",
     min: "At least {min}",
     max: "At most {max}",
-    url: "Enter a full address, e.g. https://example.org",
+    url: "Enter a full address, e.g. https://example.invalid",
     email: "Enter an email address",
     format: "Check the format",
     number: "Enter a whole number",

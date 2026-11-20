@@ -5,7 +5,7 @@ import { apiUrl, sessionEnded } from "@/lib/api";
 
 /** The deployment guide of the released version, for admins without an update service. */
 const DEPLOYMENT_GUIDE =
-  "https://github.com/meldgrove/backups/blob/stable/docs/deployment.md#automatic-updates";
+  "https://github.com/meldgrove/iam/blob/stable/docs/deployment.md#automatic-updates";
 
 /**
  * Admins: the update status that the header button and the Updates page
@@ -17,8 +17,8 @@ export function AdminUpdates({ appName, children }: { appName: string; children:
   return (
     <UpdatesProvider
       appName={appName}
-      // The systemd unit of a server set up as in docs/deployment.md (/srv/backups).
-      project="backups"
+      // The systemd unit of a server set up as in docs/deployment.md (/srv/iam).
+      project="iam"
       url={apiUrl("/admin/updates")}
       guideUrl={DEPLOYMENT_GUIDE}
       // US English dates, as everywhere in the app.

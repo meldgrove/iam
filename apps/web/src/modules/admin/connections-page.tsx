@@ -1,0 +1,84 @@
+import { Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Alert, AlertDescription } from "@meldgrove/ui/alert";
+import { Button } from "@meldgrove/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@meldgrove/ui/card";
+import { Page, PageHeader } from "@meldgrove/ui/page";
+import { ErrorState, LoadingState } from "@meldgrove/ui/states";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@meldgrove/ui/table";
+import { TextLink } from "@/components/lists";
+import { ConnectionState, shortMode } from "./connection-parts";
+import { connectionsQuery } from "./api";
+
+/** The connected apps by kind: accounts and groups, people import, email. */
+export function ConnectionsPage() {
+  const query = useQuery(connectionsQuery);
+  return (
+    <Page>
+      <PageHeader
+        title="Connections"
+        description="The apps and services this app manages accounts in, imports people from, or sends email through."
+        actions={
+          <Button asChild>
+            <Link to="/admin/connections/new">Add connection</Link>
+          </Button>
+        }
+      />
+      {query.isPending ? (
+        <LoadingState />
+      ) : query.isError ? (
+        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+      ) : (
+        <>
+          {query.data.hasConnections ? null : (
+            <Alert>
+              <AlertDescription>
+                Nothing connected yet. Add your directory first (for example Keycloak or Google Workspace), then an email
+                connection for sign-in details and task notifications.
+              </AlertDescription>
+            </Alert>
+          )}
+          {query.data.sections
+            .filter((section) => section.connections.length > 0)
+            .map((section) => (
+              <Card key={section.kind}>
+                <CardHeader>
+                  <CardTitle>
+                    <h2>{section.label}</h2>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table scrollLabel={section.label}>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Mode</TableHead>
+                        <TableHead>State</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {section.connections.map((connection) => (
+                        <TableRow key={connection.id}>
+                          <TableCell>
+                            <TextLink to={`/admin/connections/${connection.id}`}>{connection.name}</TextLink>
+                          </TableCell>
+                          <TableCell className="text-sm">{connection.adapterName}</TableCell>
+                          <TableCell className="text-sm">
+                            {connection.kind === "provisioning" ? shortMode(connection.mode) : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <ConnectionState enabled={connection.enabled} status={connection.status} />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            ))}
+        </>
+      )}
+    </Page>
+  );
+}

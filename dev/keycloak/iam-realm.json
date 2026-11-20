@@ -36,10 +36,10 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
-      "redirectUris": ["http://localhost:8000/oidc/callback/"],
-      "webOrigins": ["http://localhost:8000"],
+      "redirectUris": ["http://localhost:8000/oidc/callback/", "http://localhost:5173/oidc/callback/"],
+      "webOrigins": ["http://localhost:8000", "http://localhost:5173"],
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:8000/login/",
+        "post.logout.redirect.uris": "http://localhost:8000/login/##http://localhost:5173/login/",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [

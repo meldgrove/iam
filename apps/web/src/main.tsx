@@ -14,9 +14,9 @@ void startErrorReporting(() => router.state.matches.at(-1)?.fullPath);
 // A 401 anywhere means the session ended: show the sign-in page.
 setUnauthorizedHandler(() => {
   const path = window.location.pathname;
-  if (!path.startsWith("/sign-in")) {
+  if (!path.startsWith("/login")) {
     queryClient.removeQueries({ queryKey: ["me"] });
-    void router.navigate({ to: "/sign-in", search: { redirect: path + window.location.search } });
+    void router.navigate({ to: "/login", search: { next: path + window.location.search } });
   }
 });
 

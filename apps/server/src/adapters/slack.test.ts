@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { AdapterError, ConfigurationError, TransientError, accountSpec, type AccountSpec } from "./base";
 import { SlackAdapter } from "./slack";
-import { answer, json, mockFetch, recordPauses, type Handler, type MockFetch } from "../test/mock-fetch";
+import { answer, json, mockFetch, recordPauses, type MockFetch } from "../test/mock-fetch";
 
 const TOKEN = "xoxb-test-token-value";
 
 function spec(values: Partial<AccountSpec> = {}): AccountSpec {
-  return accountSpec({ firstName: "Ada", lastName: "Lovelace", username: "ada", email: "ada@example.invalid", ...values });
+  return accountSpec({
+    firstName: "Ada",
+    lastName: "Lovelace",
+    username: "ada",
+    email: "ada@example.invalid",
+    ...values,
+  });
 }
 
 function ok(data: Record<string, unknown> = {}): Response {
@@ -21,10 +27,6 @@ function adapter(fetch: MockFetch, config: Record<string, unknown> = {}): SlackA
   return new SlackAdapter({ bot_token: TOKEN, ...config }, { fetch });
 }
 
-function transport(handler: Handler): MockFetch {
-  return mockFetch(handler);
-}
-
 /** The error a promise fails with. */
 async function failure(promise: Promise<unknown>): Promise<Error> {
   try {
@@ -37,7 +39,7 @@ async function failure(promise: Promise<unknown>): Promise<Error> {
 
 describe("Slack", () => {
   it("reports the workspace in the connection test", async () => {
-    const fetch = transport(() => ok({ team: "Example", team_id: "T1" }));
+    const fetch = mockFetch(() => ok({ team: "Example", team_id: "T1" }));
     const result = await adapter(fetch).testConnection();
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Example");
@@ -60,7 +62,7 @@ describe("Slack", () => {
   });
 
   it("treats invalid_auth as a configuration error without the token", async () => {
-    const fetch = transport(() => error("invalid_auth"));
+    const fetch = mockFetch(() => error("invalid_auth"));
     const caught = await failure(adapter(fetch).testConnection());
     expect(caught).toBeInstanceOf(ConfigurationError);
     expect(caught.message).toContain("invalid_auth");
@@ -68,17 +70,17 @@ describe("Slack", () => {
   });
 
   it("treats ratelimited as transient", async () => {
-    const fetch = transport(() => error("ratelimited"));
+    const fetch = mockFetch(() => error("ratelimited"));
     await expect(adapter(fetch).findAccount(spec())).rejects.toBeInstanceOf(TransientError);
   });
 
   it("treats HTTP 429 as transient", async () => {
-    const fetch = transport(() => answer(429));
+    const fetch = mockFetch(() => answer(429));
     await expect(adapter(fetch).testConnection()).rejects.toBeInstanceOf(TransientError);
   });
 
   it("finds an account by email", async () => {
-    const fetch = transport((request) => {
+    const fetch = mockFetch((request) => {
       expect.soft(request.url.pathname).toBe("/api/users.lookupByEmail");
       expect.soft(request.url.searchParams.get("email")).toBe("ada@example.invalid");
       return ok({
@@ -99,30 +101,33 @@ describe("Slack", () => {
   });
 
   it("finds no account for an unknown email", async () => {
-    const fetch = transport(() => error("users_not_found"));
+    const fetch = mockFetch(() => error("users_not_found"));
     expect(await adapter(fetch).findAccount(spec())).toBeNull();
   });
 
   it("looks up the external ID first, then the email", async () => {
-    const fetch = transport((request) => {
+    const fetch = mockFetch((request) => {
       if (request.url.pathname === "/api/users.info") return error("user_not_found");
       return ok({ user: { id: "U2", deleted: true, profile: { email: "ada@example.invalid" } } });
     });
     const account = (await adapter(fetch).findAccount(spec(), "U9"))!;
-    expect(fetch.requests.map((request) => request.url.pathname)).toEqual(["/api/users.info", "/api/users.lookupByEmail"]);
+    expect(fetch.requests.map((request) => request.url.pathname)).toEqual([
+      "/api/users.info",
+      "/api/users.lookupByEmail",
+    ]);
     expect(account.externalId).toBe("U2");
     expect(account.active).toBe(false);
   });
 
   it("finds an account by external ID", async () => {
-    const fetch = transport(() => ok({ user: { id: "U9", name: "ada", profile: {} } }));
+    const fetch = mockFetch(() => ok({ user: { id: "U9", name: "ada", profile: {} } }));
     const account = (await adapter(fetch).findAccount(spec({ email: "" }), "U9"))!;
     expect(account.externalId).toBe("U9");
     expect(fetch.requests).toHaveLength(1);
   });
 
   it("treats an unknown Slack error as an adapter error", async () => {
-    const fetch = transport(() => error("fatal_error"));
+    const fetch = mockFetch(() => error("fatal_error"));
     const caught = await failure(adapter(fetch).findAccount(spec()));
     expect(caught).toBeInstanceOf(AdapterError);
     expect(caught.message).toMatch(/fatal_error/);
@@ -146,7 +151,7 @@ describe("Slack", () => {
         response_metadata: { next_cursor: "" },
       },
     };
-    const fetch = transport((request) => {
+    const fetch = mockFetch((request) => {
       expect.soft(request.url.pathname).toBe("/api/users.list");
       return ok(pages[request.url.searchParams.get("cursor") ?? ""]);
     });
@@ -159,7 +164,7 @@ describe("Slack", () => {
     const { pauses } = recordPauses();
     // Slack allows about 20 users.list pages a minute and answers 429 beyond that.
     const limited: string[] = [];
-    const fetch = transport((request) => {
+    const fetch = mockFetch((request) => {
       const cursor = request.url.searchParams.get("cursor") ?? "";
       if (cursor === "page2" && limited.length === 0) {
         limited.push(cursor);
@@ -174,7 +179,7 @@ describe("Slack", () => {
   });
 
   it("rejects a repeated cursor", async () => {
-    const fetch = transport(() => ok({ members: [], response_metadata: { next_cursor: "same" } }));
+    const fetch = mockFetch(() => ok({ members: [], response_metadata: { next_cursor: "same" } }));
     const caught = await failure(adapter(fetch).listAccounts());
     expect(caught).toBeInstanceOf(AdapterError);
     expect(caught.message).toMatch(/repeated/);
@@ -191,7 +196,7 @@ describe("Slack", () => {
       },
       next: { channels: [{ id: "G1", name: "private" }], response_metadata: {} },
     };
-    const fetch = transport((request) => {
+    const fetch = mockFetch((request) => {
       expect.soft(request.url.pathname).toBe("/api/conversations.list");
       expect.soft(request.url.searchParams.get("types")).toBe("public_channel,private_channel");
       expect.soft(request.url.searchParams.get("exclude_archived")).toBe("true");
@@ -206,7 +211,7 @@ describe("Slack", () => {
   });
 
   it("rejects an unexpected answer", async () => {
-    const fetch = transport(() => answer(200, "<html>"));
+    const fetch = mockFetch(() => answer(200, "<html>"));
     const caught = await failure(adapter(fetch).testConnection());
     expect(caught).toBeInstanceOf(AdapterError);
     expect(caught.message).toMatch(/unexpected/);
@@ -232,12 +237,14 @@ describe("Slack", () => {
     expect(SlackAdapter.supportsWrite).toBe(false);
     expect(SlackAdapter.supportsGroups).toBe(true);
     expect(SlackAdapter.groupLabel).toBe("Channels");
-    const secretFields = SlackAdapter.fields.filter((spec) => spec.kind === "secret").map((spec) => spec.name);
+    const secretFields = SlackAdapter.fields
+      .filter((spec) => spec.kind === "secret")
+      .map((spec) => spec.name);
     expect(secretFields).toEqual(["bot_token"]);
   });
 
   it("carries no token in the body or the URL", async () => {
-    const fetch = transport(() => ok({ team: "T" }));
+    const fetch = mockFetch(() => ok({ team: "T" }));
     await adapter(fetch).testConnection();
     const request = fetch.requests[0]!;
     expect(String(request.url)).not.toContain(TOKEN);

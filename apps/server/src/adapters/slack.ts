@@ -142,7 +142,8 @@ export class SlackAdapter extends Adapter {
         .toLowerCase()
         .replace(/[^a-z0-9_]/g, "")
         .slice(0, 60) || "unknown_error";
-    if (code === "ratelimited") throw new TransientError(`Slack rate-limited ${method}; it runs again later.`);
+    if (code === "ratelimited")
+      throw new TransientError(`Slack rate-limited ${method}; it runs again later.`);
     if (CONFIGURATION_ERRORS.has(code)) {
       throw new ConfigurationError(`Slack refused ${method} (${code}). Check the bot token and its scopes.`);
     }
@@ -197,7 +198,9 @@ export class SlackAdapter extends Adapter {
 
   override async listGroups(): Promise<ExternalGroup[]> {
     if (!this.canReadAccounts()) {
-      throw new ConfigurationError("Slack needs a bot token to import channels. Add channels by hand instead.");
+      throw new ConfigurationError(
+        "Slack needs a bot token to import channels. Add channels by hand instead.",
+      );
     }
     const groups: ExternalGroup[] = [];
     const channels = await this.paged("conversations.list", "channels", {
@@ -255,7 +258,9 @@ export class SlackAdapter extends Adapter {
   override async listAccounts(): Promise<ExternalAccount[]> {
     this.requireToken();
     const members = await this.paged("users.list", "members", { limit: 200 });
-    return members.filter((user) => SlackAdapter.isPerson(user) && truthy(user.id)).map((user) => SlackAdapter.account(user));
+    return members
+      .filter((user) => SlackAdapter.isPerson(user) && truthy(user.id))
+      .map((user) => SlackAdapter.account(user));
   }
 
   private invitesAsGuest(personType: string): boolean {
@@ -286,7 +291,8 @@ export class SlackAdapter extends Adapter {
       if (groups.length > 0) lines.push(`Add them to these channels: ${groups.join(", ")}.`);
     }
     if (url) lines.push(`Workspace: ${String(url)}`);
-    if (!this.canReadAccounts()) lines.push("The app cannot read Slack, so completing this task records the change.");
+    if (!this.canReadAccounts())
+      lines.push("The app cannot read Slack, so completing this task records the change.");
     return lines.join("\n");
   }
 }

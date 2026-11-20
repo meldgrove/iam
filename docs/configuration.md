@@ -10,11 +10,10 @@ can read the database, and the sign-in settings.
 
 | Variable | Meaning |
 | --- | --- |
-| `DJANGO_SECRET_KEY` | Random value, at least 50 characters. Signs sessions. |
-| `ENCRYPTION_KEY` | Fernet key that encrypts connection secrets. Create one with `python manage.py generate_key`. Several comma-separated keys: the first encrypts, all decrypt (rotation below). Losing it makes the saved connection secrets unreadable. |
-| `DATABASE_URL` | PostgreSQL, e.g. `postgresql://iam:password@postgres:5432/iam`. Connecting gives up after 10 seconds, and TCP keepalives notice a server that went away within about a minute; `?connect_timeout=...` and the `keepalives_*` parameters in the URL override that. |
-| `ALLOWED_HOSTS` | Public hostname(s), comma-separated. |
-| `CSRF_TRUSTED_ORIGINS` | Public origin, e.g. `https://iam.example.invalid`. |
+| `APP_URL` | The public address, e.g. `https://iam.example.invalid`. Links, the sign-in redirect (`/oidc/callback/`) and the check of the browser's origin come from it. Without it, the first entry of `CSRF_TRUSTED_ORIGINS` (Django version) counts. |
+| `AUTH_SECRET` | Random value, at least 32 characters (`openssl rand -base64 48`). Signs the sign-in's state. Without it, `DJANGO_SECRET_KEY` (Django version) counts. |
+| `ENCRYPTION_KEY` | Fernet key that encrypts connection secrets: 32 url-safe base64-encoded bytes. Create one with `cli generate-key` (`docker run --rm ghcr.io/meldgrove/iam:0.3 cli generate-key`). Several comma-separated keys: the first encrypts, all decrypt (rotation below). Losing it makes the saved connection secrets unreadable. The keys of the Django version keep working. |
+| `DATABASE_URL` | PostgreSQL, e.g. `postgresql://iam:password@postgres:5432/iam`. Connecting gives up after 10 seconds; TCP keepalives notice a server that went away. |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The sign-in client ([authentication.md](authentication.md)). |
 | `OIDC_ISSUER` **or** `KEYCLOAK_URL` + `KEYCLOAK_REALM` | The sign-in provider. |
 
@@ -30,40 +29,41 @@ can read the database, and the sign-in settings.
 | `BOOTSTRAP_ADMIN_EMAILS` | empty | Verified addresses that may claim the first admin while no active admin exists. |
 | `OIDC_AUTHORIZATION_ENDPOINT`, `OIDC_TOKEN_ENDPOINT`, `OIDC_USERINFO_ENDPOINT`, `OIDC_JWKS_ENDPOINT` | from discovery | Only for providers without a discovery document; they win over its values. With all four set, sign-in also works when the provider has none (sign-out then stays local). |
 | `SESSION_HOURS` | `12` | How long a sign-in lasts. Also the longest time a role removed at the sign-in provider still works ([authentication.md](authentication.md)). |
-| `TRUST_PROXY_HEADERS` | `0` (`1` in `compose.yaml`) | Trust `X-Forwarded-Proto` from the reverse proxy. Enable only behind a proxy that sets it. |
-| `FORWARDED_ALLOW_IPS` | `127.0.0.1` (`*` in `compose.yaml`) | Proxies gunicorn trusts for forwarded headers. |
-| `SECURE_SSL_REDIRECT` | `1` | Redirect HTTP to HTTPS (health checks under `/-/` are exempt). |
-| `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `1` | Send HSTS for subdomains too. |
+| `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `1` | With an `https` `APP_URL`, HSTS covers subdomains too. |
 | `HEALTHCHECK_TOKEN` | empty | Shows details on `/-/readyz` for requests with `X-Health-Token`. |
-| `UPDATER_URL` | `http://updater:8080` | The `updater` service that the admins' update button and Admin › Settings › Updates talk to ([updates.md](updates.md)). Under `compose.yaml`, an empty value falls back to this default; empty switches the update button off only where the app reads its environment directly, such as `manage.py` with `.env` in development. The `updater` service's own variables (`UPDATE_*`) are in updates.md. |
+| `UPDATER_URL` | `http://updater:8080` | The `updater` service that the admins' update button and Admin › Settings › Updates talk to ([updates.md](updates.md)). Under `compose.yaml`, an empty value falls back to this default; empty switches the update button off only where the app reads its environment directly, such as `npm run dev` with `.env`. The `updater` service's own variables (`UPDATE_*`) are in updates.md. |
 | `READ_ONLY` | `0` | `1`: read-only mode. The app reads connected apps but changes nothing in them and sends no email; jobs only check what they would change ([architecture.md](architecture.md#read-only-mode)). Set it for web and worker alike (`compose.yaml` does). Any value other than `1`/`0` (or `true`/`false`, `yes`/`no`, `on`/`off`) stops the app from starting. |
 | `TZ` | `UTC` | Time zone for dates, start and end days, and the schedule. |
-| `WEB_WORKERS`, `WEB_THREADS` | `2`, `4` | gunicorn processes and threads. |
+| `PORT` | `8000` | Port of the web process. |
 | `WORKER_POLL_SECONDS` | `5` | How often an idle worker looks for jobs. |
 | `WORKER_HEARTBEAT_MAX_AGE_SECONDS` | `300` | After this, the dashboard and `/-/readyz` report the worker as stale. |
-| `WORKER_STALL_SECONDS` | `600` | A worker without any progress for this long is stuck: it logs where it was and ends, and the container restarts it ([architecture.md](architecture.md#schedule)). |
+| `WORKER_STALL_SECONDS` | `600` | A worker without any progress for this long is stuck: it logs that and ends, and the container restarts it ([architecture.md](architecture.md#schedule)). |
 | `JOB_LEASE_SECONDS` | `300` | A running job whose worker stopped runs again after this. |
 | `PROVIDER_TIMEOUT_SECONDS` | `20` | Timeout of each call to a connected app. |
-| `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | empty | Error reporting. Request headers, query strings, bodies, cookies, local variables, and outbound HTTP traces are excluded. The release defaults to `iam@<version>`. |
+| `DATABASE_POOL_SIZE` | `10` | Connections of each process. |
+| `DATABASE_STATEMENT_TIMEOUT_SECONDS` | `60` | Longest database statement of web and worker; `0`: no limit. |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Logs are JSON lines without personal data: requests by their route pattern, never their query or body. |
+| `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | empty | Error reporting. Request headers, query strings, bodies, cookies, local variables, and calls to connected apps are excluded. The release defaults to `iam@<version>`. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0` | Performance tracing share. |
 
-Gunicorn access logs include request paths and omit query strings and
-referrers, which can carry sign-in parameters or personal data. The Caddy
-example in [deployment.md](deployment.md) leaves proxy access logging off.
-If you enable access logs on a proxy, log the request path and omit queries
-and the `Referer` header there too.
+The Caddy example in [deployment.md](deployment.md) leaves proxy access
+logging off. If you enable access logs on a proxy, log the request path and
+omit queries and the `Referer` header there too.
+
+No longer read (Django version): `ALLOWED_HOSTS`, `TRUST_PROXY_HEADERS`,
+`FORWARDED_ALLOW_IPS`, `SECURE_SSL_REDIRECT`, `WEB_WORKERS`, `WEB_THREADS`,
+`DJANGO_DEBUG`, `DEPLOYMENT_ENV`, `STATIC_MANIFEST`.
 
 ## Development only
 
 | Variable | Meaning |
 | --- | --- |
-| `DJANGO_DEBUG=1` with `DEPLOYMENT_ENV=development` | Development mode. Without `ENCRYPTION_KEY`, a key is derived from the development secret key. |
-| `DEV_LOGIN=1` | Sign in as any app user without a provider (`/login/dev/`). Ignored unless `DJANGO_DEBUG=1`. |
-| `STATIC_MANIFEST` | `1` serves static files through their manifest (hashed, compressed names), as production always does; the default is `0` in development mode. The image sets it while collecting static files. |
+| `NODE_ENV=development` | Development mode (`.env.example`). Without `ENCRYPTION_KEY`, a key is derived from the development secret; without `AUTH_SECRET`, a development secret is used. The image sets `NODE_ENV=production`. |
+| `DEV_LOGIN=1` | Sign in as any app user without a provider (`/login/dev`). Refused unless `NODE_ENV=development`. |
 
 ## Rotating the encryption key
 
-1. Create a new key: `python manage.py generate_key`.
+1. Create a new key: `docker compose run --rm migrate cli generate-key`.
 2. Set `ENCRYPTION_KEY=<new>,<old>` and redeploy.
-3. Run `python manage.py rotate_secrets` once.
+3. Run `docker compose run --rm migrate cli rotate-secrets` once.
 4. Set `ENCRYPTION_KEY=<new>` and redeploy.

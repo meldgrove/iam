@@ -1,10 +1,16 @@
 import type { ChangeEvent, ComponentProps, ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import { CircleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@meldgrove/ui/alert";
+import { Button } from "@meldgrove/ui/button";
+import { Checkbox } from "@meldgrove/ui/checkbox";
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel } from "@meldgrove/ui/field";
 import { Input } from "@meldgrove/ui/input";
+import { NativeSelect, NativeSelectOption } from "@meldgrove/ui/native-select";
 import { SecretInput } from "@meldgrove/ui/secret-input";
+import { Spinner } from "@meldgrove/ui/spinner";
 import { Switch } from "@meldgrove/ui/switch";
+import { Textarea } from "@meldgrove/ui/textarea";
 
 /** The ids of a field's hint and error, for aria-describedby. */
 export function describedBy(id: string, hint: unknown, error: unknown): string | undefined {
@@ -47,6 +53,89 @@ export function TextField({
   );
 }
 
+/** A labelled choice (a native select) with its hint and error. `value` "" is the empty option, if `empty` names it. */
+export function SelectField({
+  id,
+  label,
+  hint,
+  error,
+  value,
+  onChange,
+  options,
+  empty,
+  required,
+}: {
+  id: string;
+  label: ReactNode;
+  hint?: ReactNode;
+  error?: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  /** The label of the empty option; without it, there is none. */
+  empty?: string;
+  required?: boolean;
+}) {
+  return (
+    <Field data-invalid={error ? true : undefined}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <NativeSelect
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy(id, hint, error)}
+        wrapperClassName="w-full"
+        className="w-full"
+      >
+        {empty !== undefined ? <NativeSelectOption value="">{empty}</NativeSelectOption> : null}
+        {options.map((option) => (
+          <NativeSelectOption key={option.value} value={option.value}>
+            {option.label}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+      {hint ? <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription> : null}
+      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
+    </Field>
+  );
+}
+
+/** A labelled multi-line text with its hint and error. */
+export function TextareaField({
+  id,
+  label,
+  hint,
+  error,
+  value,
+  onChange,
+  ...textarea
+}: {
+  id: string;
+  label: ReactNode;
+  hint?: ReactNode;
+  error?: string;
+  value: string;
+  onChange: (value: string) => void;
+} & Omit<ComponentProps<"textarea">, "id" | "value" | "onChange">) {
+  return (
+    <Field data-invalid={error ? true : undefined}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Textarea
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy(id, hint, error)}
+        {...textarea}
+      />
+      {hint ? <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription> : null}
+      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
+    </Field>
+  );
+}
+
 /** A switch with its label and hint beside it. */
 export function SwitchField(props: {
   id: string;
@@ -68,6 +157,52 @@ export function SwitchField(props: {
         {props.hint ? <FieldDescription id={`${props.id}-hint`}>{props.hint}</FieldDescription> : null}
       </FieldContent>
     </Field>
+  );
+}
+
+/** A checkbox with its label and hint beside it, for a yes/no value of a form. */
+export function CheckboxField(props: {
+  id: string;
+  label: ReactNode;
+  hint?: ReactNode;
+  error?: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Field orientation="horizontal" data-invalid={props.error ? true : undefined}>
+      <Checkbox
+        id={props.id}
+        checked={props.checked}
+        onCheckedChange={(checked) => props.onChange(checked === true)}
+        disabled={props.disabled}
+        aria-invalid={props.error ? true : undefined}
+        aria-describedby={describedBy(props.id, props.hint, props.error)}
+      />
+      <FieldContent>
+        <FieldLabel htmlFor={props.id} className="font-normal">
+          {props.label}
+        </FieldLabel>
+        {props.hint ? <FieldDescription id={`${props.id}-hint`}>{props.hint}</FieldDescription> : null}
+        {props.error ? <FieldError id={`${props.id}-error`}>{props.error}</FieldError> : null}
+      </FieldContent>
+    </Field>
+  );
+}
+
+/** The buttons under a form: Save (busy while `pending`) and Cancel, a link back to `cancelTo`. */
+export function FormActions({ pending, cancelTo, saveLabel = "Save" }: { pending: boolean; cancelTo: string; saveLabel?: string }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button type="submit" disabled={pending}>
+        {pending ? <Spinner /> : null}
+        {saveLabel}
+      </Button>
+      <Button asChild variant="outline">
+        <Link to={cancelTo}>Cancel</Link>
+      </Button>
+    </div>
   );
 }
 

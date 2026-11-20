@@ -18,7 +18,12 @@ const CONFIG = {
   organization_uuid: ORG,
   api_token: "relution-test-token",
 };
-const SPEC = accountSpec({ firstName: "Ada", lastName: "Lovelace", username: "ada", email: "Ada@Example.invalid" });
+const SPEC = accountSpec({
+  firstName: "Ada",
+  lastName: "Lovelace",
+  username: "ada",
+  email: "Ada@Example.invalid",
+});
 
 type User = Record<string, unknown>;
 
@@ -183,7 +188,10 @@ describe("Relution", () => {
   });
 
   it("creates an account with groups", async () => {
-    const result = await adapter.ensureAccount(SPEC, { groups: new Set(["g-1"]), managedGroups: new Set(["g-1", "g-2"]) });
+    const result = await adapter.ensureAccount(SPEC, {
+      groups: new Set(["g-1"]),
+      managedGroups: new Set(["g-1", "g-2"]),
+    });
     expect(result.created).toBe(true);
     expect(result.groupsAdded).toEqual(["g-1"]);
     const user = fake.user(result.account.externalId);
@@ -206,7 +214,12 @@ describe("Relution", () => {
     // A stale ID falls back to the work email.
     const byEmail = await adapter.findAccount(SPEC, "gone");
     expect(byEmail!.externalId).toBe("u-9");
-    const nobody = accountSpec({ firstName: "X", lastName: "Y", username: "nobody", email: "x@example.invalid" });
+    const nobody = accountSpec({
+      firstName: "X",
+      lastName: "Y",
+      username: "nobody",
+      email: "x@example.invalid",
+    });
     expect(await adapter.findAccount(nobody)).toBeNull();
   });
 
@@ -301,7 +314,10 @@ describe("Relution", () => {
   });
 
   it("drops credentials from an update", () => {
-    const body = updatePayload({ uuid: "u", passwordHash: "x", apiToken: "y", name: "n" }, { activated: false });
+    const body = updatePayload(
+      { uuid: "u", passwordHash: "x", apiToken: "y", name: "n" },
+      { activated: false },
+    );
     expect(body).toEqual({ uuid: "u", name: "n", activated: false });
   });
 
@@ -338,19 +354,22 @@ describe("Relution", () => {
    * As at Keycloak: a login name can belong to someone else (another
    * J. Smith), and an email that is not the person's shows it does.
    */
-  it.each(["ada", "ada@example.invalid"])("never changes a username of someone with another email (%s)", async (name) => {
-    fake.addUser("u-7", "ada.byron@example.invalid", { activated: false });
-    fake.user("u-7").name = name;
-    let error = await failure(
-      adapter.ensureAccount(SPEC, { groups: new Set(["g-1"]), managedGroups: new Set(["g-1"]) }),
-    );
-    expect(error).toBeInstanceOf(AdapterError);
-    expect(error.message).toBe(someoneElses(name));
-    error = await failure(adapter.disableAccount(SPEC, { managedGroups: new Set(["g-1"]) }));
-    expect(error).toBeInstanceOf(AdapterError);
-    expect(error.message).toBe(someoneElses(name));
-    expect(fake.writes).toEqual([]);
-  });
+  it.each(["ada", "ada@example.invalid"])(
+    "never changes a username of someone with another email (%s)",
+    async (name) => {
+      fake.addUser("u-7", "ada.byron@example.invalid", { activated: false });
+      fake.user("u-7").name = name;
+      let error = await failure(
+        adapter.ensureAccount(SPEC, { groups: new Set(["g-1"]), managedGroups: new Set(["g-1"]) }),
+      );
+      expect(error).toBeInstanceOf(AdapterError);
+      expect(error.message).toBe(someoneElses(name));
+      error = await failure(adapter.disableAccount(SPEC, { managedGroups: new Set(["g-1"]) }));
+      expect(error).toBeInstanceOf(AdapterError);
+      expect(error.message).toBe(someoneElses(name));
+      expect(fake.writes).toEqual([]);
+    },
+  );
 
   it("never takes over someone else's username after a create whose answer was lost", async () => {
     const flaky = (request: SeenRequest) => {
@@ -393,10 +412,14 @@ describe("Relution", () => {
     fake.addUser("u-1", "ada@example.invalid", { activated, locked: true });
     const plan = await rehearse(adapter, "ensure_account", SPEC, { externalId: "u-1", groups: ["g-1"] });
     expect(plan.refusal).toBe(
-      "The Relution user is locked. Nothing was changed. Unlock it in Relution, then " + "run the job again.",
+      "The Relution user is locked. Nothing was changed. Unlock it in Relution, then run the job again.",
     );
     const error = await failure(
-      adapter.ensureAccount(SPEC, { externalId: "u-1", groups: new Set(["g-1"]), managedGroups: new Set(["g-1"]) }),
+      adapter.ensureAccount(SPEC, {
+        externalId: "u-1",
+        groups: new Set(["g-1"]),
+        managedGroups: new Set(["g-1"]),
+      }),
     );
     expect(error).toBeInstanceOf(AdapterError);
     expect(error.message).toBe(plan.refusal);
@@ -406,7 +429,10 @@ describe("Relution", () => {
   it("rehearses refusing a create without a work email", async () => {
     const spec = accountSpec({ firstName: "Ada", lastName: "Lovelace", username: "ada" });
     const plan = await rehearse(adapter, "ensure_account", spec);
-    expect([plan.change, plan.refusal]).toEqual(["create", "A Relution account needs the person's work email."]);
+    expect([plan.change, plan.refusal]).toEqual([
+      "create",
+      "A Relution account needs the person's work email.",
+    ]);
     const error = await failure(adapter.ensureAccount(spec, { groups: new Set(), managedGroups: new Set() }));
     expect(error).toBeInstanceOf(AdapterError);
     expect(error.message).toBe(plan.refusal);
@@ -415,10 +441,16 @@ describe("Relution", () => {
   it("rehearses the group changes of the job", async () => {
     fake.addUser("u-1", "ada@example.invalid", { activated: false });
     fake.members.set("u-1", new Set(["g-2", "unmanaged"]));
-    const plan = await rehearse(adapter, "ensure_account", SPEC, { groups: ["g-1"], managedGroups: ["g-1", "g-2"] });
+    const plan = await rehearse(adapter, "ensure_account", SPEC, {
+      groups: ["g-1"],
+      managedGroups: ["g-1", "g-2"],
+    });
     expect([plan.change, plan.groupsToAdd, plan.groupsToRemove]).toEqual(["reactivate", ["g-1"], ["g-2"]]);
     expect(fake.writes).toEqual([]);
-    const result = await adapter.ensureAccount(SPEC, { groups: new Set(["g-1"]), managedGroups: new Set(["g-1", "g-2"]) });
+    const result = await adapter.ensureAccount(SPEC, {
+      groups: new Set(["g-1"]),
+      managedGroups: new Set(["g-1", "g-2"]),
+    });
     expect(result.reactivated).toBe(true);
     expect([result.groupsAdded, result.groupsRemoved]).toEqual([["g-1"], ["g-2"]]);
   });

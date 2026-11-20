@@ -38,11 +38,15 @@ export function watch(
 ): boolean {
   const stalled = secondsWithoutProgress();
   if (stalled > stallSeconds) {
-    logger.fatal(
-      { seconds: Math.round(stalled) },
-      "the worker made no progress and stops, so that it is restarted",
-    );
-    (options.stop ?? ((code: number) => process.exit(code)))(1);
+    try {
+      logger.fatal(
+        { seconds: Math.round(stalled) },
+        "the worker made no progress and stops, so that it is restarted",
+      );
+    } finally {
+      // The worker stops even when its report fails.
+      (options.stop ?? ((code: number) => process.exit(code)))(1);
+    }
     return false;
   }
   try {

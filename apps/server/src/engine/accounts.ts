@@ -218,7 +218,7 @@ export async function recordListing(connection: Pick<Connection, "id">, listed: 
         : { connectionId: connection.id, externalId: external.externalId, appliedGroups: [], createdByApp: false };
       observe(account, external, now);
       if (account.personId === null || account.personId === undefined) {
-        const person = await matchPerson(connection.id, external);
+        const person = await accountSeams.matchPerson(connection.id, external);
         if (person !== null) {
           const placeholder = locked.find(
             (row) => row.personId === person.id && row.externalId === "" && !deleted.has(row.id),
@@ -330,4 +330,7 @@ async function matchPerson(connectionId: number, external: ExternalAccount): Pro
     .limit(1);
   return linked.length > 0 ? null : person;
 }
+
+/** Tests only: recordListing matches people through this object, so a test can hold a comparison midway. */
+export const accountSeams = { matchPerson };
 

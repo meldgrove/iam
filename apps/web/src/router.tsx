@@ -4,10 +4,10 @@ import { LoadingState } from "@meldgrove/ui/states";
 import { queryClient } from "@/lib/query";
 import { rootRoute } from "@/routes/root";
 import { appRoute } from "@/routes/app";
-import { signInRoute } from "@/routes/sign-in";
+import { devSignInRoute, signInRoute } from "@/routes/sign-in";
 import { appRoutes } from "@/modules";
 
-const routeTree = rootRoute.addChildren([signInRoute, appRoute.addChildren(appRoutes)]);
+const routeTree = rootRoute.addChildren([signInRoute, devSignInRoute, appRoute.addChildren(appRoutes)]);
 
 /** The app's router; tests pass a memory history and their own query client. */
 export function createAppRouter(options: { history?: RouterHistory; queryClient?: QueryClient } = {}) {
@@ -19,6 +19,8 @@ export function createAppRouter(options: { history?: RouterHistory; queryClient?
     defaultPreloadStaleTime: 0,
     defaultPendingComponent: () => <LoadingState />,
     scrollRestoration: true,
+    // Paths of the Django version end with a slash: /people/7/ opens /people/7.
+    trailingSlash: "never",
   });
 }
 

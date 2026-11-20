@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { domainToASCII } from "node:url";
+import { domainToASCII, domainToUnicode } from "node:url";
 import * as client from "openid-client";
 import { config } from "../config";
 import { logger } from "../logger";
@@ -31,7 +31,12 @@ export const providerFetch: { fetch: typeof fetch } = { fetch: (...args) => fetc
 
 /** Whether a value is an http(s) URL an endpoint may have: a valid host, no credentials, no fragment. */
 export function isEndpointUrl(value: unknown, options: { redirect?: boolean } = {}): value is string {
-  if (typeof value !== "string" || /[\\#\s\x00-\x1f\x7f]/.test(value)) return false;
+  // Backslashes, fragments, whitespace and control characters (code points below 32, and 127).
+  if (typeof value !== "string" || /[\\#\s]/.test(value) || [...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) {
+    return false;
+  }
+  // A lone surrogate cannot be sent; URL() would quietly replace it.
+  if (!value.isWellFormed()) return false;
   let url: URL;
   try {
     url = new URL(value);
@@ -42,6 +47,8 @@ export function isEndpointUrl(value: unknown, options: { redirect?: boolean } = 
   if (url.port === "0") return false;
   if (options.redirect && value.length > MAX_REDIRECT_LENGTH) return false;
   if (url.hostname.startsWith("[")) return true;
+  // IDNA 2008, as the Django version checked: labels of letters, marks, digits and hyphens, no symbols such as "☕".
+  if (!domainToUnicode(url.hostname).split(".").every((label) => /^[\p{L}\p{M}\p{N}-]*$/u.test(label))) return false;
   const hostname = domainToASCII(url.hostname).replace(/\.$/, "");
   return hostname.length > 0 && hostname.length <= 253 && hostname.split(".").every((label) => DNS_LABEL.test(label));
 }
@@ -154,6 +161,10 @@ async function clientConfiguration(): Promise<client.Configuration> {
     client.ClientSecretPost(settings.OIDC_CLIENT_SECRET),
   );
   configuration.timeout = TIMEOUT_SECONDS;
+  // Security: verify the ID token's signature with the provider's keys, as
+  // the Django version did; openid-client skips it by default for tokens
+  // from the token endpoint. Symmetric algorithms (HS*) have no keys to fetch.
+  if (!settings.OIDC_SIGN_ALGO.startsWith("HS")) client.enableNonRepudiationChecks(configuration);
   configuration[client.customFetch] = (url, options) =>
     providerFetch.fetch(url, { ...(options as RequestInit), redirect: "manual" });
   if (Object.values(endpoints).some((value) => typeof value === "string" && value.startsWith("http:"))) {
@@ -211,6 +222,8 @@ export async function completeSignIn(
   });
   const idClaims = tokens.claims();
   if (!idClaims || typeof idClaims.exp !== "number") throw new Error("ID token without an expiry");
+  // openid-client checks only that iat is a number; a token issued in the future is not valid yet (as PyJWT checked).
+  if (idClaims.iat > Date.now() / 1000 + CLOCK_SKEW_SECONDS) throw new Error("ID token issued in the future");
   if (String(idClaims.iss).replace(/\/+$/, "") !== config().oidcIssuer) throw new Error("ID token from an unexpected issuer");
   // Security: the user is chosen from these claims, so they must be about the
   // subject of the verified ID token (OpenID Connect Core 5.3.2).

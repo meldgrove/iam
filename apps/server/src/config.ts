@@ -47,8 +47,11 @@ const schema = z
     APP_ROLE: withDefault(z.enum(["all", "web", "worker", "migrate"]), "all"),
     PORT: withDefault(z.coerce.number().int().min(1).max(65535), 8000),
     HOST: withDefault(z.string(), "0.0.0.0"),
-    /** The public URL of the app, e.g. https://iam.example.org */
-    APP_URL: optional(z.url({ protocol: /^https?$/ })),
+    /**
+     * The public URL of the app, e.g. https://iam.example.invalid. A list (as
+     * compose.yaml passes CSRF_TRUSTED_ORIGINS of the Django version): its first entry.
+     */
+    APP_URL: optional(z.string()),
     /** Django version: the public origin. Its first entry stands in for APP_URL. */
     CSRF_TRUSTED_ORIGINS: optional(z.string()),
     DATABASE_URL: z.string().min(1),
@@ -185,9 +188,10 @@ export function config(): Config {
   const isDevelopment = value.NODE_ENV !== "production";
 
   const legacyOrigin = splitList(value.CSRF_TRUSTED_ORIGINS ?? "")[0];
-  let appUrl = value.APP_URL ?? legacyOrigin ?? (isDevelopment ? `http://localhost:${value.PORT}` : "");
+  let appUrl =
+    splitList(value.APP_URL ?? "")[0] ?? legacyOrigin ?? (isDevelopment ? `http://localhost:${value.PORT}` : "");
   appUrl = appUrl.replace(/\/+$/, "");
-  if (!appUrl) problems.push("APP_URL: Set the public URL, e.g. https://iam.example.org");
+  if (!appUrl) problems.push("APP_URL: Set the public URL, e.g. https://iam.example.invalid");
   else if (!z.url({ protocol: /^https?$/ }).safeParse(appUrl).success) {
     problems.push("APP_URL: Must be an http:// or https:// URL");
   }

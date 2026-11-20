@@ -12,5 +12,5 @@ process.env.LOG_LEVEL = "silent";
 process.env.OIDC_ISSUER ??= "http://localhost:8098/realms/iam";
 process.env.OIDC_CLIENT_ID ??= "iam";
 process.env.OIDC_CLIENT_SECRET ??= "test-client-secret";
-process.env.UPDATER_URL ??= "http://updater.test:8080";
+process.env.UPDATER_URL ??= "http://updater.example.invalid:8080";
 process.env.WORKER_ALIVE_FILE ??= `/tmp/iam-test-worker-alive-${process.pid}`;

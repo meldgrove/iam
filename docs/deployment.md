@@ -5,9 +5,9 @@ from `compose.yaml`:
 
 | Service | Command | Notes |
 | --- | --- | --- |
-| `migrate` | `manage.py migrate` | Runs once per deploy; web and worker wait for it. |
-| `web` | gunicorn on port 8000 | Behind a reverse proxy that terminates HTTPS. |
-| `worker` | `manage.py run_worker` | Runs jobs, the schedule and reads from connections. One is enough; with a second, one runs jobs while the other reads a big directory. |
+| `migrate` | `migrate` | Applies the database migrations once per deploy; web and worker wait for it. Takes over a database of the Django version ([below](#upgrade-from-the-django-version)). |
+| `web` | `web`: the server (Node.js) on port 8000 | The API and the web app, behind a reverse proxy that terminates HTTPS. |
+| `worker` | `worker` | Runs jobs, the schedule and reads from connections. One is enough; with a second, one runs jobs while the other reads a big directory. |
 | `updater` | Meldgrove Updater | Checks for and installs updates; the admins' update button talks to it ([updates.md](updates.md)). |
 
 PostgreSQL 16 or newer runs separately (a managed database or a PostgreSQL
@@ -40,12 +40,11 @@ server first.
 
    | Variable | Value |
    | --- | --- |
-   | `IAM_VERSION` | `0.1` (a release series; with [automatic updates](updates.md), the server writes the exact version it installs here) |
-   | `DJANGO_SECRET_KEY` | random, 50+ characters |
-   | `ENCRYPTION_KEY` | `docker run --rm -e DJANGO_DEBUG=1 ghcr.io/meldgrove/iam:0.1 python manage.py generate_key`; keep a copy with the backups |
+   | `IAM_VERSION` | `0.3` (a release series; with [automatic updates](updates.md), the server writes the exact version it installs here) |
+   | `APP_URL` | `https://iam.example.invalid` |
+   | `AUTH_SECRET` | random, 32+ characters: `openssl rand -base64 48` |
+   | `ENCRYPTION_KEY` | `docker run --rm ghcr.io/meldgrove/iam:0.3 cli generate-key`; keep a copy with the backups |
    | `DATABASE_URL` | your PostgreSQL, or the container below |
-   | `ALLOWED_HOSTS` | `iam.example.invalid` |
-   | `CSRF_TRUSTED_ORIGINS` | `https://iam.example.invalid` |
    | `HEALTHCHECK_TOKEN` | random |
    | `KEYCLOAK_URL`, `KEYCLOAK_REALM` or `OIDC_ISSUER` | the sign-in provider ([authentication.md](authentication.md)) |
    | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | the sign-in client |
@@ -71,7 +70,7 @@ server first.
 
    ```sh
    docker compose up -d --pull always
-   docker compose run --rm web python manage.py createadmin --email admin@example.invalid
+   docker compose run --rm migrate cli create-admin --email admin@example.invalid
    ```
 
 6. **HTTPS:** point the domain's DNS at the server, install Caddy
@@ -88,10 +87,8 @@ server first.
    Then `systemctl reload caddy`. Caddy gets the certificate itself.
    `compose.yaml` publishes `web` on `127.0.0.1:8000` only; `IAM_PORT`
    changes the host port. With several apps on one server, give each its
-   own port and its own site in the Caddyfile. Caddy's requests reach the
-   container from the Docker network's gateway, which is why `compose.yaml`
-   trusts forwarded headers from any address (`FORWARDED_ALLOW_IPS=*`):
-   nothing outside the server reaches the port.
+   own port and its own site in the Caddyfile. The app builds every link
+   and redirect from `APP_URL`, not from forwarded headers.
 
 7. Sign in, then continue with "First steps" below.
 8. **Automatic updates:** [switch them on](updates.md#switch-it-on).
@@ -221,3 +218,36 @@ runs Docker Compose with the files that started the updater, so it fails
 while those name a deleted file.
 
 Database migrations run automatically in `migrate`.
+
+## Upgrade from the Django version
+
+Versions 0.1 and 0.2 of IAM were a Django app; 0.3 is the same app in
+TypeScript (Node.js), with the same database, the same connections and the
+same sign-in client. Its release is marked as needing upgrade steps, so
+automatic updates do not install it.
+
+1. **Back up the database** ([Backups](#backups)) and keep `ENCRYPTION_KEY`.
+2. **Get the new files:** in `/srv/iam`, `git pull` (branch `stable`). The new
+   `compose.yaml` starts the new processes and health checks; the Django
+   one cannot run the new image.
+3. **`.env` stays as it is.** `compose.yaml` takes `AUTH_SECRET` from
+   `DJANGO_SECRET_KEY` and `APP_URL` from `CSRF_TRUSTED_ORIGINS` while those
+   are set; rename them when convenient. `ENCRYPTION_KEY` keeps working: the
+   saved connection secrets stay readable. `ALLOWED_HOSTS`,
+   `TRUST_PROXY_HEADERS`, `FORWARDED_ALLOW_IPS`, `SECURE_SSL_REDIRECT`,
+   `WEB_WORKERS`, `WEB_THREADS`, `DJANGO_DEBUG` and `DEPLOYMENT_ENV` are no
+   longer read.
+4. **Install it:** set `IAM_VERSION=0.3` in `.env`, then
+   `docker compose up -d --pull always`. `migrate` takes over the database
+   in one transaction: it keeps every table and row, adds the session table,
+   and gives the foreign keys the rules on delete Django applied itself.
+   Django's own tables stay, so going back works (step 6).
+5. **Sign in again:** sessions of the Django version end. The sign-in client
+   needs no change: the callback stays `/oidc/callback/` and the address
+   after sign-out `/login/`.
+6. **Going back:** set `IAM_VERSION=0.2`, check out the release's files
+   (`git checkout v0.2.0`), and run `docker compose up -d --pull always`.
+   Sessions end again. Changes made in 0.3 stay in the database.
+
+An installation of 0.1 can go straight to 0.3: `migrate` adds the columns of
+0.2 too.

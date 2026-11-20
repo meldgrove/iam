@@ -25,12 +25,13 @@ type StoredState = SignInState & { expires: number };
 /** A path in this app to go to after sign-in; anything else becomes "/". */
 export function safeNext(value: string | undefined | null): string {
   if (!value || value.length > 2000) return "/";
-  if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\") || /[\x00-\x1f\\]/.test(value)) {
+  const controls = [...value].some((character) => character.charCodeAt(0) < 32);
+  if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\") || controls || value.includes("\\")) {
     return "/";
   }
   try {
-    const url = new URL(value, "http://app.invalid");
-    if (url.origin !== "http://app.invalid") return "/";
+    const url = new URL(value, "http://app.example.invalid");
+    if (url.origin !== "http://app.example.invalid") return "/";
     return url.pathname + url.search + url.hash;
   } catch {
     return "/";

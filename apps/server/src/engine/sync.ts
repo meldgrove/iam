@@ -55,7 +55,7 @@ async function run(
     .insert(syncRuns)
     .values({ connectionId: connection.id, kind, triggeredById: actor?.id ?? null })
     .returning();
-  let status: SyncRun["status"] = "running";
+  let status: SyncRun["status"];
   let summary: Record<string, unknown> = {};
   let error = "";
   try {
@@ -336,7 +336,8 @@ const FIELD_NAMES: Record<string, string> = {
 const iexact = (column: typeof people.workEmail | typeof teams.name, value: string) =>
   sql`lower(${column}) = lower(${value})`;
 
-async function importRecord(connection: Connection, item: HRRecord, summary: PeopleSummary, actor: Actor): Promise<void> {
+/** Imports one HR record; importPeople runs each in its own transaction (exported for tests). */
+export async function importRecord(connection: Connection, item: HRRecord, summary: PeopleSummary, actor: Actor): Promise<void> {
   // Locked: the import saves the whole row, which must not write back a status
   // a workflow changed meanwhile.
   let [person] = await q()

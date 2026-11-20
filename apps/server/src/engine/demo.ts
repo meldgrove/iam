@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, type SQL } from "drizzle-orm";
 import { addDays, today } from "../core/time";
 import { accessProfiles, connections, people, profileGrants, providerGroups, teamGroups, teams, users } from "../db/schema";
 import { q } from "../db/tx";
@@ -56,7 +56,7 @@ export async function seedDemo(adminEmail: string): Promise<void> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any table of the schema
-async function getOrCreate<T extends Record<string, any>>(table: any, where: ReturnType<typeof sql> | undefined, values: T) {
+async function getOrCreate<T extends Record<string, any>>(table: any, where: SQL | undefined, values: T) {
   const [existing] = (await q().select().from(table).where(where).limit(1)) as { id: number }[];
   if (existing) return existing;
   const [created] = (await q().insert(table).values(values).returning()) as { id: number }[];

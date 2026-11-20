@@ -14,7 +14,12 @@ function attr(value: unknown, label?: string): Json {
   return data;
 }
 
-function employee(pid: string, first: string, last: string, attributes: Json = {}): { type: string; attributes: Json } {
+function employee(
+  pid: string,
+  first: string,
+  last: string,
+  attributes: Json = {},
+): { type: string; attributes: Json } {
   return {
     type: "Employee",
     attributes: {
@@ -126,7 +131,9 @@ describe("Personio", () => {
       value: { type: "Employee", attributes: { id: attr(9), email: attr("lead@example.invalid") } },
     };
     record.attributes.dynamic_4 = { label: "Cost center", value: "Ops" };
-    const [personioAdapter, fetch] = adapter(personio([[record]], attributes), { team_attribute: "Cost center" });
+    const [personioAdapter, fetch] = adapter(personio([[record]], attributes), {
+      team_attribute: "Cost center",
+    });
 
     const [cy] = await personioAdapter.listPeople();
 
@@ -253,10 +260,14 @@ describe("Personio", () => {
       employee("2", "Grace", "Hopper", { department: null, team: "Research" }),
     ];
     let [personioAdapter] = adapter(personio([page]), { team_attribute: "team" });
-    let teams = Object.fromEntries((await personioAdapter.listPeople()).map((record) => [record.externalId, record.team]));
+    let teams = Object.fromEntries(
+      (await personioAdapter.listPeople()).map((record) => [record.externalId, record.team]),
+    );
     expect(teams).toEqual({ 1: "Operations", 2: "Research" });
     [personioAdapter] = adapter(personio([page]));
-    teams = Object.fromEntries((await personioAdapter.listPeople()).map((record) => [record.externalId, record.team]));
+    teams = Object.fromEntries(
+      (await personioAdapter.listPeople()).map((record) => [record.externalId, record.team]),
+    );
     expect(teams).toEqual({ 1: "Engineering", 2: "Research" });
   });
 
@@ -271,20 +282,20 @@ describe("Personio", () => {
     ["ada@[::1]", true],
     ["ada@[999.1.1.1]", false],
     ["ada@[01.1.1.1]", false],
-    ["!#$%&*+/=?^_`{|}~-@example.com", true],
-    ['"quoted local"@example.com', false],
-    ["a..b@example.com", false],
-    [".a@example.com", false],
+    ["!#$%&*+/=?^_`{|}~-@example.invalid", true],
+    ['"quoted local"@example.invalid', false],
+    ["a..b@example.invalid", false],
+    [".a@example.invalid", false],
     ["ada@example", false],
     ["ada@example.c1", false],
-    ["ada@-example.com", false],
-    ["ada@exämple.com", true],
-    ["ädä@example.com", false],
-    ["ada@example.xn--p1ai", true],
-    ["ada@example.com.", false],
-    ["ada@@example.com", false],
-    ["ada@ex_ample.com", false],
-    [`${"x".repeat(64)}@${"y".repeat(250)}.com`, false],
+    ["ada@-x.example.invalid", false],
+    ["ada@exämple.example.invalid", true],
+    ["ädä@example.invalid", false],
+    ["ada@example." + "xn--p1ai", true],
+    ["ada@example.invalid.", false],
+    ["ada@@example.invalid", false],
+    ["ada@ex_ample.example.invalid", false],
+    [`${"x".repeat(64)}@${"y".repeat(250)}.invalid`, false],
     ["", false],
   ])("checks %s as Django's validate_email does", (value, valid) => {
     expect(isEmail(value)).toBe(valid);

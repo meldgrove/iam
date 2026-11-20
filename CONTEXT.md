@@ -13,7 +13,7 @@ explains how the pieces work together.
 - **Connection**: one connected app or service, configured in Admin ›
   Connections: an adapter type, settings, encrypted secrets, a mode
   (automatic, manual, read only) and an on/off switch.
-- **Adapter**: the code for one kind of connection (`iam/adapters/`). Three
+- **Adapter**: the code for one kind of connection (`apps/server/src/adapters/`). Three
   kinds: accounts and groups (provisioning), people import (HR source),
   email.
 - **Group**: something access can grant inside a connected app: a Keycloak

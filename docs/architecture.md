@@ -42,7 +42,7 @@ shown as cancelled: the job ends as done, and its history says that the
 cancel came too late. Cancelling a workflow names the jobs that were already
 running, and the workflow's page names them while they run.
 
-**Jobs.** The worker (`manage.py run_worker`) runs queued jobs. For a
+**Jobs.** The worker (the `worker` process) runs queued jobs. For a
 connection in automatic mode it calls the adapter:
 
 - *Create or update account*: find the account (by its saved ID, then by
@@ -132,7 +132,7 @@ in those apps:
   else the app changes there, such as the name or the sessions; the groups
   to add and remove). The adapter decides that once, from reads alone, in
   its plan (`plan_ensure`, `plan_disable`, `plan_groups` in
-  `iam/adapters/base.py`); a real job follows the same plan, so the
+  `apps/server/src/adapters/base.ts`); a real job follows the same plan, so the
   rehearsal says what the job will do. Where the job would fail (a locked
   Relution user, a Google super admin, a HubSpot user to reactivate), the
   rehearsal fails with the same message, and names the groups a disable
@@ -214,7 +214,7 @@ values.
 
 ## Adapters
 
-Each connected app is an adapter in `iam/adapters/`. Adapters get their
+Each connected app is an adapter in `apps/server/src/adapters/`. Adapters get their
 configuration as a dict, never touch the database, and return plain data;
-the engine (`iam/jobs.py`, `iam/sync.py`) records the results. See
+the engine (`apps/server/src/engine/jobs.ts`, `sync.ts`) records the results. See
 "Writing a new adapter" in [connections.md](connections.md).

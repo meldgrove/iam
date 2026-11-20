@@ -1,7 +1,15 @@
 import MailComposer from "nodemailer/lib/mail-composer";
 import SMTPConnection from "nodemailer/lib/smtp-connection";
 import { config } from "../config";
-import { Adapter, AdapterError, AdapterKind, ConfigurationError, TransientError, field, type TestResult } from "./base";
+import {
+  Adapter,
+  AdapterError,
+  AdapterKind,
+  ConfigurationError,
+  TransientError,
+  field,
+  type TestResult,
+} from "./base";
 
 /**
  * Email over SMTP: notifications to admins and sign-in details to new people.
@@ -48,17 +56,7 @@ type SmtpFailure = Error & {
 /** Nodemailer's codes for a session that broke off or never started. */
 const UNREACHABLE = new Set(["ECONNECTION", "ESOCKET", "EDNS", "ETIMEDOUT", "EPROXY"]);
 /** Nodemailer's codes for a request the server or Nodemailer refused (Python: SMTPException). */
-const REFUSED = new Set([
-  "EPROTOCOL",
-  "EENVELOPE",
-  "EMESSAGE",
-  "EAUTH",
-  "ENOAUTH",
-  "EREQUIRETLS",
-  "EMAXLIMIT",
-  "EMAXRECIPIENTS",
-  "ESTREAM",
-]);
+const REFUSED = new Set(["EPROTOCOL", "EENVELOPE", "EMESSAGE", "EREQUIRETLS"]);
 /** Node's codes for a TLS handshake or certificate that failed (Python: ssl.SSLError, CertificateError). */
 const TLS_FAILURE =
   /^(ERR_SSL_|ERR_TLS_|ERR_OSSL_|CERT_|CRL_|UNABLE_TO_|ERROR_IN_C|DEPTH_ZERO_SELF_SIGNED_CERT$|SELF_SIGNED_CERT_IN_CHAIN$|INVALID_CA$|INVALID_PURPOSE$|PATH_LENGTH_EXCEEDED$|HOSTNAME_MISMATCH$|EPROTO$)/;
@@ -128,7 +126,9 @@ class NodemailerSession implements SmtpSession {
   }
 
   login(username: string, password: string): Promise<void> {
-    return this.step((done) => this.connection.login({ user: username, pass: password }, (error) => done(error)));
+    return this.step((done) =>
+      this.connection.login({ user: username, pass: password }, (error) => done(error)),
+    );
   }
 
   check(): Promise<void> {
@@ -176,7 +176,7 @@ export class SmtpAdapter extends Adapter {
   static override readonly label = "Email (SMTP)";
   static override readonly kind = AdapterKind.EMAIL;
   static override readonly description =
-    "Sends notifications about manual tasks and the sign-in details of new accounts " + "through any SMTP server.";
+    "Sends notifications about manual tasks and the sign-in details of new accounts through any SMTP server.";
   static override readonly supportsWrite = false;
   static override readonly supportsAccountListing = false;
   static override readonly fields = [
@@ -208,7 +208,7 @@ export class SmtpAdapter extends Adapter {
     this.require("host", "from_address");
     const host = String(this.setting("host"));
     const serverPort = port(this.setting("port", 587));
-    const security = this.setting("security", "starttls");
+    const security = this.setting<unknown>("security", "starttls");
     const timeout = config().PROVIDER_TIMEOUT_SECONDS * 1000;
     const session = this.openSession({
       host,
@@ -247,16 +247,24 @@ export class SmtpAdapter extends Adapter {
     if (!isSmtpFailure(error) || error instanceof AdapterError) return error;
     const { code = "", command = "" } = error;
     const cause = { cause: error };
-    if (temporary(error)) return new TransientError(`The SMTP server asked to try again later (${what}).`, cause);
+    if (temporary(error)) {
+      return new TransientError(`The SMTP server asked to try again later (${what}).`, cause);
+    }
     if (code === "EAUTH" || code === "ENOAUTH") {
       return new ConfigurationError(
-        "The SMTP server refused the username or password. Check the connection's " + "credentials.",
+        "The SMTP server refused the username or password. Check the connection's credentials.",
         cause,
       );
     }
-    // The server refused STARTTLS, or would not even greet with EHLO when STARTTLS is required.
-    if ((code === "ETLS" && command === "STARTTLS" && error.responseCode) || (code === "ECONNECTION" && command === "EHLO")) {
-      return new ConfigurationError("The SMTP server does not support the chosen encryption or sign-in.", cause);
+    // The server refused STARTTLS, or refused EHLO although STARTTLS is required (Python: SMTPNotSupportedError).
+    if (
+      (code === "ETLS" && command === "STARTTLS" && error.responseCode) ||
+      (code === "ECONNECTION" && command === "EHLO")
+    ) {
+      return new ConfigurationError(
+        "The SMTP server does not support the chosen encryption or sign-in.",
+        cause,
+      );
     }
     if (code === "EENVELOPE" && command === "RCPT TO") {
       return new AdapterError("The SMTP server refused the recipient address.", cause);
@@ -299,7 +307,12 @@ export class SmtpAdapter extends Adapter {
     return { ok: true, message: `Connected to ${String(this.setting("host"))} and signed in.` };
   }
 
-  override async sendMessage(message: { to: string[]; subject: string; body: string; replyTo?: string }): Promise<void> {
+  override async sendMessage(message: {
+    to: string[];
+    subject: string;
+    body: string;
+    replyTo?: string;
+  }): Promise<void> {
     const recipients = message.to
       .filter((address) => address.trim())
       .map((address) => checkHeader(address.trim(), "recipient"));

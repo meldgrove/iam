@@ -207,7 +207,7 @@ export class RelutionAdapter extends Adapter {
   private baseUrl(): string {
     this.require("base_url", "organization_uuid", "api_token");
     const baseUrl = String(this.setting("base_url")).replace(/\/+$/, "");
-    let parts: URL | null = null;
+    let parts: URL | null;
     try {
       parts = new URL(baseUrl);
     } catch {
@@ -340,7 +340,9 @@ export class RelutionAdapter extends Adapter {
     const users = (await this.list(USERS_PATH, "list users")).filter((user) => entityId(user));
     let matches: Json[] = [];
     if (email) {
-      matches = users.filter((user) => normalize(str(user.email)) === email || normalize(str(user.name)) === email);
+      matches = users.filter(
+        (user) => normalize(str(user.email)) === email || normalize(str(user.name)) === email,
+      );
     }
     if (matches.length === 0 && username) {
       matches = users.filter((user) => normalize(str(user.name)) === username);
@@ -414,10 +416,15 @@ export class RelutionAdapter extends Adapter {
     // Deactivating writes also for a locked user: a lock is not an end.
     const needsWrite = active ? !userIsActive(user) : canSignInLater(user);
     if (needsWrite) {
-      await this.request("PUT", this.userPath(account.externalId), active ? "activate a user" : "deactivate a user", {
-        allow404: !active,
-        json: updatePayload(user, { activated: active }),
-      });
+      await this.request(
+        "PUT",
+        this.userPath(account.externalId),
+        active ? "activate a user" : "deactivate a user",
+        {
+          allow404: !active,
+          json: updatePayload(user, { activated: active }),
+        },
+      );
     }
     const confirmed = await this.getUser(account.externalId);
     if (confirmed === null) {
@@ -514,14 +521,17 @@ export class RelutionAdapter extends Adapter {
       new Set([...current].filter((id) => id !== groupId)),
       "remove a group membership",
     );
-    if (confirmed.has(groupId)) throw new AdapterError("Relution did not confirm the removed group membership.");
+    if (confirmed.has(groupId))
+      throw new AdapterError("Relution did not confirm the removed group membership.");
   }
 
   // -- reads -----------------------------------------------------------------
 
   override async listAccounts(): Promise<ExternalAccount[]> {
     // Listings do not embed memberships, so groups stay unknown (null).
-    return (await this.list(USERS_PATH, "list users")).filter((user) => entityId(user)).map((user) => this.toAccount(user));
+    return (await this.list(USERS_PATH, "list users"))
+      .filter((user) => entityId(user))
+      .map((user) => this.toAccount(user));
   }
 
   override async testConnection(): Promise<TestResult> {
@@ -542,7 +552,9 @@ export class RelutionAdapter extends Adapter {
         "also affects the enrolled devices. Retire devices separately."
       );
     }
-    const lines = [`In Relution, make sure ${who} has an activated, SSO-only user with the work email as login name.`];
+    const lines = [
+      `In Relution, make sure ${who} has an activated, SSO-only user with the work email as login name.`,
+    ];
     if (groups.length > 0) lines.push(`Relution groups: ${groups.join(", ")}.`);
     return lines.join("\n");
   }

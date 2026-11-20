@@ -15,7 +15,7 @@ export function PreferencesPage() {
       <AppearanceCard value={theme} onChange={setTheme} />
       <KeyboardShortcutsCard />
       {/* The software's name, also when an installation renames the app. */}
-      <AboutCard appName="Backups" repositoryUrl={REPOSITORY_URL} />
+      <AboutCard appName="Meldgrove IAM" repositoryUrl={REPOSITORY_URL} />
     </Page>
   );
 }

@@ -225,7 +225,8 @@ function calendarDate(year: number, month: number, day: number): string | null {
   if (year < 1 || month < 1 || month > 12 || day < 1) return null;
   const date = new Date(Date.UTC(2000, month - 1, day));
   date.setUTCFullYear(year);
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day)
+    return null;
   return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`;
 }
 
@@ -277,7 +278,8 @@ function isoDate(value: string): string | null {
   const time = ISO_TIME.exec(rest.slice(1).join(""));
   if (!time) return null;
   const within = (part: string | undefined, limit: number) => part === undefined || Number(part) <= limit;
-  const timeOk = within(time[1] ?? time[4], 23) && within(time[2] ?? time[5], 59) && within(time[3] ?? time[6], 59);
+  const timeOk =
+    within(time[1] ?? time[4], 23) && within(time[2] ?? time[5], 59) && within(time[3] ?? time[6], 59);
   const offsetOk = within(time[7], 23) && within(time[8], 59) && within(time[9], 59);
   return timeOk && offsetOk ? date : null;
 }
@@ -352,7 +354,8 @@ export function recordId(found: unknown): string {
 
 // Django's validate_email (EmailValidator), which the Python version used.
 const EMAIL_USER =
-  /^(?:[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(?:\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f!#-\[\]-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")$/iu;
+  // eslint-disable-next-line no-control-regex -- Django's quoted local part allows control characters.
+  /^(?:[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(?:\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f!#-[\]-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")$/iu;
 const UNICODE_LETTERS = "\\u00a1-\\uffff";
 const EMAIL_DOMAIN = new RegExp(
   `^[a-z${UNICODE_LETTERS}0-9](?:[a-z${UNICODE_LETTERS}0-9-]{0,61}[a-z${UNICODE_LETTERS}0-9])?` +
@@ -481,7 +484,9 @@ export class PersonioAdapter extends Adapter {
     const keys = [...STANDARD_ATTRIBUTE_KEYS];
     const teamAttribute = String(this.setting("team_attribute", "department"));
     if (!keys.includes(teamAttribute)) keys.push(teamAttribute);
-    const wanted = new Set([...PRIVATE_EMAIL_KEYS, ...START_DATE_KEYS, ...SUPERVISOR_KEYS].map(normalizedKey));
+    const wanted = new Set(
+      [...PRIVATE_EMAIL_KEYS, ...START_DATE_KEYS, ...SUPERVISOR_KEYS].map(normalizedKey),
+    );
     wanted.add(normalizedKey(teamAttribute));
     const data = await this.request(client, "GET", "/v1/company/employees/attributes", "read attributes");
     const attributes = data.data;
@@ -527,6 +532,8 @@ export class PersonioAdapter extends Adapter {
 
   private configuredTypes(): Map<string, string> {
     const mapping = new Map<string, string>();
+    // The line breaks of Python's str.splitlines().
+    // eslint-disable-next-line no-control-regex -- \x1c-\x1e separate lines there.
     const lines = String(this.setting("type_mapping", "")).split(/\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/);
     for (const line of lines) {
       if (!line.includes("=")) continue;
@@ -559,12 +566,7 @@ export class PersonioAdapter extends Adapter {
       String(this.setting("work_email_domains", ""))
         .split(",")
         .filter((domain) => domain.trim())
-        .map((domain) =>
-          domain
-            .trim()
-            .toLowerCase()
-            .replace(/^@+/, ""),
-        ),
+        .map((domain) => domain.trim().toLowerCase().replace(/^@+/, "")),
     );
   }
 
