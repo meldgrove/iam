@@ -56,7 +56,7 @@ class Field:
 
     name: str
     label: str
-    # text, url, email, int, bool, choice, textarea, secret, secret_text
+    # text, url, email, int, bool, choice, textarea, secret
     kind: str = "text"
     required: bool = False
     help: str = ""
@@ -69,7 +69,7 @@ class Field:
 
     @property
     def secret(self) -> bool:
-        return self.kind in {"secret", "secret_text"}
+        return self.kind == "secret"
 
 
 SYNC_INTERVAL_FIELD = Field(

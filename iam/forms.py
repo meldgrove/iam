@@ -124,10 +124,12 @@ class SettingsForm(forms.ModelForm):
 KEEP_SECRET_HELP = "Saved. Leave empty to keep it."
 
 
-class SecretTextarea(forms.Textarea):
-    def format_value(self, value):
-        # Like PasswordInput, never echo a submitted secret on validation errors.
-        return None
+class SecretInput(forms.PasswordInput):
+    """A password field with the eye button of @meldgrove/ui, which shows the
+    value on demand. Like PasswordInput, it never echoes a submitted secret.
+    A pasted multi-line key arrives as one line, which JSON does not mind."""
+
+    template_name = "iam/widgets/secret_input.html"
 
 
 class ConnectionForm(forms.Form):
@@ -200,12 +202,8 @@ class ConnectionForm(forms.Form):
             if saved:
                 common["required"] = False
                 common["help_text"] = " ".join(filter(None, [spec.help, KEEP_SECRET_HELP]))
-            widget = (
-                SecretTextarea(attrs={"rows": 4, "autocomplete": "off", "spellcheck": "false"})
-                if spec.kind == "secret_text"
-                else forms.PasswordInput(attrs={"autocomplete": "new-password"}, render_value=False)
-            )
-            return forms.CharField(widget=widget, strip=spec.kind != "secret_text", **common)
+            widget = SecretInput(attrs={"autocomplete": "new-password", "spellcheck": "false"})
+            return forms.CharField(widget=widget, **common)
         return forms.CharField(
             widget=forms.TextInput(attrs={"placeholder": spec.placeholder}), **common
         )

@@ -42,7 +42,10 @@ A new connection starts turned off. Test it, then turn it on.
 
 Secret fields (tokens, passwords, keys) are stored encrypted with
 `ENCRYPTION_KEY` and never shown again. The form says "Saved. Leave empty to
-keep it." Enter a new value to replace one. When you change where a secret
+keep it." Enter a new value to replace one. What you type stays hidden; the
+eye button at the end of the field shows it. Paste a multi-line key, such as
+the JSON key of a Google service account, as a whole: the field keeps it on
+one line, which JSON does not mind. When you change where a secret
 is sent (the URL or server, the port, the encryption), enter the secret
 again: a saved secret never follows to a new address. The audit log records
 which settings changed, never their values.
@@ -443,7 +446,7 @@ email connection that is turned on. Notification recipients are set in
 1. Create a module in `iam/adapters/` with a subclass of `Adapter`
    (`iam/adapters/base.py`). Set `slug`, `name`, `description`, `kind`
    (`AdapterKind.PROVISIONING`, `HR_SOURCE` or `EMAIL`) and `fields`. Field
-   kinds: text, url, email, int, bool, choice, textarea, secret, secret_text.
+   kinds: text, url, email, int, bool, choice, textarea, secret.
    Add `SYNC_INTERVAL_FIELD` for account comparisons.
 2. Declare what the app can do: `supports_write`, `supports_groups`,
    `supports_account_listing`, `manual_groups`, `remove_groups_on_disable`,

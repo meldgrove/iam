@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from django.urls import reverse
 
@@ -275,16 +277,76 @@ def test_connection_secrets_are_write_only(client_for, admin_user):
     assert "realm" in changed and "client_secret" not in changed
 
 
-def test_invalid_connection_form_keeps_multiline_secrets_write_only(client_for, admin_user):
+def test_invalid_connection_form_keeps_secrets_write_only(client_for, admin_user):
     client = client_for(admin_user)
     response = client.post(
         reverse("connection_create", args=["google_workspace"]),
         {"cfg_service_account_json": "submitted-key-placeholder"},
     )
     assert response.status_code == 200
-    assert b'name="cfg_service_account_json"' in response.content
     assert b"submitted-key-placeholder" not in response.content
     assert not Connection.objects.exists()
+    # Hidden at first; the eye button of @meldgrove/ui shows it.
+    page = response.content.decode()
+    assert "/static/iam/vendor/meldgrove-secret-input.js" in page
+    assert (
+        '<meldgrove-secret-input locale="en"><input type="password" name="cfg_service_account_json"'
+    ) in page
+
+
+@pytest.mark.parametrize("line_break", ["", " "])
+def test_google_key_pasted_into_the_one_line_field_still_works(
+    client_for, admin_user, monkeypatch, line_break
+):
+    """Browsers drop the line breaks of a value pasted into the secret field
+    (Firefox turns them into spaces). The key's JSON still reads."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from google.oauth2 import service_account
+
+    from iam.adapters.google_workspace import GoogleWorkspaceAdapter
+
+    pem = (
+        rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        .private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        .decode()
+    )
+    key_file = json.dumps(
+        {
+            "type": "service_account",
+            "client_email": "iam@project.example.invalid",
+            "private_key": pem,
+            "token_uri": "https://oauth2.googleapis.com/token",
+        },
+        indent=2,
+    )
+    pasted = line_break.join(key_file.splitlines())
+    client = client_for(admin_user)
+    response = client.post(
+        reverse("connection_create", args=["google_workspace"]),
+        {
+            "name": "Google",
+            "mode": "automatic",
+            "cfg_service_account_json": pasted,
+            "cfg_admin_email": "admin@example.invalid",
+            "cfg_domain": "example.invalid",
+            "cfg_customer_id": "my_customer",
+            "cfg_org_unit_path": "/",
+            "cfg_sync_interval_minutes": "360",
+        },
+    )
+    assert response.status_code == 302, response.content.decode()[:2000]
+    monkeypatch.setattr(
+        service_account.Credentials,
+        "refresh",
+        lambda credentials, request: setattr(credentials, "token", "signed-in"),
+    )
+    connection = Connection.objects.get(name="Google")
+    assert GoogleWorkspaceAdapter(connection.config())._access_token() == "signed-in"
 
 
 def test_saved_secrets_do_not_follow_a_changed_url(client_for, admin_user, fake_connection):
