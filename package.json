@@ -12,6 +12,6 @@
     "static": "mkdir -p iam/static/iam/vendor && cp node_modules/@meldgrove/ui/dist/standalone/meldgrove-updates.js node_modules/@meldgrove/ui/dist/standalone/meldgrove-secret-input.js node_modules/@meldgrove/ui/dist/tokens.css iam/static/iam/vendor/"
   },
   "dependencies": {
-    "@meldgrove/ui": "^0.1.0"
+    "@meldgrove/ui": "^0.1.3"
   }
 }
