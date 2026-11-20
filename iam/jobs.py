@@ -17,8 +17,10 @@ rate limits, server errors) runs again with growing pauses; any other
 failure, or the last retry, hands the job to a person as a failure task.
 Groups never hold up an account: once the account is created, reactivated
 or disabled, a group step that keeps failing becomes a task while the job
-succeeds. Nothing here stores passwords: a new account's initial password
-is emailed once to the personal address and forgotten.
+succeeds. A change the connection made is never shown as cancelled: a
+cancel that came while the job ran came too late for it, the job succeeds,
+and its history says so. Nothing here stores passwords: a new account's
+initial password is emailed once to the personal address and forgotten.
 
 In read-only mode (READ_ONLY=1) the worker rehearses every job instead: it
 reads what the job would change, records that in the result, changes
@@ -50,6 +52,7 @@ from .crypto import SecretUnreadable
 from .models import (
     Account,
     AppSettings,
+    AuditEvent,
     Connection,
     Job,
     Person,
@@ -141,11 +144,13 @@ def _cancel_replaced_group_tasks(person_id: int, jobs: list[Job], actor) -> list
     return ids
 
 
-def stop_workflow(workflow: Workflow, *, actor: User | None = None, note: str) -> None:
-    """Cancel the workflow and its unfinished jobs. A running job finishes:
-    its change may already have happened in the connected app. The lock
-    keeps the worker from claiming a job meanwhile; it covers only the job
-    rows, not the connections the ordering joins."""
+def stop_workflow(workflow: Workflow, *, actor: User | None = None, note: str) -> list[Job]:
+    """Cancel the workflow and its unfinished jobs. The cancel comes too late
+    for a running job: its change may already have happened in the
+    connected app, so it finishes, and its change counts. Returns those
+    jobs. The lock keeps the worker from claiming a job meanwhile; it covers
+    only the job rows, not the connections the ordering joins. The caller
+    holds the person's lock, so no running job finishes meanwhile."""
     unfinished = workflow.jobs.select_for_update(of=("self",)).exclude(
         status__in=[*Job.FINISHED_STATUSES, Job.Status.RUNNING]
     )
@@ -154,14 +159,55 @@ def stop_workflow(workflow: Workflow, *, actor: User | None = None, note: str) -
     workflow.status = Workflow.Status.CANCELLED
     workflow.finished_at = timezone.now()
     workflow.save(update_fields=["status", "finished_at"])
+    return list(
+        workflow.jobs.filter(status=Job.Status.RUNNING)
+        .select_related("connection")
+        .order_by("connection__name", "pk")
+    )
 
 
 def cancel_job(job: Job, *, actor: User | None = None, note: str = "") -> None:
+    """Cancel a job. A job whose account step an earlier run did, so that
+    only its groups were left, ends as done instead: a change that was made
+    is never shown as cancelled, and the cancel stops only the groups."""
+    step = _account_step(job)
+    if step is not None:
+        job.status = Job.Status.SUCCEEDED
+        job.finished_at = timezone.now()
+        job.locked_until = None
+        job.last_error = ""
+        job.result = step.details
+        job.save(update_fields=["status", "finished_at", "locked_until", "last_error", "result"])
+        _close_tasks(_work_tasks(job), Task.Status.CANCELLED, actor=actor, note=note)
+        audit.record(
+            f"job.{job.action}",
+            f"{job.get_action_display()} at {job.connection.name} for {job.person.full_name}: "
+            "an earlier run already did the account step, so the cancel stopped only the "
+            "groups. They are left as they are.",
+            actor=actor,
+            person=job.person,
+            target=job,
+            details={"note": note[:500]} if note else {},
+        )
+        return
     job.status = Job.Status.CANCELLED
     job.finished_at = timezone.now()
     job.locked_until = None
     job.save(update_fields=["status", "finished_at", "locked_until"])
     _close_tasks(_work_tasks(job), Task.Status.CANCELLED, actor=actor, note=note)
+
+
+def _account_step(job: Job) -> AuditEvent | None:
+    """The audit event of the account step an earlier run of this open job
+    did, if one did. An open job has one only when that run left the groups
+    for another try, or another worker claimed the job since."""
+    return (
+        AuditEvent.objects.filter(
+            action=f"job.{job.action}", target_type="job", target_id=str(job.pk)
+        )
+        .order_by("-pk")
+        .first()
+    )
 
 
 def _work_tasks(job: Job):
@@ -439,9 +485,11 @@ def finish(claim: Job, outcome: Outcome) -> Job:
     - A change the connection made always counts: the account is recorded
       and audited even when a newer workflow replaced the job's, or another
       worker claimed the job since. The job succeeds unless another worker
-      holds the latest claim. A group error that may clear on its own runs
-      the job again instead, until the last attempt. An account linked to
-      someone else meanwhile fails the job, as any other failure.
+      holds the latest claim, also when it was cancelled while it ran: that
+      cancel came too late, and the audit says so. A group error that may
+      clear on its own runs the job again instead, until the last attempt,
+      unless the job was cancelled. An account linked to someone else
+      meanwhile fails the job, as any other failure.
     - Any other outcome settles only a job that is still open and still
       this claim's. A job whose workflow was replaced or cancelled is
       cancelled.
@@ -534,8 +582,13 @@ def _record_change(
     """Record a change the connection made. Returns what is left to settle,
     if anything, and the result whose sign-in details must reach the person."""
     error = result.group_error
+    too_late = _cancel_too_late(job, claim)
+    # A cancelled job does not run again for its groups.
     groups_pending = (
-        isinstance(error, AdapterError) and error.retryable and claim.attempts < MAX_ATTEMPTS
+        isinstance(error, AdapterError)
+        and error.retryable
+        and claim.attempts < MAX_ATTEMPTS
+        and not too_late
     )
     # IAM must know a new account even if a newer workflow replaces this
     # job. A disabled account stays active in IAM until its groups are done,
@@ -547,6 +600,8 @@ def _record_change(
         except accounts.AccountConflict as exc:
             return Failed(str(exc), retryable=False), None
     if groups_pending:
+        # A cancel before the run for the groups comes too late for the
+        # account: this event tells cancel_job so (_account_step).
         audit.record(
             f"job.{job.action}",
             f"{_success_summary(job, result)}. The groups are not done yet.",
@@ -575,9 +630,10 @@ def _record_change(
         )
         if error is not None and _workflow_is_current(job):
             group_task = _open_group_task(job, error)
+    summary = _success_summary(job, result)
     audit.record(
         f"job.{job.action}",
-        _success_summary(job, result),
+        f"{summary}. {too_late}" if too_late else summary,
         person=job.person,
         target=job,
         details=_result_summary(result),
@@ -585,6 +641,18 @@ def _record_change(
     if current:
         _settle(job, group_task)
     return None, result
+
+
+def _cancel_too_late(job: Job, claim: Job) -> str:
+    """Why a cancel came too late for the change this claim made, if one
+    did: the job or its workflow was cancelled while the job ran."""
+    if _claimed_elsewhere(job, claim):
+        return ""
+    if job.status == Job.Status.CANCELLED:
+        return "It was cancelled while it ran, too late to stop the change."
+    if _replaced(job):
+        return "Its workflow was cancelled or replaced while it ran, too late to stop the change."
+    return ""
 
 
 def _result_summary(result: EnsureResult | DisableResult) -> dict:

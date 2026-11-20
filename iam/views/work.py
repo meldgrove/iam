@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from ..jobs import ActionError, approve_job, cancel_task, complete_task, reject_job, retry_job
-from ..lifecycle import LifecycleError, cancel_workflow
+from ..lifecycle import LifecycleError, cancel_workflow, too_late_for
 from ..models import AuditEvent, Connection, Job, Task, Workflow
 from ..permissions import admin_required, approver_required, viewer_required
 from .base import paginate
@@ -33,12 +33,15 @@ def workflow_list(request):
 @viewer_required
 def workflow_detail(request, pk):
     workflow = get_object_or_404(Workflow.objects.select_related("person", "created_by"), pk=pk)
+    jobs = list(workflow.jobs.select_related("connection").order_by("connection__name"))
+    running = [job for job in jobs if job.status == Job.Status.RUNNING]
     return render(
         request,
         "iam/workflows/detail.html",
         {
             "workflow": workflow,
-            "jobs": workflow.jobs.select_related("connection").order_by("connection__name"),
+            "jobs": jobs,
+            "too_late": too_late_for(running) if running else "",
             "tasks": Task.objects.filter(job__workflow=workflow).select_related("connection"),
         },
     )
@@ -49,11 +52,12 @@ def workflow_detail(request, pk):
 def workflow_cancel(request, pk):
     workflow = get_object_or_404(Workflow, pk=pk)
     try:
-        cancel_workflow(workflow, actor=request.user)
+        running = cancel_workflow(workflow, actor=request.user)
     except LifecycleError as exc:
         messages.error(request, str(exc))
     else:
-        messages.success(request, "Cancelled the workflow.")
+        too_late = f" {too_late_for(running)}" if running else ""
+        messages.success(request, f"Cancelled the workflow.{too_late}")
     return redirect("workflow_detail", pk=pk)
 
 

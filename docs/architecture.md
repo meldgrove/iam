@@ -32,9 +32,15 @@ cannot (retry or complete its steps instead). A cancelled onboarding returns
 the person to planned, and the schedule does not start it again until the
 start date or the access profile changes (an approver can still start it).
 Onboarding refuses a last day that has passed: clear or change it first, or
-the schedule would offboard the person right after. A job that is running
-when its workflow ends finishes, and its result (the account, an initial
-password) is kept. Offboarding turns off the person's app user at once.
+the schedule would offboard the person right after. Offboarding turns off the
+person's app user at once.
+
+A cancel comes too late for a job that is already running: its change may
+already have happened in the connected app. The job finishes and its result
+(the account, an initial password) is kept. A change that was made is never
+shown as cancelled: the job ends as done, and its history says that the
+cancel came too late. Cancelling a workflow names the jobs that were already
+running, and the workflow's page names them while they run.
 
 **Jobs.** The worker (`manage.py run_worker`) runs queued jobs. For a
 connection in automatic mode it calls the adapter:
@@ -66,7 +72,10 @@ and press Retry, or to make the change by hand and complete the task. Error
 messages never contain credentials or provider responses.
 
 **A stopped worker.** A job whose worker stopped mid-run (a deploy, a crash,
-a lost database) runs again once its lease (`JOB_LEASE_SECONDS`) runs out.
+a lost database) runs again once its lease (`JOB_LEASE_SECONDS`) runs out,
+or is cancelled if its workflow was cancelled or replaced meanwhile. A worker
+that was only slow and still makes the change after that cancel ends the job
+as done, and the job's history says the cancel came too late.
 If the app had already created the account, the sign-in details that run
 arranged are lost: when the next run finds an account the app does not know
 as the person's, at an app that hands out sign-in details (Google Workspace,
@@ -78,7 +87,12 @@ password is still sent. Passing errors run the job again for the groups; the
 account change is audited before that. Once retries run out, or
 at once for any other error, the job succeeds and a failure task names the
 groups to fix by hand. A later workflow that plans a job at the same
-connection cancels that task, because that job does the groups again.
+connection cancels that task, because that job does the groups again. A job
+cancelled while it ran is not run again for its groups: it succeeds, and a
+failure task names the groups unless its workflow was cancelled or replaced
+too. A cancel while a job waits to run again for its groups comes too late
+for its account step as well: the job ends as done, its history says so,
+and the groups stay as they are.
 
 **Manual tasks.** A connection in manual mode, a read-only or turned-off
 connection, and apps without write support (Slack, Notion, other apps) get a

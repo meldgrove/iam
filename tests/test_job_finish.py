@@ -8,6 +8,9 @@ ran out, or someone may close the job. Each row pins what the app records
 then: the job's and the workflow's status, the open tasks, the audit
 events, the person's account, and whether the sign-in details reached the
 person.
+
+A change the connection made is never shown as cancelled: a cancel that
+came while it was under way came too late, and the job's history says so.
 """
 
 from datetime import timedelta
@@ -33,6 +36,8 @@ pytestmark = pytest.mark.django_db
 SITUATIONS = ("current", "replaced", "claimed elsewhere", "closed meanwhile")
 
 SIGNED_IN = ["credentials.sent", "job.ensure_account"]
+# The job's history says that the cancel came too late for the change.
+TOO_LATE = ["credentials.sent", "job.ensure_account (too late)"]
 NOTHING = []
 
 # outcome: one row per situation, in the order of SITUATIONS:
@@ -41,25 +46,25 @@ EXPECTED = {
     # The account was created with its groups.
     "changed": [
         ("succeeded", "completed", [], SIGNED_IN, "active", 1),
-        ("succeeded", "cancelled", [], SIGNED_IN, "active", 1),
+        ("succeeded", "cancelled", [], TOO_LATE, "active", 1),
         ("running", "running", [], SIGNED_IN, "active", 1),
-        # A success counts even for a job closed while it ran (a question
-        # for later: keep it cancelled and only record the account?).
-        ("succeeded", "completed", [], SIGNED_IN, "active", 1),
+        ("succeeded", "completed", [], TOO_LATE, "active", 1),
     ],
     # The account was created; a group step failed for good.
     "groups failed": [
         ("succeeded", "completed", ["failure"], SIGNED_IN, "active", 1),
-        ("succeeded", "cancelled", [], SIGNED_IN, "active", 1),
+        ("succeeded", "cancelled", [], TOO_LATE, "active", 1),
         ("running", "running", [], SIGNED_IN, "active", 1),
-        ("succeeded", "completed", ["failure"], SIGNED_IN, "active", 1),
+        ("succeeded", "completed", ["failure"], TOO_LATE, "active", 1),
     ],
-    # The account was created; a group step failed for now, before the last attempt.
+    # The account was created; a group step failed for now, before the last
+    # attempt. A cancelled job does not run again for the groups: a newer
+    # workflow does them, or else a person.
     "groups pending": [
         ("queued", "running", [], SIGNED_IN, "active", 1),
-        ("cancelled", "cancelled", [], SIGNED_IN, "active", 1),
+        ("succeeded", "cancelled", [], TOO_LATE, "active", 1),
         ("running", "running", [], SIGNED_IN, "active", 1),
-        ("cancelled", "completed", [], SIGNED_IN, "active", 1),
+        ("succeeded", "completed", ["failure"], TOO_LATE, "active", 1),
     ],
     # The account changed, but by then it was linked to someone else.
     "linked to someone else": [
@@ -144,6 +149,15 @@ def arrange_situation(situation, claim, person):
             refresh_workflow(claim.workflow)
 
 
+def history(job):
+    """The job's audit events, marked where one says the cancel came too late."""
+    events = AuditEvent.objects.filter(target_type="job", target_id=str(job.pk))
+    return sorted(
+        f"{action} (too late)" if "too late" in summary else action
+        for action, summary in events.values_list("action", "summary")
+    )
+
+
 def observe(job, person, sent):
     job.refresh_from_db()
     return (
@@ -152,11 +166,7 @@ def observe(job, person, sent):
         sorted(
             Task.objects.filter(job=job, status=Task.Status.OPEN).values_list("kind", flat=True)
         ),
-        sorted(
-            AuditEvent.objects.filter(target_type="job", target_id=str(job.pk)).values_list(
-                "action", flat=True
-            )
-        ),
+        history(job),
         Account.objects.filter(person=person).values_list("status", flat=True).first(),
         len(sent),
     )

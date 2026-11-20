@@ -262,7 +262,10 @@ def _over_removal_limit(connection, settings: AppSettings) -> bool:
     return recent + 1 > settings.removal_limit_per_day
 
 
-def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
+def cancel_workflow(workflow: Workflow, *, actor: User) -> list[Job]:
+    """Cancel an onboarding or access update. Returns the jobs that were
+    already running: the cancel comes too late for them, and their changes
+    go ahead."""
     if workflow.kind == Workflow.Kind.OFFBOARDING:
         raise LifecycleError(
             "Offboarding cannot be cancelled. Retry or complete its steps instead."
@@ -272,7 +275,7 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
         workflow = Workflow.objects.select_for_update().get(pk=workflow.pk)
         if not workflow.is_open:
             raise LifecycleError("This workflow is already finished.")
-        stop_workflow(workflow, actor=actor, note="Workflow cancelled.")
+        running = stop_workflow(workflow, actor=actor, note="Workflow cancelled.")
         person = workflow.person
         if workflow.kind == Workflow.Kind.ONBOARDING and person.status == Person.Status.ONBOARDING:
             # Cancelled stays cancelled: the schedule waits for a new start
@@ -280,13 +283,26 @@ def cancel_workflow(workflow: Workflow, *, actor: User) -> None:
             person.status = Person.Status.PLANNED
             person.onboarding_paused = True
             person.save(update_fields=["status", "onboarding_paused", "updated_at"])
+        summary = f"Cancelled {workflow.get_kind_display().lower()} of {person.full_name}"
         audit.record(
             "workflow.cancelled",
-            f"Cancelled {workflow.get_kind_display().lower()} of {person.full_name}",
+            f"{summary}. {too_late_for(running)}" if running else summary,
             actor=actor,
             person=person,
             target=workflow,
         )
+    return running
+
+
+def too_late_for(running: list[Job]) -> str:
+    """What a cancel means for the jobs that were already running."""
+    names = sorted({job.connection.name for job in running})
+    where = ", ".join(names[:-1]) + f" and {names[-1]}" if len(names) > 1 else names[0]
+    if len(running) == 1:
+        return f"Too late for the job at {where}: it was already running, so its change goes ahead."
+    return (
+        f"Too late for the jobs at {where}: they were already running, so their changes go ahead."
+    )
 
 
 @transaction.atomic
