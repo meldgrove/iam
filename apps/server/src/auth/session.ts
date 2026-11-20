@@ -13,7 +13,15 @@ import { getDb } from "../db/client";
  * active.
  */
 
-export const SESSION_COOKIE = "iam_session";
+/**
+ * The cookie's name. On HTTPS with the `__Host-` prefix: the browser then
+ * takes it only from this host itself, never from a sibling subdomain.
+ */
+export function cookieName(name: string): string {
+  return secureCookies() ? `__Host-${name}` : name;
+}
+
+const sessionCookie = () => cookieName("iam_session");
 
 const hash = (token: string) => createHash("sha256").update(token).digest("hex");
 
@@ -31,7 +39,7 @@ export async function startSession(c: Context, user: Pick<User, "id">, idToken =
   await db.insert(sessions).values({ id: hash(token), userId: user.id, expiresAt, idToken });
   await db.update(users).set({ lastLogin: new Date() }).where(eq(users.id, user.id));
   await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
-  setCookie(c, SESSION_COOKIE, token, {
+  setCookie(c, sessionCookie(), token, {
     httpOnly: true,
     secure: secureCookies(),
     sameSite: "Lax",
@@ -43,7 +51,7 @@ export async function startSession(c: Context, user: Pick<User, "id">, idToken =
 
 /** The signed-in user of the request and the provider's ID token of the session, or null. */
 export async function currentSession(c: Context): Promise<{ user: User; idToken: string } | null> {
-  const token = getCookie(c, SESSION_COOKIE);
+  const token = getCookie(c, sessionCookie());
   if (!token || token.length > 200) return null;
   const [row] = await getDb()
     .select({ user: users, idToken: sessions.idToken })
@@ -55,8 +63,8 @@ export async function currentSession(c: Context): Promise<{ user: User; idToken:
 
 /** Ends the request's session; returns the provider's ID token it had. */
 export async function endSession(c: Context): Promise<string> {
-  const token = getCookie(c, SESSION_COOKIE);
-  deleteCookie(c, SESSION_COOKIE, { path: "/", secure: secureCookies() });
+  const token = getCookie(c, sessionCookie());
+  deleteCookie(c, sessionCookie(), { path: "/", secure: secureCookies() });
   if (!token || token.length > 200) return "";
   const [row] = await getDb()
     .delete(sessions)

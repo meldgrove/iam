@@ -44,7 +44,7 @@ describe("jobs page", () => {
           result: { would: "create the account", groups_to_add: "staff", groups_to_remove: "none" },
         }),
       ]),
-      "GET /group-connections": { body: [] },
+      "GET /connection-names": { body: [] },
     });
     renderPage(<JobsPage search={{}} onSearch={() => undefined} />);
     const rows = (await screen.findAllByRole("row")).slice(1);
@@ -59,7 +59,7 @@ describe("jobs page", () => {
 
   it("shows a viewer no actions", async () => {
     user.current = me("viewer");
-    stubApi({ "GET /jobs": page([jobRow({ status: "failed" })]), "GET /group-connections": { body: [] } });
+    stubApi({ "GET /jobs": page([jobRow({ status: "failed" })]), "GET /connection-names": { body: [] } });
     renderPage(<JobsPage search={{}} onSearch={() => undefined} />);
     expect(await screen.findByText("Ada Lovelace")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
@@ -69,10 +69,8 @@ describe("jobs page", () => {
     user.current = me("viewer");
     const fetch = stubApi({
       "GET /jobs": page([]),
-      "GET /group-connections": {
-        body: [
-          { id: 5, name: "Keycloak", enabled: true, groupLabel: "Groups", supportsGroups: true, groups: [] },
-        ],
+      "GET /connection-names": {
+        body: [{ id: 5, name: "Keycloak" }],
       },
     });
     const onSearch = vi.fn();

@@ -44,6 +44,8 @@ describe("access profile page", () => {
     stubApi({ "GET /me": { body: viewer }, "GET /profiles/5": { body: profile } });
     renderPage(<ProfilePage id={5} />);
     expect(await screen.findByRole("heading", { name: "Staff" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "Grants" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "People" })).toBeVisible();
     expect(screen.getByText("Default for: Employee, Intern")).toBeVisible();
     const [keycloak, figma] = screen.getAllByRole("row");
     expect(keycloak).toHaveTextContent("Keycloak");

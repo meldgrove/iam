@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { ROLE_LABELS } from "@iam/shared/labels";
 import { config } from "../config";
-import { users, type Role, type User } from "../db/schema";
+import { sessions, users, type Role, type User } from "../db/schema";
 import { atomic, q } from "../db/tx";
 import { record } from "../engine/audit";
 
@@ -155,6 +155,7 @@ async function updateUser(found: User, claims: Claims): Promise<User> {
     const fields = Object.keys(changes).map((key) => FIELD_NAMES[key] ?? key);
     if (fields.length === 0) return user;
     const [updated] = await q().update(users).set(changes).where(eq(users.id, user.id)).returning();
+    if (changes.isActive === false) await q().delete(sessions).where(eq(sessions.userId, user.id));
     const details: Record<string, unknown> = { fields: [...fields].sort() };
     if ("role" in changes) details.role = [user.role, updated!.role];
     if ("isActive" in changes) details.is_active = [user.isActive, updated!.isActive];

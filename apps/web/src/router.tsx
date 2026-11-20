@@ -4,10 +4,15 @@ import { LoadingState } from "@meldgrove/ui/states";
 import { queryClient } from "@/lib/query";
 import { rootRoute } from "@/routes/root";
 import { appRoute } from "@/routes/app";
-import { devSignInRoute, signInRoute } from "@/routes/sign-in";
+import { deniedRoute, devSignInRoute, signInRoute } from "@/routes/sign-in";
 import { appRoutes } from "@/modules";
 
-const routeTree = rootRoute.addChildren([signInRoute, devSignInRoute, appRoute.addChildren(appRoutes)]);
+const routeTree = rootRoute.addChildren([
+  signInRoute,
+  devSignInRoute,
+  deniedRoute,
+  appRoute.addChildren(appRoutes),
+]);
 
 /** The app's router; tests pass a memory history and their own query client. */
 export function createAppRouter(options: { history?: RouterHistory; queryClient?: QueryClient } = {}) {

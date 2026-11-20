@@ -50,9 +50,15 @@ describe("access profile form", () => {
     expect(screen.getByText("Automatic")).toBeVisible();
     expect(screen.getByText("turned off · Manual")).toBeVisible();
     await user.click(screen.getByRole("checkbox", { name: "Employee" }));
-    // Choosing a group grants the account too.
+    // The account and its groups are independent: a group alone grants nothing,
+    // and unchecking the account keeps its groups chosen.
+    const keycloak = screen.getByRole("checkbox", { name: "Account in Keycloak" });
     await user.click(screen.getByRole("checkbox", { name: "admins" }));
-    expect(screen.getByRole("checkbox", { name: "Account in Keycloak" })).toBeChecked();
+    expect(keycloak).not.toBeChecked();
+    await user.click(keycloak);
+    await user.click(keycloak);
+    expect(screen.getByRole("checkbox", { name: "admins" })).toBeChecked();
+    await user.click(keycloak);
     await user.click(screen.getByRole("checkbox", { name: "Account in Figma" }));
     expect(screen.getByText("No teams imported yet.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -66,6 +72,20 @@ describe("access profile form", () => {
         { connectionId: 2, groupIds: [] },
       ],
     });
+  });
+
+  it("grants nothing for groups of an unchecked account", async () => {
+    const fetch = stubApi({
+      "GET /group-connections": { body: connections },
+      "POST /profiles": { status: 201, body: { id: 6, message: "Saved Groups only." } },
+    });
+    const user = userEvent.setup();
+    renderPage(<ProfileFormPage />);
+    await user.type(await screen.findByLabelText("Name"), "Groups only");
+    await user.click(screen.getByRole("checkbox", { name: "staff" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requests(fetch, "POST /profiles")).toHaveLength(1));
+    expect(requests(fetch, "POST /profiles")[0]!.body).toMatchObject({ grants: [] });
   });
 
   it("drops a grant that is unchecked and a group no longer listed", async () => {

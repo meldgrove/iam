@@ -51,7 +51,9 @@ export function TeamPage({ id }: { id: number }) {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Groups</CardTitle>
+            <CardTitle>
+              <h2>Groups</h2>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {team.groups.length === 0 ? (
@@ -75,7 +77,9 @@ export function TeamPage({ id }: { id: number }) {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Members</CardTitle>
+            <CardTitle>
+              <h2>Members</h2>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {team.members.length === 0 ? (

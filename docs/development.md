@@ -4,11 +4,11 @@
 
 `compose.dev.yaml` runs the services the app talks to:
 
-| Service       | Address                                      | Login                                                                                    |
-| ------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| PostgreSQL 18 | `localhost:55438`, database `iam`            | `iam` / `iam`                                                                            |
-| Keycloak 26   | http://localhost:8098                        | console `admin` / `admin`; realm `iam`, user `admin` / `admin` (member of `/iam/admins`) |
-| Mailpit       | http://localhost:8027, SMTP `localhost:1027` | none                                                                                     |
+| Service | Address | Login |
+| --- | --- | --- |
+| PostgreSQL 18 | `localhost:55438`, database `iam` | `iam` / `iam` |
+| Keycloak 26 | http://localhost:8098 | console `admin` / `admin`; realm `iam`, user `admin` / `admin` (member of `/iam/admins`) |
+| Mailpit | http://localhost:8027, SMTP `localhost:1027` | none |
 
 The realm (`dev/keycloak/iam-realm.json`) has the sign-in client `iam`
 (secret `iam-dev-client-secret`, with a group claim), the provisioning client
@@ -32,11 +32,11 @@ Vite's address, which the development realm allows as a sign-in redirect.
 
 The repository is an npm workspace:
 
-| Folder            | What                                                                                                                                                                                                                                                                                                                          |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/server`     | Hono server: the API (`src/modules`), sign-in (`src/auth`, `src/http/sign-in.ts`), the engine (`src/engine`), the adapters (`src/adapters`), the worker (`src/worker`), the database (`src/db`: Drizzle schema, migrations in `drizzle/`, the takeover of a Django database in `django.ts`), operator commands (`src/cli.ts`) |
-| `apps/web`        | React web app: the app frame and pages from `@meldgrove/ui`, TanStack Router and Query; one folder per area in `src/modules`                                                                                                                                                                                                  |
-| `packages/shared` | API types and request schemas (`src/api/iam.ts`), labels of the choices (`src/labels.ts`)                                                                                                                                                                                                                                     |
+| Folder | What |
+| --- | --- |
+| `apps/server` | Hono server: the API (`src/modules`), sign-in (`src/auth`, `src/http/sign-in.ts`), the engine (`src/engine`), the adapters (`src/adapters`), the worker (`src/worker`), the database (`src/db`: Drizzle schema, migrations in `drizzle/`, the takeover of a Django database in `django.ts`), operator commands (`src/cli.ts`) |
+| `apps/web` | React web app: the app frame and pages from `@meldgrove/ui`, TanStack Router and Query; one folder per area in `src/modules` |
+| `packages/shared` | API types and request schemas (`src/api/iam.ts`), labels of the choices (`src/labels.ts`) |
 
 The theme, the components, the app frame, the update button and the eye
 button of secret fields come from the npm package `@meldgrove/ui`, which the

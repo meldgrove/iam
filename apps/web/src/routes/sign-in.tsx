@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createRoute, redirect } from "@tanstack/react-router";
+import { createRoute, notFound, redirect } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { LogIn, ShieldCheck } from "lucide-react";
@@ -9,7 +9,7 @@ import { NativeSelect, NativeSelectOption } from "@meldgrove/ui/native-select";
 import { Label } from "@meldgrove/ui/label";
 import { SignInPage as SignInLayout } from "@meldgrove/ui/sign-in-page";
 import { Spinner } from "@meldgrove/ui/spinner";
-import { DEFAULT_APP_NAME, useAuthConfig } from "@/lib/auth-config";
+import { authConfigQuery, DEFAULT_APP_NAME, useAuthConfig } from "@/lib/auth-config";
 import { api, apiUrl, errorMessage } from "@/lib/api";
 import { REPOSITORY_URL } from "@/lib/repository";
 import { rootRoute } from "./root";
@@ -157,6 +157,20 @@ function DevSignInPage() {
 export const devSignInRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login/dev",
-  beforeLoad: () => leaveWhenSignedIn(undefined),
+  beforeLoad: async ({ context }) => {
+    // Development only: elsewhere the page does not exist, as in the Django version.
+    const config = await context.queryClient.ensureQueryData(authConfigQuery).catch(() => null);
+    if (!config?.devLogin) throw notFound();
+    await leaveWhenSignedIn(undefined);
+  },
   component: DevSignInPage,
+});
+
+/** The Django version's page for a refused sign-in. */
+export const deniedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/login/denied",
+  beforeLoad: () => {
+    throw redirect({ to: "/login", search: { error: "denied" } });
+  },
 });

@@ -10,6 +10,7 @@ import {
   accounts,
   jobs,
   people,
+  sessions,
   users,
   workflows,
   type Connection,
@@ -132,8 +133,11 @@ export async function startWorkflow(
       // access, so the person still becomes active at its end.
       kind = "onboarding";
     }
+    // Every workflow can disable accounts (offboarding all of them, the others
+    // where access was taken away): nobody starts one for someone with a higher
+    // role in this app than their own.
+    if (actor !== null) await checkMayChange(person, actor, kind);
     if (kind === "offboarding") {
-      if (actor !== null) await checkMayOffboard(person, actor);
       if (automatic) {
         // The last day may have changed since the schedule selected this person.
         if (!person.endDate || person.endDate >= today()) {
@@ -219,16 +223,17 @@ export async function higherRoleAppUser(
 }
 
 /**
- * Offboarding turns off the person's app user, so nobody may offboard
- * someone with a higher role in this app than their own. The schedule (no
- * actor) still offboards everyone after their last day.
+ * Offboarding turns off the person's app user, and every workflow may
+ * disable their accounts (the sign-in provider's too), so nobody may start
+ * one for someone with a higher role in this app than their own. The
+ * schedule (no actor) still offboards everyone after their last day.
  */
-async function checkMayOffboard(person: Person, actor: Pick<User, "role">): Promise<void> {
+async function checkMayChange(person: Person, actor: Pick<User, "role">, kind: WorkflowKind): Promise<void> {
   const user = await higherRoleAppUser(person, actor);
   if (user) {
     throw new LifecycleError(
       `${fullName(person)} is ${withArticle(ROLE_LABELS[user.role].toLowerCase())} of this ` +
-        "app. Only someone with that role can start the offboarding.",
+        `app. Only someone with that role can start the ${WORKFLOW_KIND_LABELS[kind].toLowerCase()}.`,
     );
   }
 }
@@ -245,6 +250,8 @@ async function deactivateAppUser(person: Person, actor: Actor): Promise<void> {
     .limit(1);
   if (!user) return;
   await q().update(users).set({ isActive: false }).where(eq(users.id, user.id));
+  // Turned on again later, the user signs in anew.
+  await q().delete(sessions).where(eq(sessions.userId, user.id));
   await record(
     "user.deactivated",
     `Deactivated app user ${user.email} because ${fullName(person)} is offboarded`,

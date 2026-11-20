@@ -78,8 +78,9 @@ export function TasksTable({ tasks, showPerson = true }: { tasks: TaskRow[]; sho
         <TableRow>
           <TableHead>Task</TableHead>
           {showPerson ? <TableHead>Person</TableHead> : null}
-          <TableHead>Created</TableHead>
+          <TableHead>Kind</TableHead>
           <TableHead>Status</TableHead>
+          <TableHead>Created</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -87,18 +88,18 @@ export function TasksTable({ tasks, showPerson = true }: { tasks: TaskRow[]; sho
           <TableRow key={task.id}>
             <TableCell className="whitespace-normal">
               <TextLink to={`/tasks/${task.id}`}>{task.title}</TextLink>
-              <div className="text-muted-foreground text-xs">{TASK_KIND_LABELS[task.kind]}</div>
             </TableCell>
             {showPerson ? (
               <TableCell>
                 {task.person ? <TextLink to={`/people/${task.person.id}`}>{task.person.name}</TextLink> : "—"}
               </TableCell>
             ) : null}
-            <TableCell className="text-muted-foreground whitespace-nowrap">
-              {format.dateTime(task.createdAt)}
-            </TableCell>
+            <TableCell>{TASK_KIND_LABELS[task.kind]}</TableCell>
             <TableCell>
               <StatusBadge value={task.status} labels={TASK_STATUS_LABELS} />
+            </TableCell>
+            <TableCell className="text-muted-foreground whitespace-nowrap">
+              {format.dateTime(task.createdAt)}
             </TableCell>
           </TableRow>
         ))}
@@ -213,6 +214,7 @@ export function WorkflowsTable({
           <TableHead>Workflow</TableHead>
           {showPerson ? <TableHead>Person</TableHead> : null}
           <TableHead>Started</TableHead>
+          <TableHead>By</TableHead>
           <TableHead>Status</TableHead>
         </TableRow>
       </TableHeader>
@@ -232,8 +234,8 @@ export function WorkflowsTable({
             ) : null}
             <TableCell className="text-muted-foreground whitespace-nowrap">
               {format.dateTime(workflow.createdAt)}
-              <div className="text-xs">{workflow.createdBy ?? "the schedule"}</div>
             </TableCell>
+            <TableCell>{workflow.createdBy ?? "Schedule"}</TableCell>
             <TableCell>
               <StatusBadge value={workflow.status} labels={WORKFLOW_STATUS_LABELS} />
             </TableCell>

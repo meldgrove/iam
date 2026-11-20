@@ -60,7 +60,9 @@ export function ProfilePage({ id }: { id: number }) {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Grants</CardTitle>
+            <CardTitle>
+              <h2>Grants</h2>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {profile.grants.length === 0 ? (
@@ -110,7 +112,9 @@ export function ProfilePage({ id }: { id: number }) {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>People</CardTitle>
+            <CardTitle>
+              <h2>People</h2>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {profile.people.length === 0 ? (

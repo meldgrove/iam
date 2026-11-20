@@ -44,6 +44,13 @@ export function monitored<T>(slug: string, schedule: { minutes: number }, job: (
   });
 }
 
+/** The DSN without a secret key (old DSNs had one): it goes into every page. */
+function publicDsn(dsn: string): string {
+  const url = new URL(dsn);
+  url.password = "";
+  return url.toString();
+}
+
 const ATTRIBUTE_ESCAPES: Record<string, string> = { "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" };
 
 /** Adds the web app's Sentry settings to index.html; the web app reports only with them. */
@@ -51,7 +58,7 @@ export function withErrorReportingSettings(indexHtml: string): string {
   const settings = config();
   if (!settings.SENTRY_DSN) return indexHtml;
   const content = JSON.stringify({
-    dsn: settings.SENTRY_DSN,
+    dsn: publicDsn(settings.SENTRY_DSN),
     environment: settings.SENTRY_ENVIRONMENT ?? settings.NODE_ENV,
     release: errorReportRelease(settings),
     tracesSampleRate: settings.SENTRY_TRACES_SAMPLE_RATE,

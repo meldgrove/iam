@@ -303,8 +303,11 @@ router.put("/people/:id", async (c) => {
     // status a workflow changed meanwhile.
     const person = await lockPerson(id);
     const values = await cleanPerson(input, id);
+    // As Django's changed_data: the profile counts as changed when the choice
+    // submitted differs from the saved one, before an empty choice becomes the default.
+    const submitted: Values = { ...values, accessProfileId: input.accessProfileId };
     const changed = Object.keys(FIELD_NAMES).filter(
-      (key) => (person[key as keyof Person] ?? null) !== (values[key as keyof Values] ?? null),
+      (key) => (person[key as keyof Person] ?? null) !== (submitted[key as keyof Values] ?? null),
     );
     // Changing the last day can cause the worker to turn off the linked app user.
     if (changed.includes("endDate") && (await higherRoleAppUser(person, user))) {

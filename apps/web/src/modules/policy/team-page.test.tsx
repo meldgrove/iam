@@ -40,6 +40,8 @@ describe("team page", () => {
     stubApi({ "GET /me": { body: me(false) }, "GET /teams/2": { body: team } });
     renderPage(<TeamPage id={2} />);
     expect(await screen.findByRole("heading", { name: "Product" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "Groups" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "Members" })).toBeVisible();
     expect(screen.getByText("Keycloak: product")).not.toHaveTextContent("missing");
     expect(screen.getByText(/Keycloak: old/)).toHaveTextContent("Keycloak: old missing");
     expect(screen.queryByRole("link", { name: "Edit" })).toBeNull();

@@ -92,6 +92,18 @@ describe("config", () => {
     ).toThrow(/DEV_LOGIN: Only for NODE_ENV=development/);
   });
 
+  it("needs HTTPS in production, except on this machine", () => {
+    const production = { NODE_ENV: "production", ENCRYPTION_KEY: KEY, AUTH_SECRET: "x".repeat(40) };
+    expect(configWith({ ...production, APP_URL: "http://iam.example.invalid" })).toThrow(
+      /APP_URL: Must be an https/,
+    );
+    expect(configWith({ ...production, APP_URL: "http://localhost:8000" })().APP_URL).toBe(
+      "http://localhost:8000",
+    );
+    expect(configWith({ ...production, APP_URL: "https://iam.example.invalid" })().HOST).toBe("0.0.0.0");
+    expect(configWith({ NODE_ENV: "development", HOST: undefined })().HOST).toBe("127.0.0.1");
+  });
+
   it("checks the time zone", () => {
     expect(configWith({ TZ: "Europe/Berlin" })().TZ).toBe("Europe/Berlin");
     expect(configWith({ TZ: "Mars/Olympus" })).toThrow(/Not a time zone/);
@@ -199,7 +211,7 @@ describe("deployment settings", () => {
       const headers = {
         "x-health-token": "sample-header",
         referer: "https://iam.example.invalid/people?q=sample-referrer",
-        cookie: "iam_session=sample-session",
+        cookie: "__Host-iam_session=sample-session",
       };
       const statuses = [
         (await fetch(base + "/api/v1/me?q=sample-search", { headers })).status,

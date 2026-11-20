@@ -42,9 +42,6 @@ export function ProfileFormPage({ id }: { id?: number }) {
   );
 }
 
-/** The groups chosen per connection that grants an account. */
-type Grants = ReadonlyMap<number, ReadonlySet<number>>;
-
 function ProfileForm({
   profile,
   connections,
@@ -57,11 +54,13 @@ function ProfileForm({
   const [name, setName] = useState(profile?.name ?? "");
   const [description, setDescription] = useState(profile?.description ?? "");
   const [defaultFor, setDefaultFor] = useState<PersonType[]>(profile?.defaultFor ?? []);
-  const [grants, setGrants] = useState<Grants>(
-    () =>
-      new Map(
-        profile?.grants.map((grant) => [grant.connection.id, new Set(grant.groups.map((group) => group.id))]),
-      ),
+  // The account checkboxes and the group checkboxes are independent, as in the Django version:
+  // only checked accounts are granted, each with its checked groups.
+  const [granted, setGranted] = useState<ReadonlySet<number>>(
+    () => new Set(profile?.grants.map((grant) => grant.connection.id)),
+  );
+  const [groupIds, setGroupIds] = useState<ReadonlySet<number>>(
+    () => new Set(profile?.grants.flatMap((grant) => grant.groups.map((group) => group.id))),
   );
   const [errors, setErrors] = useState<FieldErrors>({});
 
@@ -89,12 +88,10 @@ function ProfileForm({
       description,
       defaultFor: PERSON_TYPES.filter((type) => defaultFor.includes(type)),
       grants: connections
-        .filter((connection) => grants.has(connection.id))
+        .filter((connection) => granted.has(connection.id))
         .map((connection) => ({
           connectionId: connection.id,
-          groupIds: connection.groups
-            .map((group) => group.id)
-            .filter((groupId) => grants.get(connection.id)!.has(groupId)),
+          groupIds: connection.groups.map((group) => group.id).filter((groupId) => groupIds.has(groupId)),
         })),
     };
     const invalid = validate(profileInputSchema, input);
@@ -102,21 +99,12 @@ function ProfileForm({
     if (!invalid) save.mutate(input);
   };
 
-  const setGranted = (connectionId: number, granted: boolean) =>
-    setGrants((current) => {
-      const next = new Map(current);
-      if (granted) next.set(connectionId, current.get(connectionId) ?? new Set());
-      else next.delete(connectionId);
+  const toggle = (set: typeof setGranted, id: number, checked: boolean) =>
+    set((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
       return next;
-    });
-
-  // Choosing a group grants the account too.
-  const toggleGroup = (connectionId: number, groupId: number, checked: boolean) =>
-    setGrants((current) => {
-      const groups = new Set(current.get(connectionId) ?? []);
-      if (checked) groups.add(groupId);
-      else groups.delete(groupId);
-      return new Map(current).set(connectionId, groups);
     });
 
   const title = profile ? `Edit ${profile.name}` : "Add access profile";
@@ -178,7 +166,9 @@ function ProfileForm({
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Accounts</CardTitle>
+            <CardTitle>
+              <h2>Accounts</h2>
+            </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3">
             {connections.length === 0 ? (
@@ -188,7 +178,6 @@ function ProfileForm({
               </p>
             ) : null}
             {connections.map((connection) => {
-              const selected = grants.get(connection.id);
               return (
                 <fieldset key={connection.id} className="grid gap-3 rounded-lg border p-4">
                   <legend className="sr-only">{connection.name}</legend>
@@ -196,8 +185,8 @@ function ProfileForm({
                     <div className="flex items-center gap-2">
                       <Checkbox
                         id={`grant-${connection.id}`}
-                        checked={selected !== undefined}
-                        onCheckedChange={(checked) => setGranted(connection.id, checked === true)}
+                        checked={granted.has(connection.id)}
+                        onCheckedChange={(checked) => toggle(setGranted, connection.id, checked === true)}
                       />
                       <Label htmlFor={`grant-${connection.id}`} className="font-semibold">
                         Account in {connection.name}
@@ -211,8 +200,8 @@ function ProfileForm({
                   {connection.supportsGroups ? (
                     <GroupChecklist
                       connection={connection}
-                      selected={selected ?? NONE}
-                      onToggle={(groupId, checked) => toggleGroup(connection.id, groupId, checked)}
+                      selected={groupIds}
+                      onToggle={(groupId, checked) => toggle(setGroupIds, groupId, checked)}
                       idPrefix={`grant-${connection.id}-group`}
                       emptyText={`No ${connection.groupLabel.toLowerCase()} imported yet.`}
                     />
@@ -228,5 +217,3 @@ function ProfileForm({
     </Page>
   );
 }
-
-const NONE: ReadonlySet<number> = new Set();

@@ -2,7 +2,6 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, AlertDescription } from "@meldgrove/ui/alert";
 import { Button } from "@meldgrove/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@meldgrove/ui/card";
 import { Page, PageHeader } from "@meldgrove/ui/page";
 import { ErrorState, LoadingState } from "@meldgrove/ui/states";
 import { Table, TableBody, TableCell, TableRow } from "@meldgrove/ui/table";
@@ -12,15 +11,30 @@ import type { Dashboard, PersonDateRow } from "@iam/shared/api/iam";
 import { api } from "@/lib/api";
 import { useFormatter } from "@/lib/format";
 import { useMe } from "@/hooks/use-me";
+import { Section } from "@/components/detail";
 import { StatusBadge } from "@/components/status";
 import { Empty, EventsTable, TextLink } from "@/components/lists";
 
 export const dashboardQuery = { queryKey: ["dashboard"], queryFn: () => api.get<Dashboard>("/dashboard") };
 
-function Stat({ to, value, label, alert }: { to: string; value: number; label: string; alert?: boolean }) {
+/** A count that leads to its list; the list's filter goes in `search` (a query in `to` is lost). */
+function Stat({
+  to,
+  search,
+  value,
+  label,
+  alert,
+}: {
+  to: string;
+  search?: Record<string, string>;
+  value: number;
+  label: string;
+  alert?: boolean;
+}) {
   return (
     <Link
       to={to}
+      search={search}
       className={cn(
         "bg-card hover:bg-accent/40 rounded-xl border p-4 transition-colors",
         alert && value > 0 ? "border-destructive/50" : "",
@@ -39,32 +53,27 @@ function Stat({ to, value, label, alert }: { to: string; value: number; label: s
 function PeopleDates({ title, rows }: { title: string; rows: PersonDateRow[] }) {
   const format = useFormatter();
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {rows.length === 0 ? (
-          <Empty>Nobody.</Empty>
-        ) : (
-          <Table>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell>
-                    <TextLink to={`/people/${row.id}`}>{row.name}</TextLink>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{format.date(row.date)}</TableCell>
-                  <TableCell>
-                    <StatusBadge value={row.status} labels={PERSON_STATUS_LABELS} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+    <Section title={title}>
+      {rows.length === 0 ? (
+        <Empty>Nobody.</Empty>
+      ) : (
+        <Table>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell>
+                  <TextLink to={`/people/${row.id}`}>{row.name}</TextLink>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{format.date(row.date)}</TableCell>
+                <TableCell>
+                  <StatusBadge value={row.status} labels={PERSON_STATUS_LABELS} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Section>
   );
 }
 
@@ -126,27 +135,33 @@ export function DashboardPage() {
       ))}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat to="/tasks" value={data.openTasks} label="Open tasks" alert />
-        <Stat to="/jobs?status=failed" value={data.failedJobs} label="Failed jobs" alert />
-        <Stat to="/jobs?status=held" value={data.heldJobs} label="Removals to approve" alert />
+        <Stat to="/jobs" search={{ status: "failed" }} value={data.failedJobs} label="Failed jobs" alert />
+        <Stat
+          to="/jobs"
+          search={{ status: "held" }}
+          value={data.heldJobs}
+          label="Removals to approve"
+          alert
+        />
         <Stat to="/workflows" value={data.openWorkflows} label="Open workflows" />
-        <Stat to="/people?status=active" value={data.peopleCounts.active} label="Active people" />
-        <Stat to="/people?status=planned" value={data.peopleCounts.planned} label="Planned" />
+        <Stat
+          to="/people"
+          search={{ status: "active" }}
+          value={data.peopleCounts.active}
+          label="Active people"
+        />
+        <Stat to="/people" search={{ status: "planned" }} value={data.peopleCounts.planned} label="Planned" />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <PeopleDates title="Starting in the next 30 days" rows={data.starting} />
         <PeopleDates title="Leaving in the next 30 days" rows={data.leaving} />
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent activity</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <EventsTable events={data.recentEvents} showPerson />
-          <p className="text-sm">
-            <TextLink to="/audit">Full audit log</TextLink>
-          </p>
-        </CardContent>
-      </Card>
+      <Section title="Recent activity">
+        <EventsTable events={data.recentEvents} showPerson />
+        <p className="text-sm">
+          <TextLink to="/audit">Full audit log</TextLink>
+        </p>
+      </Section>
     </Page>
   );
 }

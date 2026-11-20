@@ -8,21 +8,21 @@ connection needs an environment variable.
 
 ### Kinds
 
-| Kind                | What it does                                                       | Adapters                                                                                         |
-| ------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Kind | What it does | Adapters |
+| --- | --- | --- |
 | Accounts and groups | Creates, updates and disables accounts and their group memberships | Keycloak, Google Workspace, SCIM 2.0, HubSpot, Slack, Notion, Relution, Other app (manual tasks) |
-| People import       | Reads people from an HR system                                     | Personio                                                                                         |
-| Email               | Sends task notifications and initial passwords                     | Email (SMTP)                                                                                     |
+| People import | Reads people from an HR system | Personio |
+| Email | Sends task notifications and initial passwords | Email (SMTP) |
 
 ### Modes
 
 Accounts-and-groups connections that can write have a mode:
 
-| Mode      | Effect                                                                                             |
-| --------- | -------------------------------------------------------------------------------------------------- |
-| Automatic | The worker makes each change through the app's API.                                                |
-| Manual    | Each change becomes a task with step-by-step instructions. Completing the task records the change. |
-| Read only | The app compares accounts but never changes them. Each change becomes a task.                      |
+| Mode | Effect |
+| --- | --- |
+| Automatic | The worker makes each change through the app's API. |
+| Manual | Each change becomes a task with step-by-step instructions. Completing the task records the change. |
+| Read only | The app compares accounts but never changes them. Each change becomes a task. |
 
 Slack, Notion and "Other app" never write, so their changes are always tasks.
 
@@ -52,12 +52,12 @@ which settings changed, never their values.
 
 ### Buttons on the connection page
 
-| Button                             | What it does                                                                                                                                                                          |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Test connection                    | Signs in and reads a little data. Shows the result and stores it as the connection's status.                                                                                          |
+| Button | What it does |
+| --- | --- |
+| Test connection | Signs in and reads a little data. Shows the result and stores it as the connection's status. |
 | Import groups (or channels, teams) | Reads the app's groups into the catalog that access profiles and teams choose from. Groups the app no longer lists are marked "no longer listed" and stop counting as desired access. |
-| Compare accounts now               | Reads all accounts. Shown only when the app can list accounts.                                                                                                                        |
-| Import people now                  | For people imports: runs the import at once.                                                                                                                                          |
+| Compare accounts now | Reads all accounts. Shown only when the app can list accounts. |
+| Import people now | For people imports: runs the import at once. |
 
 The worker also runs comparisons and imports on their own, every
 "Compare accounts every (minutes)" or "Import people every (minutes)". 0 turns
@@ -125,20 +125,20 @@ own client (docs/authentication.md).
    without the audience it adds (401).
 4. For the setup email: configure the realm's email settings.
 
-| Field                            | Required | Meaning                                                                                                                                                                                                  |
-| -------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Keycloak URL                     | yes      | Without `/realms/...`. Include `/auth` only for Keycloak versions before 17.                                                                                                                             |
-| Allow plain HTTP                 | no       | Only for a Keycloak in the same private network, e.g. `http://keycloak:8080` in one Docker network. Otherwise the URL must use HTTPS (except localhost).                                                 |
-| Realm                            | yes      | The realm to manage.                                                                                                                                                                                     |
-| Client ID                        | yes      | The client from step 1.                                                                                                                                                                                  |
-| Client secret                    | yes      | Its secret.                                                                                                                                                                                              |
-| Group root                       | no       | Import only groups below this path, e.g. `/apps`. The root group itself is not imported. Empty imports every group.                                                                                      |
-| Username                         | no       | Login name (the work email before @, or the person's username) or the full work email.                                                                                                                   |
-| Send setup email                 | no (on)  | After creating a user, Keycloak emails a link to set a password. Needs a work email and the realm's email settings.                                                                                      |
-| Setup link valid for (hours)     | no (72)  | Lifespan of that link.                                                                                                                                                                                   |
-| Set a temporary password         | no (off) | Instead of the setup email: a temporary password, emailed to the personal address (see Initial passwords). Keycloak asks for a new one at first sign-in. When both options are on, the setup email wins. |
-| End sessions on disable          | no (on)  | Signs the user out of every session when the account is disabled.                                                                                                                                        |
-| Compare accounts every (minutes) | no (360) | 0 turns it off.                                                                                                                                                                                          |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| Keycloak URL | yes | Without `/realms/...`. Include `/auth` only for Keycloak versions before 17. |
+| Allow plain HTTP | no | Only for a Keycloak in the same private network, e.g. `http://keycloak:8080` in one Docker network. Otherwise the URL must use HTTPS (except localhost). |
+| Realm | yes | The realm to manage. |
+| Client ID | yes | The client from step 1. |
+| Client secret | yes | Its secret. |
+| Group root | no | Import only groups below this path, e.g. `/apps`. The root group itself is not imported. Empty imports every group. |
+| Username | no | Login name (the work email before @, or the person's username) or the full work email. |
+| Send setup email | no (on) | After creating a user, Keycloak emails a link to set a password. Needs a work email and the realm's email settings. |
+| Setup link valid for (hours) | no (72) | Lifespan of that link. |
+| Set a temporary password | no (off) | Instead of the setup email: a temporary password, emailed to the personal address (see Initial passwords). Keycloak asks for a new one at first sign-in. When both options are on, the setup email wins. |
+| End sessions on disable | no (on) | Signs the user out of every session when the account is disabled. |
+| Compare accounts every (minutes) | no (360) | 0 turns it off. |
 
 **Behavior**
 
@@ -180,15 +180,15 @@ memberships, through the Admin SDK Directory API.
      `admin.directory.group.member`, and choose an administrator for it to
      act as (**Admin user**).
 
-| Field                             | Required           | Meaning                                                                                                                                                                                                                                                                         |
-| --------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Service account key (JSON)        | yes                | The JSON key from step 1.                                                                                                                                                                                                                                                       |
-| Admin user                        | no                 | Only for domain-wide delegation: the administrator the service account acts as. Empty: the service account acts as itself with its admin roles.                                                                                                                                 |
-| Domains                           | yes                | The Workspace domains, separated by commas, the primary domain first. Work emails of new users must be in one of them; others stop the job. Comparisons read the accounts of all domains either way.                                                                            |
-| Customer ID                       | no (`my_customer`) | Without an admin user, the app looks up the ID from a user of the first domain. Change only if the admin user manages several accounts, or to skip the lookup (Admin console > Account > Account settings).                                                                     |
-| Organizational unit for new users | no (`/`)           | Where new users go, e.g. `/Staff`.                                                                                                                                                                                                                                              |
-| Email a first password            | no (on)            | New users get a generated password that must be changed at first sign-in, emailed to the personal address (see Initial passwords). Off: Google still requires a password, so the app sets a random one nobody knows; set a password in the Admin console or use single sign-on. |
-| Compare accounts every (minutes)  | no (360)           | 0 turns it off.                                                                                                                                                                                                                                                                 |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| Service account key (JSON) | yes | The JSON key from step 1. |
+| Admin user | no | Only for domain-wide delegation: the administrator the service account acts as. Empty: the service account acts as itself with its admin roles. |
+| Domains | yes | The Workspace domains, separated by commas, the primary domain first. Work emails of new users must be in one of them; others stop the job. Comparisons read the accounts of all domains either way. |
+| Customer ID | no (`my_customer`) | Without an admin user, the app looks up the ID from a user of the first domain. Change only if the admin user manages several accounts, or to skip the lookup (Admin console > Account > Account settings). |
+| Organizational unit for new users | no (`/`) | Where new users go, e.g. `/Staff`. |
+| Email a first password | no (on) | New users get a generated password that must be changed at first sign-in, emailed to the personal address (see Initial passwords). Off: Google still requires a password, so the app sets a random one nobody knows; set a password in the Admin console or use single sign-on. |
+| Compare accounts every (minutes) | no (360) | 0 turns it off. |
 
 **Behavior**
 
@@ -212,14 +212,14 @@ Creates, deactivates and groups accounts in any app with a SCIM 2.0 endpoint
 **Set up in the app first:** turn on SCIM provisioning and create a bearer
 token. Note the SCIM base URL that `/Users` and `/Groups` follow.
 
-| Field                            | Required        | Meaning                                                          |
-| -------------------------------- | --------------- | ---------------------------------------------------------------- |
-| SCIM base URL                    | yes             | E.g. `https://app.example.invalid/scim/v2`.                      |
-| Bearer token                     | yes             | The app's SCIM token.                                            |
-| User name                        | no (work email) | What the app's `userName` holds: the work email or the username. |
-| When access ends                 | no (deactivate) | Deactivate the user (`active = false`) or delete it.             |
-| Manage groups                    | no (on)         | Turn off for apps without a `/Groups` endpoint.                  |
-| Compare accounts every (minutes) | no (360)        | 0 turns it off.                                                  |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| SCIM base URL | yes | E.g. `https://app.example.invalid/scim/v2`. |
+| Bearer token | yes | The app's SCIM token. |
+| User name | no (work email) | What the app's `userName` holds: the work email or the username. |
+| When access ends | no (deactivate) | Deactivate the user (`active = false`) or delete it. |
+| Manage groups | no (on) | Turn off for apps without a `/Groups` endpoint. |
+| Compare accounts every (minutes) | no (360) | 0 turns it off. |
 
 **Behavior**
 
@@ -245,12 +245,12 @@ HubSpot's Settings Users API. Groups are HubSpot **teams**.
 `settings.users.read`, `settings.users.write` and `settings.users.teams.read`,
 and copy its access token.
 
-| Field                            | Required | Meaning                                                                         |
-| -------------------------------- | -------- | ------------------------------------------------------------------------------- |
-| Private app access token         | yes      | The private app's token.                                                        |
-| Role ID for new users            | no       | Empty: HubSpot's default access. The ID is in Settings > Users & Teams > Roles. |
-| Send HubSpot's welcome email     | no (on)  | New users get HubSpot's invitation to set their password.                       |
-| Compare accounts every (minutes) | no (360) | 0 turns it off.                                                                 |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| Private app access token | yes | The private app's token. |
+| Role ID for new users | no | Empty: HubSpot's default access. The ID is in Settings > Users & Teams > Roles. |
+| Send HubSpot's welcome email | no (on) | New users get HubSpot's invitation to set their password. |
+| Compare accounts every (minutes) | no (360) | 0 turns it off. |
 
 **Behavior**
 
@@ -276,12 +276,12 @@ Business+). Groups are **channels**.
 Slack app with the bot scopes `users:read`, `users:read.email`,
 `channels:read` and `groups:read`, install it, and copy the `xoxb-` token.
 
-| Field                            | Required        | Meaning                                                                                                   |
-| -------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------- |
-| Bot token                        | no              | Without it, changes are tasks, channels are added by hand and accounts are not compared.                  |
-| Workspace URL                    | no              | Linked in every task.                                                                                     |
-| Invite as guests                 | no (`external`) | Person types invited as multi-channel guests, comma-separated. Everyone else is invited as a full member. |
-| Compare accounts every (minutes) | no (360)        | 0 turns it off. Needs the bot token.                                                                      |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| Bot token | no | Without it, changes are tasks, channels are added by hand and accounts are not compared. |
+| Workspace URL | no | Linked in every task. |
+| Invite as guests | no (`external`) | Person types invited as multi-channel guests, comma-separated. Everyone else is invited as a full member. |
+| Compare accounts every (minutes) | no (360) | 0 turns it off. Needs the bot token. |
 
 **Behavior**
 
@@ -301,11 +301,11 @@ Notion's public API cannot invite or remove members. No groups.
 **Optional:** an internal integration token with the capability "Read user
 information including email addresses" lets the app read members.
 
-| Field                            | Required | Meaning                                                      |
-| -------------------------------- | -------- | ------------------------------------------------------------ |
-| Integration token                | no       | Without it, changes are tasks and accounts are not compared. |
-| Workspace URL                    | no       | Linked in every task.                                        |
-| Compare accounts every (minutes) | no (360) | 0 turns it off. Needs the token.                             |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| Integration token | no | Without it, changes are tasks and accounts are not compared. |
+| Workspace URL | no | Linked in every task. |
+| Compare accounts every (minutes) | no (360) | 0 turns it off. Needs the token. |
 
 **Behavior**
 
@@ -324,14 +324,14 @@ memberships, and deactivates users on offboarding.
 that may only manage the organization's users and group memberships. Note the
 organization UUID.
 
-| Field                                  | Required | Meaning                                                                  |
-| -------------------------------------- | -------- | ------------------------------------------------------------------------ |
-| Relution address                       | yes      | The origin only, without a path or credentials. HTTPS, except localhost. |
-| Organization UUID                      | yes      | Users are created in this organization; others are ignored.              |
-| API access token                       | yes      | The token.                                                               |
-| Sign in only through single sign-on    | no (on)  | New users get no Relution password.                                      |
-| Use the work email as managed Apple ID | no (on)  | Sets the managed Apple ID to the work email.                             |
-| Compare accounts every (minutes)       | no (360) | 0 turns it off.                                                          |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| Relution address | yes | The origin only, without a path or credentials. HTTPS, except localhost. |
+| Organization UUID | yes | Users are created in this organization; others are ignored. |
+| API access token | yes | The token. |
+| Sign in only through single sign-on | no (on) | New users get no Relution password. |
+| Use the work email as managed Apple ID | no (on) | Sets the managed Apple ID to the work email. |
+| Compare accounts every (minutes) | no (360) | 0 turns it off. |
 
 **Behavior**
 
@@ -358,11 +358,11 @@ For any app without an API. Every account or group change becomes a task with
 the steps below; completing the task records the change. Groups are added by
 hand on the connection page.
 
-| Field        | Required | Meaning                                            |
-| ------------ | -------- | -------------------------------------------------- |
-| App name     | yes      | Shown in tasks.                                    |
-| Admin page   | no       | Linked in every task.                              |
-| Instructions | no       | Added to every task, e.g. which license to assign. |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| App name | yes | Shown in tasks. |
+| Admin page | no | Linked in every task. |
+| Instructions | no | Added to every task, e.g. which license to assign. |
 
 ## Personio
 
@@ -373,16 +373,16 @@ Personio API v1.
 **Set up in Personio first:** create API credentials in Settings >
 Integrations > API credentials.
 
-| Field                         | Required                       | Meaning                                                                                                                        |
-| ----------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Client ID                     | yes                            | From the API credentials.                                                                                                      |
-| Client secret                 | yes                            | From the API credentials.                                                                                                      |
-| API URL                       | no (`https://api.personio.de`) | Change only for a different Personio API host.                                                                                 |
-| Work email domains            | no                             | Comma-separated. A Personio email outside these domains becomes the personal email. Empty: Personio's email is the work email. |
-| Person types                  | no                             | One line per value: `Personio value = employee`, `intern`, `freelancer`, `volunteer` or `external`.                            |
-| Team attribute                | no (`department`)              | The Personio attribute whose value names the team.                                                                             |
-| List leavers for (days)       | no (30)                        | People who left longer ago are no longer imported.                                                                             |
-| Import people every (minutes) | no (60)                        | 0 imports only when started by hand.                                                                                           |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| Client ID | yes | From the API credentials. |
+| Client secret | yes | From the API credentials. |
+| API URL | no (`https://api.personio.de`) | Change only for a different Personio API host. |
+| Work email domains | no | Comma-separated. A Personio email outside these domains becomes the personal email. Empty: Personio's email is the work email. |
+| Person types | no | One line per value: `Personio value = employee`, `intern`, `freelancer`, `volunteer` or `external`. |
+| Team attribute | no (`department`) | The Personio attribute whose value names the team. |
+| List leavers for (days) | no (30) | People who left longer ago are no longer imported. |
+| Import people every (minutes) | no (60) | 0 imports only when started by hand. |
 
 **Mapping**
 
@@ -422,16 +422,16 @@ accounts, through any SMTP server or sending service. The app uses the first
 email connection that is turned on. Notification recipients are set in
 **Admin > Settings**.
 
-| Field            | Required      | Meaning                                                                                                      |
-| ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------ |
-| SMTP server      | yes           | Host name.                                                                                                   |
-| Port             | no (587)      |                                                                                                              |
-| Encryption       | no (STARTTLS) | STARTTLS (usually port 587), TLS from the start (usually port 465), or none (only inside a trusted network). |
-| Username         | no            | Sign-in is skipped when empty.                                                                               |
-| Password         | no            |                                                                                                              |
-| From address     | yes           | The sender; the server must be allowed to send for it.                                                       |
-| From name        | no            | E.g. "IT team".                                                                                              |
-| Reply-to address | no            |                                                                                                              |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| SMTP server | yes | Host name. |
+| Port | no (587) | |
+| Encryption | no (STARTTLS) | STARTTLS (usually port 587), TLS from the start (usually port 465), or none (only inside a trusted network). |
+| Username | no | Sign-in is skipped when empty. |
+| Password | no | |
+| From address | yes | The sender; the server must be allowed to send for it. |
+| From name | no | E.g. "IT team". |
+| Reply-to address | no | |
 
 **Behavior**
 

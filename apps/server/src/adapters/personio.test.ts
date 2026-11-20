@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { addDays, today } from "../core/time";
 import { AdapterError, ConfigurationError, TransientError } from "./base";
-import { PersonioAdapter, isEmail, parseDate } from "./personio";
+import { isEmail } from "@iam/shared/email";
+import { PersonioAdapter, parseDate } from "./personio";
 import { answer, json, mockFetch, type Handler, type SeenRequest } from "../test/mock-fetch";
 
 const CONFIG = { client_id: "client", client_secret: "s3cret-value" };

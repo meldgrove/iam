@@ -1,9 +1,9 @@
 import { keepPreviousData } from "@tanstack/react-query";
 import type {
-  GroupConnection,
   JobDetail,
   JobRow,
   Paged,
+  Ref,
   TaskDetail,
   TaskRow,
   WorkflowDetail,
@@ -86,9 +86,9 @@ export const taskQuery = (id: number) => ({
   queryFn: () => api.get<TaskDetail>(`/tasks/${id}`),
 });
 
-/** The connections that have accounts: the jobs' filter. Viewers may read them. */
-export const accountConnectionsQuery = {
-  queryKey: ["group-connections"],
-  queryFn: () => api.get<GroupConnection[]>("/group-connections"),
+/** Every connection's name, for the jobs' filter (viewers may read them). */
+export const connectionNamesQuery = {
+  queryKey: ["connection-names"],
+  queryFn: () => api.get<Ref[]>("/connection-names"),
   staleTime: 60_000,
 };

@@ -117,6 +117,26 @@ describe("connection form", () => {
     });
   });
 
+  it("keeps settings the connection never saved empty, and sends them back unchanged", async () => {
+    // The server sends "" (false for a bool) for them, not the adapter's default.
+    const fetch = stubApi({
+      "GET /connections/7/form": {
+        body: { ...saved, settings: { url: "https://example.invalid", interval: "", verify: false } },
+      },
+      "PUT /connections/7": { body: { id: 7, message: "Saved Example." } },
+    });
+    const user = userEvent.setup();
+    renderPage(<ConnectionFormPage id={7} />);
+    expect(await screen.findByLabelText("Sync interval")).toHaveValue(null);
+    expect(screen.getByRole("checkbox", { name: "Verify TLS" })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requests(fetch, "PUT /connections/7")).toHaveLength(1));
+    expect(requests(fetch, "PUT /connections/7")[0]!.body).toMatchObject({
+      settings: { url: "https://example.invalid", interval: "", verify: false },
+      secrets: {},
+    });
+  });
+
   it("shows a server error of a secret under that field, with an input to enter it again", async () => {
     stubApi({
       "GET /connections/7/form": { body: saved },

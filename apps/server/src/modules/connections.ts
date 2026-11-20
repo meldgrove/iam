@@ -50,6 +50,7 @@ import { fullName } from "../engine/people";
 import { groupLabel } from "../engine/policy";
 import { canCompareAccounts, compareAccounts, importGroups, importPeople } from "../engine/sync";
 import { iso } from "./rows";
+import { isEmail } from "@iam/shared/email";
 
 /** Admin › Connections: add, test, configure and read connected apps. */
 const router = new Hono<AppEnv>();
@@ -101,6 +102,16 @@ function savedSecrets(connection: Connection | null): Record<string, string> {
     throw error;
   }
 }
+
+/** Every connection's name, for the filter of the jobs list (viewers read it). */
+router.get("/connection-names", async (c) => {
+  requireRole(c, "viewer");
+  const rows = await q()
+    .select({ id: connections.id, name: connections.name })
+    .from(connections)
+    .orderBy(asc(connections.name));
+  return c.json(rows);
+});
 
 router.get("/connections", async (c) => {
   requireRole(c, "admin");
@@ -250,7 +261,9 @@ router.get("/connections/:id/form", async (c) => {
   const settings: Record<string, unknown> = {};
   for (const spec of cls.fields) {
     if (spec.kind === "secret") continue;
-    settings[spec.name] = spec.name in connection.settings ? connection.settings[spec.name] : spec.default;
+    // As Django's form: the saved values; a setting the connection never saved stays empty.
+    settings[spec.name] =
+      spec.name in connection.settings ? connection.settings[spec.name] : spec.kind === "bool" ? false : "";
   }
   const body: ConnectionForm = {
     adapter: adapterInfo(cls),
@@ -275,8 +288,10 @@ function cleanSetting(spec: Field, raw: unknown): { value: unknown } | { error: 
   }
   switch (spec.kind) {
     case "int": {
-      if (!/^[+-]?\d+$/.test(text)) return { error: "Enter a whole number." };
-      const value = Number(text);
+      // Django's IntegerField takes "10.0" as 10.
+      const whole = text.replace(/\.0*\s*$/, "");
+      if (!/^[+-]?\d+$/.test(whole)) return { error: "Enter a whole number." };
+      const value = Number(whole);
       if (value < 0) return { error: "Ensure this value is greater than or equal to 0." };
       return { value };
     }
@@ -285,9 +300,7 @@ function cleanSetting(spec: Field, raw: unknown): { value: unknown } | { error: 
         ? { value: text }
         : { error: `Select a valid choice. ${text} is not one of the available choices.` };
     case "email":
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)
-        ? { value: text }
-        : { error: "Enter a valid email address." };
+      return isEmail(text) ? { value: text } : { error: "Enter a valid email address." };
     case "url":
       return URL_PATTERN.test(text) && isUrl(text) ? { value: text } : { error: "Enter a valid URL." };
     case "textarea":

@@ -104,7 +104,9 @@ function TeamForm({ team, connections }: { team: TeamDetail | null; connections:
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Team groups</CardTitle>
+            <CardTitle>
+              <h2>Team groups</h2>
+            </CardTitle>
             <CardDescription>
               Members join these groups in every app where their access profile gives them an account.
             </CardDescription>

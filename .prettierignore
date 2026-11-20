@@ -5,3 +5,4 @@ package-lock.json
 apps/server/drizzle/
 playwright-report/
 test-results/
+*.md

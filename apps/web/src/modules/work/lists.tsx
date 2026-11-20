@@ -7,7 +7,7 @@ import { Page, PageHeader } from "@meldgrove/ui/page";
 import { ErrorState, LoadingState } from "@meldgrove/ui/states";
 import { Empty, JobsTable, PageControls, TasksTable, WorkflowsTable } from "@/components/lists";
 import {
-  accountConnectionsQuery,
+  connectionNamesQuery,
   JOB_FILTERS,
   jobsQuery,
   TASK_FILTERS,
@@ -116,7 +116,7 @@ export function JobsPage({
   onSearch: (search: JobsSearch) => void;
 }) {
   const query = useQuery(jobsQuery(search));
-  const connections = useQuery(accountConnectionsQuery).data ?? [];
+  const connections = useQuery(connectionNamesQuery).data ?? [];
   return (
     <ListPage
       title="Jobs"
@@ -137,7 +137,7 @@ export function JobsPage({
             options={[
               ["", "All connections"],
               ...connections.map((connection): [string, string] => [String(connection.id), connection.name]),
-              // A connection from the address that the list lacks (e.g. one of another kind).
+              // A connection from the address that no longer exists.
               ...(search.connection && !connections.some((connection) => connection.id === search.connection)
                 ? [[String(search.connection), `Connection ${search.connection}`] as [string, string]]
                 : []),

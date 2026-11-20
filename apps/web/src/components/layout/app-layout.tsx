@@ -3,6 +3,7 @@ import { Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router"
 import { ShieldCheck } from "lucide-react";
 import { AppFrame, type FrameLink, type NavGroup, type SearchResult } from "@meldgrove/ui/app-frame";
 import { Alert, AlertDescription } from "@meldgrove/ui/alert";
+import { Button } from "@meldgrove/ui/button";
 import { UpdateButton } from "@meldgrove/ui/updates";
 import { ROLE_LABELS } from "@iam/shared/labels";
 import type { Paged, PersonRow } from "@iam/shared/api/iam";
@@ -99,7 +100,11 @@ export function AppLayout() {
         nav={nav}
         pathname={pathname}
         link={AppLink}
-        navigate={(href) => void router.navigate({ to: href })}
+        navigate={(href) => {
+          // Keep a query ("Show all results" opens /people?q=…): TanStack takes it apart.
+          const url = new URL(href, window.location.origin);
+          void router.navigate({ to: url.pathname, search: Object.fromEntries(url.searchParams) as never });
+        }}
         user={{ name: me.name, email: me.email, detail: ROLE_LABELS[me.role] }}
         theme={theme}
         onThemeChange={setTheme}
@@ -107,7 +112,17 @@ export function AppLayout() {
         onSignOut={() => void signOut()}
         breadcrumbs={breadcrumbs}
         search={{ find: findPeople, allResultsHref: (query) => `/people?q=${encodeURIComponent(query)}` }}
-        headerEnd={me.updatesButton ? <UpdateButton /> : null}
+        headerEnd={
+          <>
+            {me.accountUrl ? (
+              <Button asChild variant="ghost" size="sm">
+                {/* The sign-in provider's account page (Keycloak), where people manage their sign-in. */}
+                <a href={me.accountUrl}>My account</a>
+              </Button>
+            ) : null}
+            {me.updatesButton ? <UpdateButton /> : null}
+          </>
+        }
       >
         {me.readOnly ? (
           <div className="mx-auto w-full max-w-7xl px-4 pt-4 md:px-6">

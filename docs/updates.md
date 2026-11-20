@@ -14,10 +14,10 @@ app. Until it is [switched on](#switch-it-on), it only checks.
 
 ## Channels
 
-| Channel              | Offers                                                               | Installs automatically                                          |
-| -------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------- |
-| **Stable** (default) | releases                                                             | a release of the installed series, three days after it came out |
-| **Preview**          | every change on `main` as soon as its checks pass, and every release | within the hour                                                 |
+| Channel | Offers | Installs automatically |
+| --- | --- | --- |
+| **Stable** (default) | releases | a release of the installed series, three days after it came out |
+| **Preview** | every change on `main` as soon as its checks pass, and every release | within the hour |
 
 Admins choose the channel in Admin › Settings › Updates. Preview brings new features
 first, and now and then a new bug; previews have no release notes. Switching from
@@ -60,11 +60,11 @@ as `02:00-05:00` in the time zone `TZ` (default UTC), keeps automatic installs o
 working hours; the update button installs at any time. A version whose installation
 failed does not install again automatically; a newer one does.
 
-| Variable (`compose.yaml`)                              | Meaning                                                                                     |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `UPDATE_COOLDOWN`                                      | How long a stable release is out before it installs: `3d` (default), `12h`, `30m`, seconds. |
-| `UPDATE_WINDOW`, `TZ`                                  | Automatic installs only between two times of day.                                           |
-| `UPDATE_REGISTRY_USERNAME`, `UPDATE_REGISTRY_PASSWORD` | Only for an image in a private registry.                                                    |
+| Variable (`compose.yaml`) | Meaning |
+| --- | --- |
+| `UPDATE_COOLDOWN` | How long a stable release is out before it installs: `3d` (default), `12h`, `30m`, seconds. |
+| `UPDATE_WINDOW`, `TZ` | Automatic installs only between two times of day. |
+| `UPDATE_REGISTRY_USERNAME`, `UPDATE_REGISTRY_PASSWORD` | Only for an image in a private registry. |
 
 ## Switch it on
 

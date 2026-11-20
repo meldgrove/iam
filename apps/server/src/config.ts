@@ -46,7 +46,8 @@ const schema = z
     /** Which part of the application this process runs. */
     APP_ROLE: withDefault(z.enum(["all", "web", "worker", "migrate"]), "all"),
     PORT: withDefault(z.coerce.number().int().min(1).max(65535), 8000),
-    HOST: withDefault(z.string(), "0.0.0.0"),
+    /** The address the web process listens on: all in production (the image), only this machine in development. */
+    HOST: optional(z.string()),
     /**
      * The public URL of the app, e.g. https://iam.example.invalid. A list (as
      * compose.yaml passes CSRF_TRUSTED_ORIGINS of the Django version): its first entry.
@@ -144,6 +145,11 @@ const schema = z
     }
   });
 
+function isLocal(url: string): boolean {
+  const host = new URL(url).hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+}
+
 function splitList(value: string, lower = false): string[] {
   return value
     .split(",")
@@ -153,8 +159,9 @@ function splitList(value: string, lower = false): string[] {
 
 type Parsed = z.infer<typeof schema>;
 
-export type Config = Omit<Parsed, "APP_URL" | "AUTH_SECRET" | "ENCRYPTION_KEY"> & {
+export type Config = Omit<Parsed, "APP_URL" | "AUTH_SECRET" | "ENCRYPTION_KEY" | "HOST"> & {
   APP_URL: string;
+  HOST: string;
   AUTH_SECRET: string;
   /** The Fernet keys; empty only in development and tests (a derived key then). */
   encryptionKeys: string[];
@@ -196,6 +203,9 @@ export function config(): Config {
   if (!appUrl) problems.push("APP_URL: Set the public URL, e.g. https://iam.example.invalid");
   else if (!z.url({ protocol: /^https?$/ }).safeParse(appUrl).success) {
     problems.push("APP_URL: Must be an http:// or https:// URL");
+  } else if (value.NODE_ENV === "production" && !/^https:/i.test(appUrl) && !isLocal(appUrl)) {
+    // Sessions travel in cookies that only HTTPS keeps secret.
+    problems.push("APP_URL: Must be an https:// URL in production (http only for localhost)");
   }
 
   const secret = value.AUTH_SECRET ?? value.DJANGO_SECRET_KEY ?? (isDevelopment ? DEV_SECRET : "");
@@ -230,6 +240,7 @@ export function config(): Config {
   cached = {
     ...value,
     APP_URL: appUrl,
+    HOST: value.HOST ?? (isDevelopment ? "127.0.0.1" : "0.0.0.0"),
     AUTH_SECRET: secret,
     encryptionKeys,
     isDevelopment,

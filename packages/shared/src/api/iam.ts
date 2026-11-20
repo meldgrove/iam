@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isEmail } from "../email";
 import type {
   AccountStatus,
   AdapterKind,
@@ -193,7 +194,7 @@ const emailField = z
   .string()
   .trim()
   .max(254, "Ensure this value has at most 254 characters.")
-  .refine((value) => value === "" || z.email().safeParse(value).success, "Enter a valid email address.");
+  .refine((value) => value === "" || isEmail(value), "Enter a valid email address.");
 const dateField = z
   .string()
   .trim()
@@ -472,7 +473,7 @@ export const userInputSchema = z.object({
     .trim()
     .min(1, "This field is required.")
     .max(254, "Ensure this value has at most 254 characters.")
-    .pipe(z.email("Enter a valid email address.")),
+    .refine(isEmail, "Enter a valid email address."),
   displayName: trimmed(200),
   role: z.enum(ROLES as [Role, ...Role[]], "Select a valid choice."),
   isActive: z.boolean(),

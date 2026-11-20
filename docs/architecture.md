@@ -20,11 +20,11 @@ saw.
 Starting a workflow captures the person's desired access and plans one job
 per connection:
 
-| Workflow      | Starts                                                                                                      | Person's status               | Jobs                                                                                                             |
-| ------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Onboarding    | By an approver, or by the schedule a set number of days before the start date                               | Planned → Onboarding → Active | Create or update the account where the profile grants one                                                        |
-| Access update | By an approver after changing profile, team or policy; during onboarding it starts a new onboarding instead | stays Active                  | Create or update where granted; disable known accounts no longer granted                                         |
-| Offboarding   | By an approver, or by the schedule the day after the last day                                               | → Offboarding → Offboarded    | Disable every known account (also one the last comparison no longer listed) and every account the profile grants |
+| Workflow | Starts | Person's status | Jobs |
+| --- | --- | --- | --- |
+| Onboarding | By an approver, or by the schedule a set number of days before the start date | Planned → Onboarding → Active | Create or update the account where the profile grants one |
+| Access update | By an approver after changing profile, team or policy; during onboarding it starts a new onboarding instead | stays Active | Create or update where granted; disable known accounts no longer granted |
+| Offboarding | By an approver, or by the schedule the day after the last day | → Offboarding → Offboarded | Disable every known account (also one the last comparison no longer listed) and every account the profile grants |
 
 A new workflow for the same person replaces the open one: its unfinished jobs
 are cancelled. Onboarding and access updates can be cancelled; offboarding
@@ -45,7 +45,7 @@ running, and the workflow's page names them while they run.
 **Jobs.** The worker (the `worker` process) runs queued jobs. For a
 connection in automatic mode it calls the adapter:
 
-- _Create or update account_: find the account (by its saved ID, then by
+- *Create or update account*: find the account (by its saved ID, then by
   username or email), create it if missing, reactivate it if disabled, then
   add the wanted managed groups and remove the managed groups no longer
   wanted.
@@ -56,8 +56,7 @@ connection in automatic mode it calls the adapter:
   with nothing changed. A Google address that is an alias of another user
   is not the person's account (creating it stops the job). The job then
   changes exactly the account whose owner it checked.
-
-- _Disable account_: remove the managed groups (unless the adapter keeps
+- *Disable account*: remove the managed groups (unless the adapter keeps
   them, e.g. Relution) and disable the account. No account found counts as
   done.
 

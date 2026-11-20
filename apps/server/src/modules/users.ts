@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { userInputSchema, type UserRow } from "@iam/shared/api/iam";
 import { ROLE_LABELS } from "@iam/shared/labels";
-import { people, users, type User } from "../db/schema";
+import { people, sessions, users, type User } from "../db/schema";
 import { atomic, q } from "../db/tx";
 import type { AppEnv } from "../http/env";
 import { idParam, jsonBody, requireRole } from "../http/middleware";
@@ -113,6 +113,8 @@ async function saveUser(actor: User, existing: User | null, input: ReturnType<ty
           ? await q().update(users).set(update).where(eq(users.id, existing.id)).returning()
           : [existing]
       ) as [User];
+      // Turned off: its sessions end, so turning it on again needs a new sign-in.
+      if (!saved.isActive) await q().delete(sessions).where(eq(sessions.userId, saved.id));
     }
     await record("user.saved", `Saved app user ${saved.email} (${ROLE_LABELS[saved.role]})`, {
       actor,

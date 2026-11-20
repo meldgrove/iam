@@ -3,7 +3,8 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-const server = process.env.IAM_SERVER_URL ?? "http://localhost:8000";
+// 127.0.0.1: in development the server listens only there, and "localhost" may resolve to ::1.
+const server = process.env.IAM_SERVER_URL ?? "http://127.0.0.1:8000";
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
 export default defineConfig({

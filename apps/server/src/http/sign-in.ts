@@ -5,7 +5,7 @@ import { logger } from "../logger";
 import type { AppEnv } from "./env";
 import { authorizationUrl, completeSignIn, ProviderUnavailable, type SignInState } from "../auth/oidc";
 import { userForClaims, SignInRefused } from "../auth/claims";
-import { secureCookies, sign, startSession, unsign } from "../auth/session";
+import { cookieName, secureCookies, sign, startSession, unsign } from "../auth/session";
 
 /**
  * The sign-in's redirects: /oidc/authenticate/ sends the browser to the
@@ -15,7 +15,8 @@ import { secureCookies, sign, startSession, unsign } from "../auth/session";
  * did not check out) or `unavailable` (the provider cannot be reached).
  */
 
-const STATE_COOKIE = "iam_oidc";
+/** The pending sign-ins (cookieName: `__Host-` on HTTPS, so on the whole site). */
+const stateCookie = () => cookieName("iam_oidc");
 const STATE_SECONDS = 600;
 /** Sign-ins a browser may have open at once (several tabs). */
 const MAX_STATES = 5;
@@ -38,27 +39,29 @@ export function safeNext(value: string | undefined | null): string {
   try {
     const url = new URL(value, "http://app.example.invalid");
     if (url.origin !== "http://app.example.invalid") return "/";
-    return url.pathname + url.search + url.hash;
+    const next = url.pathname + url.search + url.hash;
+    // Normalizing can turn "/.//host" into "//host", which a browser reads as another site.
+    return next.startsWith("//") || next.startsWith("/\\") ? "/" : next;
   } catch {
     return "/";
   }
 }
 
 function readStates(c: Context): StoredState[] {
-  const states = unsign<StoredState[]>(getCookie(c, STATE_COOKIE)) ?? [];
+  const states = unsign<StoredState[]>(getCookie(c, stateCookie())) ?? [];
   return Array.isArray(states) ? states.filter((state) => state && state.expires > Date.now()) : [];
 }
 
 function writeStates(c: Context, states: StoredState[]) {
   if (states.length === 0) {
-    deleteCookie(c, STATE_COOKIE, { path: "/oidc/", secure: secureCookies() });
+    deleteCookie(c, stateCookie(), { path: "/", secure: secureCookies() });
     return;
   }
-  setCookie(c, STATE_COOKIE, sign(states), {
+  setCookie(c, stateCookie(), sign(states), {
     httpOnly: true,
     secure: secureCookies(),
     sameSite: "Lax",
-    path: "/oidc/",
+    path: "/",
     maxAge: STATE_SECONDS,
   });
 }
@@ -79,7 +82,7 @@ export function signInRoutes() {
       c.header("cache-control", "no-store");
       return c.redirect(url, 302);
     } catch (error) {
-      logger.warn({ err: error }, "sign-in provider unavailable");
+      logger.warn({ error: safeError(error) }, "sign-in provider unavailable");
       return toSignIn(c, "unavailable");
     }
   });
@@ -105,10 +108,10 @@ export function signInRoutes() {
       signedIn = await completeSignIn(current, state);
     } catch (error) {
       if (error instanceof ProviderUnavailable || isNetworkError(error)) {
-        logger.warn({ err: error }, "sign-in provider request failed");
+        logger.warn({ error: safeError(error) }, "sign-in provider request failed");
         return toSignIn(c, "unavailable");
       }
-      logger.warn({ err: error }, "sign-in did not check out");
+      logger.warn({ error: safeError(error) }, "sign-in did not check out");
       return toSignIn(c, "denied");
     }
     try {
@@ -126,6 +129,22 @@ export function signInRoutes() {
   });
 
   return app;
+}
+
+/**
+ * What the log may say about a failed sign-in: the kind of error and the
+ * provider's error code or status, never its description or body, which can
+ * quote tokens or personal data.
+ */
+function safeError(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { type: typeof error };
+  const fields = error as Error & { code?: unknown; error?: unknown; status?: unknown };
+  return {
+    type: error.constructor.name,
+    code: typeof fields.code === "string" ? fields.code : undefined,
+    error: typeof fields.error === "string" && /^[a-z_]{1,64}$/.test(fields.error) ? fields.error : undefined,
+    status: typeof fields.status === "number" ? fields.status : undefined,
+  };
 }
 
 function isNetworkError(error: unknown): boolean {

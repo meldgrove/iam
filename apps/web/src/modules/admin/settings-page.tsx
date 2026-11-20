@@ -37,8 +37,16 @@ export function SettingsPage() {
   );
 }
 
-/** A count as its input holds it; an empty or invalid one fails validation ("Enter a whole number."). */
-const count = (text: string) => (text.trim() === "" ? Number.NaN : Number(text));
+/**
+ * A whole number as Django's IntegerField reads it: an optional sign, digits
+ * and an optional ".0…" ("7", "+7", "7.00"); anything else ("1e2", "7.5") is
+ * a message.
+ */
+function wholeNumber(text: string): { value: number } | { error: string } {
+  if (text.trim() === "") return { error: "This field is required." };
+  const match = /^\s*([+-]?\d+)(?:\.0*)?\s*$/.exec(text);
+  return match ? { value: Number(match[1]) } : { error: "Enter a whole number." };
+}
 
 function SettingsForm({ settings }: { settings: Settings }) {
   const client = useQueryClient();
@@ -66,17 +74,21 @@ function SettingsForm({ settings }: { settings: Settings }) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    const leadDays = wholeNumber(onboardingLeadDays);
+    const removalLimit = wholeNumber(removalLimitPerDay);
     const input: SettingsInput = {
       organizationName,
       automaticOnboarding,
-      onboardingLeadDays: count(onboardingLeadDays),
+      onboardingLeadDays: "value" in leadDays ? leadDays.value : 0,
       automaticOffboarding,
-      removalLimitPerDay: count(removalLimitPerDay),
+      removalLimitPerDay: "value" in removalLimit ? removalLimit.value : 0,
       notificationEmails,
     };
-    const invalid = validate(settingsInputSchema, input);
-    setErrors(invalid ?? {});
-    if (!invalid) save.mutate(input);
+    const invalid: FieldErrors = { ...validate(settingsInputSchema, input) };
+    if ("error" in leadDays) invalid.onboardingLeadDays = leadDays.error;
+    if ("error" in removalLimit) invalid.removalLimitPerDay = removalLimit.error;
+    setErrors(invalid);
+    if (Object.keys(invalid).length === 0) save.mutate(input);
   };
 
   return (
