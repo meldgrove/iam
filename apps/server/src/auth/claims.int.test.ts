@@ -97,6 +97,19 @@ describe("users for sign-in claims", () => {
     expect((await userById(user.id)).isActive).toBe(false);
   });
 
+  it("creates one user for simultaneous first sign-ins", async () => {
+    overrideConfigForTests({ adminGroups: ["/iam/admins"] });
+    // Open the connections first, so the sign-ins run side by side.
+    await Promise.all(Array.from({ length: 8 }, () => getPool().query("select pg_sleep(0.05)")));
+    const signedIn = await Promise.all(
+      Array.from({ length: 8 }, () => userForClaims(claims({ groups: ["/iam/admins"] }))),
+    );
+    const ids = new Set(signedIn.map((user) => user?.id));
+    expect(ids.size).toBe(1);
+    expect([...ids][0]).toBeTypeOf("number");
+    expect(await getDb().$count(users)).toBe(1);
+  });
+
   it("leaves local roles to the app", async () => {
     overrideConfigForTests({ adminGroups: ["admins"] });
     const user = await createUser("approver", "ada@example.invalid");

@@ -9,7 +9,7 @@ import {
   type Job,
   type Person,
 } from "../db/schema";
-import { atomic, q } from "../db/tx";
+import { atomic, isUniqueViolation, q } from "../db/tx";
 import { fullName } from "./people";
 
 /**
@@ -350,15 +350,6 @@ async function saveAccount(account: Partial<Account>): Promise<void> {
 async function personById(id: number): Promise<Person | null> {
   const [person] = await q().select().from(people).where(eq(people.id, id));
   return person ?? null;
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 3 && current instanceof Error; depth += 1) {
-    if ((current as { code?: unknown }).code === "23505") return true;
-    current = current.cause;
-  }
-  return false;
 }
 
 const iexact = (column: typeof people.workEmail | typeof people.username, value: string) =>

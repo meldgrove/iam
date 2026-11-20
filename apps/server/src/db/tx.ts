@@ -53,3 +53,13 @@ export function onCommit(fn: () => unknown): void {
     .then(fn)
     .catch((error: unknown) => logger.error({ err: error }, "a callback failed"));
 }
+
+/** Whether the error is PostgreSQL's unique violation, also when Drizzle wrapped it (`cause`). */
+export function isUniqueViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current instanceof Error; depth += 1) {
+    if ((current as { code?: unknown }).code === "23505") return true;
+    current = current.cause;
+  }
+  return false;
+}

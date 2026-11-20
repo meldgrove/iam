@@ -2,7 +2,7 @@ import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { ROLE_LABELS } from "@iam/shared/labels";
 import { config } from "../config";
 import { sessions, users, type Role, type User } from "../db/schema";
-import { atomic, q } from "../db/tx";
+import { atomic, isUniqueViolation, q } from "../db/tx";
 import { record } from "../engine/audit";
 
 /**
@@ -192,8 +192,22 @@ const FIELD_NAMES: Record<string, string> = {
  */
 export async function userForClaims(claims: Claims): Promise<User | null> {
   if (!claims.sub) return null;
-  const found = await usersForClaims(claims);
-  if (found.length > 1) throw new SignInRefused("Multiple users returned");
-  const user = found.length === 1 ? await updateUser(found[0]!, claims) : await createUser(claims);
-  return user && user.isActive ? user : null;
+  for (let attempt = 1; ; attempt += 1) {
+    const found = await usersForClaims(claims);
+    if (found.length > 1) throw new SignInRefused("Multiple users returned");
+    if (found.length === 1) {
+      const user = await updateUser(found[0]!, claims);
+      return user.isActive ? user : null;
+    }
+    let created: User | null;
+    try {
+      created = await createUser(claims);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      created = null;
+    }
+    // Not created: a concurrent first sign-in may have created this user
+    // meanwhile (the email taken, an admin there); look once more.
+    if (created || attempt > 1) return created && created.isActive ? created : null;
+  }
 }
