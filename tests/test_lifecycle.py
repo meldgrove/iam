@@ -7,10 +7,14 @@ from iam.adapters.base import AdapterError, TransientError
 from iam.jobs import (
     MAX_ATTEMPTS,
     ActionError,
+    Changed,
+    Failed,
     approve_job,
+    attempt,
     cancel_task,
     claim_next_job,
     complete_task,
+    finish,
     recover_stale_jobs,
     reject_job,
     retry_job,
@@ -347,17 +351,10 @@ def test_initial_password_is_emailed_never_stored(person, fake_store, monkeypatc
     assert "a***@personal.example.invalid" in summary and "ada@" not in summary
 
 
-def stop_the_worker_after_the_change(job, monkeypatch):
+def stop_the_worker_after_the_change(job):
     """Run the job until the app changed the account, and stop the worker
     there, before it records anything: a deploy, a crash, a lost database."""
-
-    def killed(*args, **kwargs):
-        raise KeyboardInterrupt("worker killed")
-
-    with monkeypatch.context() as patch:
-        patch.setattr("iam.jobs.succeed_job", killed)
-        with pytest.raises(KeyboardInterrupt):
-            run_job(job)
+    assert isinstance(attempt(job), Changed)
     Job.objects.filter(pk=job.pk).update(locked_until=timezone.now() - timedelta(seconds=1))
     assert recover_stale_jobs() == 1
 
@@ -369,7 +366,7 @@ def test_sign_in_details_lost_with_a_stopped_worker_become_a_task(person, fake_s
     sent = []
     monkeypatch.setattr("iam.jobs.send_email", lambda to, subject, body: sent.append(to) or True)
     start_workflow(person, Workflow.Kind.ONBOARDING)
-    stop_the_worker_after_the_change(claim_next_job(), monkeypatch)
+    stop_the_worker_after_the_change(claim_next_job())
     run_all()
     job = Job.objects.get()
     assert job.status == Job.Status.SUCCEEDED
@@ -397,11 +394,9 @@ def test_a_worker_that_stopped_before_the_change_hands_over_sign_in_as_usual(
     assert not Task.objects.exists()
 
 
-def test_apps_without_sign_in_details_get_no_task_after_a_stopped_worker(
-    person, fake_store, monkeypatch
-):
+def test_apps_without_sign_in_details_get_no_task_after_a_stopped_worker(person, fake_store):
     start_workflow(person, Workflow.Kind.ONBOARDING)
-    stop_the_worker_after_the_change(claim_next_job(), monkeypatch)
+    stop_the_worker_after_the_change(claim_next_job())
     run_all()
     assert Job.objects.get().status == Job.Status.SUCCEEDED
     assert not Task.objects.exists()
@@ -858,7 +853,7 @@ def test_jobs_that_finish_at_once_still_complete_the_workflow(person, profile, m
     def finish(job):
         try:
             account = ExternalAccount(external_id=f"x{job.pk}", username=f"x{job.pk}")
-            jobs.succeed_job(Job.objects.get(pk=job.pk), EnsureResult(account=account))
+            jobs.finish(Job.objects.get(pk=job.pk), jobs.Changed(EnsureResult(account=account)))
         finally:
             connections.close_all()
 
@@ -968,8 +963,6 @@ def test_job_changes_lock_the_person_first(person, fake_connection, fake_store, 
     from django.db import connection
     from django.test.utils import CaptureQueriesContext
 
-    from iam.jobs import fail_job
-
     if connection.vendor != "postgresql":
         pytest.skip("Only PostgreSQL locks rows.")
 
@@ -981,7 +974,7 @@ def test_job_changes_lock_the_person_first(person, fake_connection, fake_store, 
 
     start_workflow(person, Workflow.Kind.ONBOARDING)
     job = claim_next_job()
-    assert first_lock(lambda: fail_job(job, "Fake app answered 400.", retryable=False)) == (
+    assert first_lock(lambda: finish(job, Failed("Fake app answered 400.", retryable=False))) == (
         '"iam_person"'
     )
     assert first_lock(lambda: retry_job(job, actor=admin_user)) == '"iam_person"'

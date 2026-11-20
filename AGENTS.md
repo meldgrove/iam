@@ -12,8 +12,10 @@ processes: `migrate`, `web` (gunicorn) and `worker` (`manage.py run_worker`).
   environment variables.
 - The engine: `iam/policy.py` (desired access), `iam/lifecycle.py`
   (starting and cancelling workflows), `iam/jobs.py` (running jobs; the only
-  place that changes job, task and workflow status), `iam/accounts.py` (the
-  only writer of Account rows), `iam/sync.py` (reads), `iam/schedule.py`.
+  place that changes job, task and workflow status: `run_job` is `attempt`,
+  which talks to the connection and writes nothing, then `finish`, the only
+  code that settles a claimed job), `iam/accounts.py` (the only writer of
+  Account rows), `iam/sync.py` (reads), `iam/schedule.py`.
 - Every change by a person or the worker writes an audit event without secret
   values.
 - Templates render the pages; `iam/static/iam/app.css` styles them with the

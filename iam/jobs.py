@@ -8,15 +8,17 @@ ends the same way: the workflow's status is worked out again from its jobs
 (refresh_workflow), which also finishes the person's status, and people
 hear about new tasks once the change commits.
 
-The worker claims queued jobs one at a time. A connection that may change
-accounts gets the adapter call; any other connection gets a manual task. A
-failure that clears on its own (timeouts, rate limits, server errors) runs
-again with growing pauses; any other failure, or the last retry, hands the
-job to a person as a failure task. Groups never hold up an account: once
-the account is created, reactivated or disabled, a group step that keeps
-failing becomes a task while the job succeeds. Nothing here stores
-passwords: a new account's initial password is emailed once to the personal
-address and forgotten.
+The worker claims queued jobs one at a time and runs each in two steps
+(run_job): attempt talks to the connection and writes nothing in this app;
+finish records the outcome, and is the only code that settles a claimed
+job. A connection that may change accounts gets the adapter call; any other
+connection gets a manual task. A failure that clears on its own (timeouts,
+rate limits, server errors) runs again with growing pauses; any other
+failure, or the last retry, hands the job to a person as a failure task.
+Groups never hold up an account: once the account is created, reactivated
+or disabled, a group step that keeps failing becomes a task while the job
+succeeds. Nothing here stores passwords: a new account's initial password
+is emailed once to the personal address and forgotten.
 
 In read-only mode (READ_ONLY=1) the worker rehearses every job instead: it
 reads what the job would change, records that in the result, changes
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
@@ -332,54 +335,70 @@ def recover_stale_jobs() -> int:
 # -- running ----------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class Changed:
+    """The connection made the job's change: the account step is done, and
+    the groups are done or carry the error that stopped them."""
+
+    result: EnsureResult | DisableResult
+
+
+@dataclass(frozen=True)
+class Failed:
+    """The connection did not make the change. The message is safe to show."""
+
+    message: str
+    retryable: bool
+
+
+@dataclass(frozen=True)
+class ForAPerson:
+    """The connection no longer changes accounts automatically: a person does."""
+
+
+@dataclass(frozen=True)
+class Rehearsed:
+    """Read-only mode: what the job would change. Nothing changed."""
+
+    plan: dict
+
+
+Outcome = Changed | Failed | ForAPerson | Rehearsed
+
+
 def run_job(job: Job) -> Job:
+    """Run a job the worker claimed: attempt, then finish."""
+    return finish(job, attempt(job))
+
+
+def attempt(job: Job) -> Outcome:
+    """Make the job's change at its connection, or in read-only mode find out
+    what it would change. Writes nothing in this app: finish records the
+    outcome. Every failure becomes Failed with a message safe to show; an
+    unexpected one also goes to the worker log and Sentry."""
     connection = Connection.objects.get(pk=job.connection_id)
     person = Person.objects.select_related("team", "manager").get(pk=job.person_id)
-    if settings.READ_ONLY:
-        return rehearse_job(job, connection, person)
     if not connection.writes_automatically or not _can_write(connection):
-        with transaction.atomic():
-            claim, job = job, _locked(job)
-            if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
-                return job
-            if _claimed_elsewhere(job, claim):
-                return job
-            if _replaced(job):
-                cancel_job(job, note="Replaced by a newer workflow.")
-                _settle(job)
-            else:
-                _settle(job, _hand_to_person(job))
-        return job
-    spec = account_spec(person)
+        if settings.READ_ONLY:
+            return Rehearsed(
+                {"would": "ask a person to make the change", "steps": _manual_steps(job)}
+            )
+        return ForAPerson()
     try:
-        adapter = connection.build_adapter()
-        # Check whose account the app is about to change before changing it.
-        external_id, found = _checked_account(adapter, connection, person, spec)
-        # Hand over the account whose owner was checked, so the change cannot
-        # land on another account a second lookup finds.
-        if job.action == Job.Action.ENSURE_ACCOUNT:
-            result = adapter.ensure_account(
-                spec,
-                external_id=external_id,
-                groups=set(job.groups),
-                managed_groups=managed_groups(job),
-                found=found,
-            )
-            if _created_by_a_stopped_worker(job, adapter, person, found, result):
-                result.credentials_problem = _lost_sign_in(connection, person)
-        else:
-            result = adapter.disable_account(
-                spec, external_id=external_id, managed_groups=managed_groups(job), found=found
-            )
+        if settings.READ_ONLY:
+            return Rehearsed(_rehearse_change(job, connection, person))
+        result = _change(job, connection, person)
     except AdapterError as exc:
-        return fail_job(job, str(exc), retryable=exc.retryable)
+        return Failed(str(exc), retryable=exc.retryable)
     except SecretUnreadable as exc:
-        return fail_job(job, str(exc), retryable=False)
+        return Failed(str(exc), retryable=False)
     except Exception as exc:  # noqa: BLE001 - every failure must reach a person
-        logger.exception("Job %s failed unexpectedly", job.pk)
+        if settings.READ_ONLY:
+            logger.exception("Rehearsal of job %s failed unexpectedly", job.pk)
+        else:
+            logger.exception("Job %s failed unexpectedly", job.pk)
         _report_to_sentry(exc)
-        return fail_job(
-            job,
+        return Failed(
             f"Unexpected error ({type(exc).__name__}). The details are in the worker log.",
             retryable=False,
         )
@@ -387,16 +406,57 @@ def run_job(job: Job) -> Job:
     if error is not None and not isinstance(error, AdapterError):
         logger.error("Job %s: the group step failed unexpectedly", job.pk, exc_info=error)
         _report_to_sentry(error)
-    elif error is not None and error.retryable and job.attempts < MAX_ATTEMPTS:
-        # The account step is done; the job runs again for the groups. A new
-        # account's password must reach the person now: the next run finds
-        # the account and generates none.
-        conflict = record_account_step(job, result)
-        if conflict:
-            return fail_job(job, conflict, retryable=False)
-        hand_over_sign_in(job, result)
-        return fail_job(job, str(error), retryable=True)
-    return succeed_job(job, result)
+    return Changed(result)
+
+
+def _change(job: Job, connection: Connection, person: Person) -> EnsureResult | DisableResult:
+    spec = account_spec(person)
+    adapter = connection.build_adapter()
+    # Check whose account the app is about to change before changing it.
+    external_id, found = _checked_account(adapter, connection, person, spec)
+    # Hand over the account whose owner was checked, so the change cannot
+    # land on another account a second lookup finds.
+    if job.action == Job.Action.DISABLE_ACCOUNT:
+        return adapter.disable_account(
+            spec, external_id=external_id, managed_groups=managed_groups(job), found=found
+        )
+    result = adapter.ensure_account(
+        spec,
+        external_id=external_id,
+        groups=set(job.groups),
+        managed_groups=managed_groups(job),
+        found=found,
+    )
+    if _created_by_a_stopped_worker(job, adapter, person, found, result):
+        result.credentials_problem = _lost_sign_in(connection, person)
+    return result
+
+
+def finish(claim: Job, outcome: Outcome) -> Job:
+    """Record what an attempt found: the only code that settles a job the
+    worker claimed. It locks the person, then the job.
+
+    - A change the connection made always counts: the account is recorded
+      and audited even when a newer workflow replaced the job's, or another
+      worker claimed the job since. The job succeeds unless another worker
+      holds the latest claim. A group error that may clear on its own runs
+      the job again instead, until the last attempt. An account linked to
+      someone else meanwhile fails the job, as any other failure.
+    - Any other outcome settles only a job that is still open and still
+      this claim's. A job whose workflow was replaced or cancelled is
+      cancelled.
+
+    A new account's sign-in details reach the person after the commit."""
+    sign_in = None
+    with transaction.atomic():
+        job = _locked(claim)
+        if isinstance(outcome, Changed):
+            outcome, sign_in = _record_change(job, claim, outcome.result)
+        if outcome is not None:
+            _settle_claim(job, claim, outcome)
+    if sign_in is not None:
+        hand_over_sign_in(job, sign_in)
+    return job
 
 
 def _checked_account(
@@ -450,30 +510,6 @@ def _lost_sign_in(connection: Connection, person: Person) -> str:
     )
 
 
-def record_account_step(job: Job, result: EnsureResult | DisableResult) -> str:
-    """Audit an account that changed while its groups did not, before the
-    job runs again. Returns why the account cannot be linked, if so."""
-    with transaction.atomic():
-        job = _locked(job)
-        if isinstance(result, EnsureResult):
-            # IAM must know a new account even if a newer workflow replaces
-            # this job. A disabled account stays active in IAM until its
-            # groups are done, so a newer workflow still plans a job there.
-            try:
-                with transaction.atomic():
-                    accounts.record_job_result(job, result)
-            except accounts.AccountConflict as exc:
-                return str(exc)
-        audit.record(
-            f"job.{job.action}",
-            f"{_success_summary(job, result)}. The groups are not done yet.",
-            person=job.person,
-            target=job,
-            details=_result_summary(result),
-        )
-    return ""
-
-
 def _group_error_message(error: Exception) -> str:
     if isinstance(error, AdapterError):
         return str(error)
@@ -492,52 +528,63 @@ def _report_to_sentry(exc: Exception) -> None:
         sentry_sdk.capture_exception(exc)
 
 
-def succeed_job(job: Job, result: EnsureResult | DisableResult) -> Job:
-    conflict = ""
-    group_task = None
-    claim = job
-    with transaction.atomic():
-        job = _locked(job)
-        # The change happened in the connected app, so the account and the
-        # initial password count even when the job was cancelled, or handed
-        # back to the queue after its lease ran out, while it ran. A worker
-        # that claimed it again since then settles the job.
+def _record_change(
+    job: Job, claim: Job, result: EnsureResult | DisableResult
+) -> tuple[Failed | None, EnsureResult | DisableResult | None]:
+    """Record a change the connection made. Returns what is left to settle,
+    if anything, and the result whose sign-in details must reach the person."""
+    error = result.group_error
+    groups_pending = (
+        isinstance(error, AdapterError) and error.retryable and claim.attempts < MAX_ATTEMPTS
+    )
+    # IAM must know a new account even if a newer workflow replaces this
+    # job. A disabled account stays active in IAM until its groups are done,
+    # so a newer workflow still plans a job there.
+    if isinstance(result, EnsureResult) or not groups_pending:
         try:
             with transaction.atomic():
                 accounts.record_job_result(job, result)
         except accounts.AccountConflict as exc:
-            conflict = str(exc)
-        current = not conflict and not _claimed_elsewhere(job, claim)
-        if current:
-            job.status = Job.Status.SUCCEEDED
-            job.finished_at = timezone.now()
-            job.locked_until = None
-            job.last_error = ""
-            job.result = _result_summary(result)
-            job.save(
-                update_fields=["status", "finished_at", "locked_until", "last_error", "result"]
-            )
-            _close_tasks(
-                job.tasks.filter(status=Task.Status.OPEN, kind=Task.Kind.FAILURE),
-                Task.Status.DONE,
-                note="Resolved by a retry.",
-            )
-            if result.group_error is not None and _workflow_is_current(job):
-                group_task = _open_group_task(job, result.group_error)
-        if not conflict:
-            audit.record(
-                f"job.{job.action}",
-                _success_summary(job, result),
-                person=job.person,
-                target=job,
-                details=_result_summary(result),
-            )
-        if current:
-            _settle(job, group_task)
-    if conflict:
-        return fail_job(claim, conflict, retryable=False)
-    hand_over_sign_in(job, result)
-    return job
+            return Failed(str(exc), retryable=False), None
+    if groups_pending:
+        audit.record(
+            f"job.{job.action}",
+            f"{_success_summary(job, result)}. The groups are not done yet.",
+            person=job.person,
+            target=job,
+            details=_result_summary(result),
+        )
+        # The job runs again for the groups. A new account's password must
+        # reach the person now: the next run finds the account and
+        # generates none.
+        return Failed(str(error), retryable=True), result
+    # A worker that claimed the job again since then settles it.
+    current = not _claimed_elsewhere(job, claim)
+    group_task = None
+    if current:
+        job.status = Job.Status.SUCCEEDED
+        job.finished_at = timezone.now()
+        job.locked_until = None
+        job.last_error = ""
+        job.result = _result_summary(result)
+        job.save(update_fields=["status", "finished_at", "locked_until", "last_error", "result"])
+        _close_tasks(
+            job.tasks.filter(status=Task.Status.OPEN, kind=Task.Kind.FAILURE),
+            Task.Status.DONE,
+            note="Resolved by a retry.",
+        )
+        if error is not None and _workflow_is_current(job):
+            group_task = _open_group_task(job, error)
+    audit.record(
+        f"job.{job.action}",
+        _success_summary(job, result),
+        person=job.person,
+        target=job,
+        details=_result_summary(result),
+    )
+    if current:
+        _settle(job, group_task)
+    return None, result
 
 
 def _result_summary(result: EnsureResult | DisableResult) -> dict:
@@ -573,51 +620,58 @@ def _success_summary(job: Job, result) -> str:
     return f"Disabled the {name}" if result.changed else f"The {name} was already disabled"
 
 
-def fail_job(job: Job, message: str, *, retryable: bool) -> Job:
-    task = None
-    claim = job
-    with transaction.atomic():
-        job = _locked(job)
-        if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
-            return job
-        if _claimed_elsewhere(job, claim):
-            return job
-        if _replaced(job):
-            # A newer workflow replaced this one while the job ran.
-            cancel_job(job, note=f"Replaced by a newer workflow after: {message[:500]}")
-            _settle(job)
-            return job
-        job.last_error = message[:2000]
-        job.locked_until = None
-        if retryable and job.attempts < MAX_ATTEMPTS:
-            job.status = Job.Status.QUEUED
-            job.next_attempt_at = timezone.now() + backoff(job.attempts)
-            job.save(update_fields=["status", "last_error", "locked_until", "next_attempt_at"])
-            return job
-        job.status = Job.Status.FAILED
-        job.save(update_fields=["status", "last_error", "locked_until"])
-        task = _open_task(
-            job,
-            Task.Kind.FAILURE,
-            f"Fix: {job.get_action_display().lower()} at {job.connection.name} for {job.person.full_name}",
-            "\n\n".join(
-                [
-                    f"The app stopped after {job.attempts} attempt(s): {message}",
-                    "Fix the cause and press Retry on the job, or make the change by hand "
-                    "and complete this task.",
-                    _manual_steps(job),
-                ]
-            ),
-        )
-        audit.record(
-            "job.failed",
-            f"{job.get_action_display()} at {job.connection.name} for {job.person.full_name} failed",
-            person=job.person,
-            target=job,
-            details={"error": message[:500], "attempts": job.attempts},
-        )
-        _settle(job, task)
-    return job
+def _settle_claim(job: Job, claim: Job, outcome: Failed | ForAPerson | Rehearsed) -> None:
+    """Settle a job whose attempt changed nothing at the connection."""
+    if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
+        return
+    if _claimed_elsewhere(job, claim):
+        return
+    if _replaced(job):
+        note = "Replaced by a newer workflow."
+        if isinstance(outcome, Failed):
+            note = f"Replaced by a newer workflow after: {outcome.message[:500]}"
+        cancel_job(job, note=note)
+        _settle(job)
+    elif isinstance(outcome, Failed):
+        _fail(job, outcome.message, retryable=outcome.retryable)
+    elif isinstance(outcome, ForAPerson):
+        _settle(job, _hand_to_person(job))
+    else:
+        _rehearsed(job, outcome.plan)
+
+
+def _fail(job: Job, message: str, *, retryable: bool) -> None:
+    """Run the job again after a pause, or hand it to a person."""
+    job.last_error = message[:2000]
+    job.locked_until = None
+    if retryable and job.attempts < MAX_ATTEMPTS:
+        job.status = Job.Status.QUEUED
+        job.next_attempt_at = timezone.now() + backoff(job.attempts)
+        job.save(update_fields=["status", "last_error", "locked_until", "next_attempt_at"])
+        return
+    job.status = Job.Status.FAILED
+    job.save(update_fields=["status", "last_error", "locked_until"])
+    task = _open_task(
+        job,
+        Task.Kind.FAILURE,
+        f"Fix: {job.get_action_display().lower()} at {job.connection.name} for {job.person.full_name}",
+        "\n\n".join(
+            [
+                f"The app stopped after {job.attempts} attempt(s): {message}",
+                "Fix the cause and press Retry on the job, or make the change by hand "
+                "and complete this task.",
+                _manual_steps(job),
+            ]
+        ),
+    )
+    audit.record(
+        "job.failed",
+        f"{job.get_action_display()} at {job.connection.name} for {job.person.full_name} failed",
+        person=job.person,
+        target=job,
+        details={"error": message[:500], "attempts": job.attempts},
+    )
+    _settle(job, task)
 
 
 def _workflow_is_current(job: Job) -> bool:
@@ -701,56 +755,27 @@ def _open_task(job: Job, kind: str, title: str, instructions: str) -> Task | Non
 # -- read-only mode ------------------------------------------------------------
 
 
-def rehearse_job(job: Job, connection: Connection, person: Person) -> Job:
-    """Read-only mode: find out what the job would change, and change
-    nothing. At a connection that changes accounts automatically the worker
-    reads the account and its groups as the job would; anywhere else it
-    records the steps a person would get, without opening a task. A read
-    that fails is handled like any failed job, so it shows where real
-    failures show."""
-    if connection.writes_automatically and _can_write(connection):
-        try:
-            plan = _rehearse_change(job, connection, person)
-        except AdapterError as exc:
-            return fail_job(job, str(exc), retryable=exc.retryable)
-        except SecretUnreadable as exc:
-            return fail_job(job, str(exc), retryable=False)
-        except Exception as exc:  # noqa: BLE001 - every failure must reach a person
-            logger.exception("Rehearsal of job %s failed unexpectedly", job.pk)
-            _report_to_sentry(exc)
-            return fail_job(
-                job,
-                f"Unexpected error ({type(exc).__name__}). The details are in the worker log.",
-                retryable=False,
-            )
-    else:
-        plan = {"would": "ask a person to make the change", "steps": _manual_steps(job)}
-    with transaction.atomic():
-        claim, job = job, _locked(job)
-        if job.status not in (Job.Status.RUNNING, Job.Status.QUEUED):
-            return job
-        if _claimed_elsewhere(job, claim):
-            return job
-        if _replaced(job):
-            cancel_job(job, note="Replaced by a newer workflow.")
-            _settle(job)
-            return job
-        job.status = Job.Status.REHEARSED
-        job.finished_at = timezone.now()
-        job.locked_until = None
-        job.last_error = ""
-        job.result = plan
-        job.save(update_fields=["status", "finished_at", "locked_until", "last_error", "result"])
-        audit.record(
-            "job.rehearsed",
-            f"Read-only mode: checked {job.get_action_display().lower()} at "
-            f"{connection.name} for {person.full_name} and changed nothing",
-            person=person,
-            target=job,
-            details=plan,
-        )
-        _settle(job)
-    return job
+def _rehearsed(job: Job, plan: dict) -> None:
+    """Read-only mode: record what the job would change. At a connection
+    that changes accounts automatically, attempt read the account and its
+    groups as the job would; anywhere else the plan holds the steps a person
+    would get, and nobody gets a task. A read that fails is a failed job,
+    so it shows where real failures show."""
+    job.status = Job.Status.REHEARSED
+    job.finished_at = timezone.now()
+    job.locked_until = None
+    job.last_error = ""
+    job.result = plan
+    job.save(update_fields=["status", "finished_at", "locked_until", "last_error", "result"])
+    audit.record(
+        "job.rehearsed",
+        f"Read-only mode: checked {job.get_action_display().lower()} at "
+        f"{job.connection.name} for {job.person.full_name} and changed nothing",
+        person=job.person,
+        target=job,
+        details=plan,
+    )
+    _settle(job)
 
 
 def _rehearse_change(job: Job, connection: Connection, person: Person) -> dict:
