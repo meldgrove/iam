@@ -136,16 +136,20 @@ describe("taking over the database of the Django version", () => {
     await loadFixture();
     expect(await upgrade(DJANGO)).toBe(true);
     await withClient(DJANGO, async (client) => {
-      // Two people signed in on 0.3 (session and last_login at the same time).
+      // Two people signed in on 0.3 twice each (two browsers), then signed
+      // out of the newer session: the older one stays theirs.
       const { rows } = await client.query<{ id: string }>("select id from iam_user order by id limit 2");
       expect(rows).toHaveLength(2);
       for (const { id } of rows) {
         await client.query(
           `insert into iam_session (id, user_id, created_at, expires_at, id_token)
-           values (md5(random()::text) || md5(random()::text), $1, '2026-11-20T10:00:00Z', now() + interval '1 day', '')`,
+           values (md5(random()::text) || md5(random()::text), $1, '2026-11-20T09:00:00Z', now() + interval '1 day', '')`,
           [id],
         );
-        await client.query("update iam_user set last_login = '2026-11-20T10:00:00Z' where id = $1", [id]);
+        await client.query(
+          "update iam_user set last_login = '2026-11-20T10:00:00Z', last_session_at = '2026-11-20T10:00:00Z' where id = $1",
+          [id],
+        );
       }
       // After a rollback, the first signed in (and maybe out) on 0.2.
       await client.query("update iam_user set last_login = '2026-11-20T11:00:00Z' where id = $1", [

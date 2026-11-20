@@ -88,7 +88,10 @@ export const users = pgTable(
   "iam_user",
   {
     id: id(),
+    /** The last sign-in, in this version or the Django version before. */
     lastLogin: stamp("last_login"),
+    /** The last sign-in in this version: a later last_login comes from the Django version. */
+    lastSessionAt: stamp("last_session_at"),
     email: varchar("email", { length: 254 }).notNull(),
     displayName: varchar("display_name", { length: 200 })
       .notNull()

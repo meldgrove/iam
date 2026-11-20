@@ -49,13 +49,14 @@ export async function startSession(c: Context, user: Pick<User, "id">, idToken =
       // deactivation, before writing its session.
       .for("no key update");
     if (!active) return false;
+    await tx.insert(sessions).values({ id: hash(token), userId: user.id, expiresAt, idToken });
     // The same time in both: a later last_login comes from the Django
     // version after a rollback (endSessionsBeforeDjangoSignIns).
     const signedInAt = new Date();
     await tx
-      .insert(sessions)
-      .values({ id: hash(token), userId: user.id, createdAt: signedInAt, expiresAt, idToken });
-    await tx.update(users).set({ lastLogin: signedInAt }).where(eq(users.id, user.id));
+      .update(users)
+      .set({ lastLogin: signedInAt, lastSessionAt: signedInAt })
+      .where(eq(users.id, user.id));
     return true;
   });
   if (!started) return null;
