@@ -85,7 +85,7 @@ function UserForm({ user, people }: { user: UserRow | null; people: Ref[] }) {
       />
       <form onSubmit={submit} noValidate className="grid gap-4">
         <Card>
-          <CardContent className="grid gap-5 sm:grid-cols-2">
+          <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <TextField
               id="email"
               label="Email"

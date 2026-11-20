@@ -160,7 +160,7 @@ function ConnectionFormView({ id, initial }: { id?: number; initial: ConnectionF
       <PageHeader title={title} description={adapter.description} />
       <form onSubmit={submit} noValidate autoComplete="off" className="grid gap-4">
         <Card>
-          <CardContent className="grid gap-5 sm:grid-cols-2">
+          <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <TextField
               id="name"
               label="Name"
@@ -210,7 +210,7 @@ function ConnectionFormView({ id, initial }: { id?: number; initial: ConnectionF
             </CardDescription>
           </CardHeader>
           {adapter.fields.length > 0 ? (
-            <CardContent className="grid gap-5 sm:grid-cols-2">
+            <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               {adapter.fields.map((field) => (
                 <div key={field.name} className={cn(field.kind === "textarea" && "sm:col-span-2")}>
                   {field.kind === "secret" ? (

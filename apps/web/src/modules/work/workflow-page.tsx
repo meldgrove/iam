@@ -80,7 +80,7 @@ export function WorkflowPage({ id }: { id: number }) {
       <Section title="Jobs">
         <JobsTable jobs={workflow.jobs} showPerson={false} />
       </Section>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Section title="Desired access when started">
           {workflow.desired.length === 0 ? (
             <Empty>No access: every known account is disabled.</Empty>

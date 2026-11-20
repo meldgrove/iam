@@ -243,14 +243,14 @@ export function PersonPage({ id }: { id: number }) {
           </AlertDescription>
         </Alert>
       ) : null}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ProfileCard person={person} />
         <Section title="Open work">
           <JobsTable jobs={person.openJobs} showPerson={false} />
         </Section>
       </div>
       <AccessCard rows={person.accessRows} />
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Section title="Workflows">
           <WorkflowsTable workflows={person.workflows} showPerson={false} />
         </Section>

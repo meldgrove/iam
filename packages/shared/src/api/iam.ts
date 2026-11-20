@@ -85,6 +85,8 @@ export type WorkflowRow = {
 /** Public: what the sign-in page shows. */
 export type AuthConfig = {
   appName: string;
+  /** Whether the request came with a session (the sign-in page then moves on). */
+  signedIn: boolean;
   providerName: string;
   oidcEnabled: boolean;
   devLogin: boolean;
@@ -184,6 +186,13 @@ export type PersonDetail = {
   can: { onboard: boolean; update: boolean; offboard: boolean; archive: boolean };
 };
 
+/** A real calendar date as YYYY-MM-DD (not 2026-02-30). */
+function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value && value >= "0001-01-01";
+}
+
 const trimmed = (max: number, message?: string) =>
   z
     .string()
@@ -198,7 +207,7 @@ const emailField = z
 const dateField = z
   .string()
   .trim()
-  .refine((value) => value === "" || /^\d{4}-\d{2}-\d{2}$/.test(value), "Enter a valid date.")
+  .refine((value) => value === "" || isCalendarDate(value), "Enter a valid date.")
   .transform((value) => value || null)
   .nullable()
   .optional()

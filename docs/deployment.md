@@ -123,8 +123,9 @@ when a deploy stops it, and web 40 seconds to finish its requests.
 2. **Access profiles:** one per kind of person, with the accounts and groups
    they get. Mark the default profile per person type.
 3. **Teams:** with the groups their members join.
-4. **Accounts:** run "Compare accounts now" on each connection. It links
-   existing accounts to people by work email or username and lists drift. An
+4. **Accounts:** on each connection's page in Admin › Connections, run
+   "Compare accounts now". It links existing accounts to people by work
+   email or username and lists drift. An
    account whose username matches but whose email is someone else's stays
    unlinked.
 5. **People:** add them, or connect Personio to import them.

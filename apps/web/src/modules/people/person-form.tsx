@@ -138,7 +138,7 @@ export function PersonForm({ person, options }: { person?: PersonDetail; options
   return (
     <form noValidate onSubmit={submit} className="grid gap-6">
       <Card>
-        <CardContent className="grid gap-6 md:grid-cols-2">
+        <CardContent className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <TextField
             {...text("firstName")}
             label={<Required>First name</Required>}

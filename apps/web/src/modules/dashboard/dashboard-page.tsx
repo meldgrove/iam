@@ -152,7 +152,7 @@ export function DashboardPage() {
         />
         <Stat to="/people" search={{ status: "planned" }} value={data.peopleCounts.planned} label="Planned" />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <PeopleDates title="Starting in the next 30 days" rows={data.starting} />
         <PeopleDates title="Leaving in the next 30 days" rows={data.leaving} />
       </div>

@@ -111,6 +111,21 @@ describe("people", () => {
     expect(await getDb().select().from(people)).toEqual([]);
   });
 
+  it("refuses a date that is not in the calendar, and takes Django's email addresses", async () => {
+    const approver = await makeUser("approver");
+    const invalid = await request("POST", "/api/v1/people", {
+      user: approver,
+      body: { ...NEW_PERSON, firstName: "A", lastName: "B", startDate: "2026-02-30" },
+    });
+    expect(invalid.status).toBe(422);
+    expect(invalid.body.error.fields.startDate).toBe("Enter a valid date.");
+    const local = await request("POST", "/api/v1/people", {
+      user: approver,
+      body: { ...NEW_PERSON, firstName: "A", lastName: "B", workEmail: "ops@localhost" },
+    });
+    expect(local.status).toBe(201);
+  });
+
   it("lets only an admin change the last day of a person linked to an admin", async () => {
     const { person } = await standardSetup();
     const approver = await makeUser("approver");

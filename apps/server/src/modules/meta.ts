@@ -19,6 +19,7 @@ router.get("/auth-config", (c) => {
   const settings = config();
   const body: AuthConfig = {
     appName: "Meldgrove IAM",
+    signedIn: c.get("user") !== null,
     providerName: settings.oidcProviderName,
     oidcEnabled: settings.oidcEnabled,
     devLogin: settings.isDevelopment && settings.DEV_LOGIN,

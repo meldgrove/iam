@@ -34,12 +34,13 @@ export function safeNext(target: string | undefined): string {
 
 /** Sends the browser away from a sign-in page when a session exists already. */
 async function leaveWhenSignedIn(next: string | undefined) {
-  // A plain request, so a 401 doesn't trigger the sign-out handling.
-  const response = await fetch(apiUrl("/me"), {
+  // The public settings say whether a session came along: no 401 for people who are signed out.
+  const response = await fetch(apiUrl("/auth-config"), {
     credentials: "same-origin",
     headers: { accept: "application/json" },
   }).catch(() => null);
-  if (response?.ok) throw redirect({ to: safeNext(next) });
+  const config = response?.ok ? ((await response.json()) as { signedIn?: boolean }) : null;
+  if (config?.signedIn) throw redirect({ to: safeNext(next) });
 }
 
 function SignInPage() {

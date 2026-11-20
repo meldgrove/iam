@@ -69,7 +69,7 @@ export function JobPage({ id }: { id: number }) {
           </AlertDescription>
         </Alert>
       ) : null}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Section title="Details">
           <Details className="lg:grid-cols-2">
             <Detail label="Attempts">{job.attempts}</Detail>
@@ -100,7 +100,7 @@ export function JobPage({ id }: { id: number }) {
           )}
         </Section>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Section title="Tasks">
           <TasksTable tasks={job.tasks} showPerson={false} />
         </Section>
