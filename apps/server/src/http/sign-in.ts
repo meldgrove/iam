@@ -117,7 +117,7 @@ export function signInRoutes() {
     try {
       const user = await userForClaims(signedIn.claims);
       if (!user) return toSignIn(c, "denied");
-      await startSession(c, user, signedIn.idToken);
+      if (!(await startSession(c, user, signedIn.idToken))) return toSignIn(c, "denied");
     } catch (error) {
       if (error instanceof SignInRefused) {
         logger.warn({ reason: error.message }, "sign-in refused");

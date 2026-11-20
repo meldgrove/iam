@@ -36,7 +36,9 @@ export function webApp() {
       return c.text("The web app is not built. Run `npm run build` or use the Vite dev server.", 503);
     }
     c.header("cache-control", "no-cache");
-    return c.html(indexHtml);
+    // The development sign-in does not exist elsewhere: the web app shows "Not found", with its status.
+    const missing = /^\/login\/dev\/?$/.test(c.req.path) && !(config().isDevelopment && config().DEV_LOGIN);
+    return c.html(indexHtml, missing ? 404 : 200);
   });
   return app;
 }

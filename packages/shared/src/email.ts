@@ -19,9 +19,11 @@ function isIPv6(value: string): boolean {
   }
 }
 
+// Python's case-insensitive [A-Z] also takes the dotted İ and the dotless ı,
+// which JavaScript's case folding leaves out: they are listed.
 const EMAIL_USER =
   // eslint-disable-next-line no-control-regex -- Django's quoted local part allows control characters.
-  /^(?:[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(?:\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f!#-[\]-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")$/iu;
+  /^(?:[-!#$%&'*+/=?^_`{}|~0-9A-Z\u0130\u0131]+(?:\.[-!#$%&'*+/=?^_`{}|~0-9A-Z\u0130\u0131]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f!#-[\]-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")$/iu;
 const UNICODE_LETTERS = "\\u00a1-\\uffff";
 const EMAIL_DOMAIN = new RegExp(
   `^[a-z${UNICODE_LETTERS}0-9](?:[a-z${UNICODE_LETTERS}0-9-]{0,61}[a-z${UNICODE_LETTERS}0-9])?` +

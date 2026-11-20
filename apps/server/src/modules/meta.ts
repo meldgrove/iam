@@ -76,7 +76,7 @@ router.post("/auth/dev-login", async (c) => {
     .where(and(sql`lower(${users.email}) = lower(${email})`, eq(users.isActive, true)))
     .limit(1);
   if (!user) throw notFound("No active app user has this address.");
-  await startSession(c, user);
+  if (!(await startSession(c, user))) throw notFound("No active app user has this address.");
   return c.json({ ok: true });
 });
 

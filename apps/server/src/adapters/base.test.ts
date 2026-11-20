@@ -5,6 +5,7 @@ import { ManualAdapter } from "./manual";
 describe("casefold", () => {
   it("compares as Python's str.casefold does", () => {
     expect(casefold("STRASSE")).toBe(casefold("straße"));
+    expect(casefold("STRAẞE")).toBe("strasse");
     expect(casefold("ﬁle")).toBe(casefold("FILE"));
     expect(casefold("Ada")).toBe("ada");
     // casefold keeps the dotless ı apart from i.

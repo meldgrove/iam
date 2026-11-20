@@ -23,6 +23,7 @@ import {
 import {
   HttpTimeoutError,
   HttpTransportError,
+  timing,
   type HttpClient,
   type HttpResponse,
   type RequestOptions,
@@ -172,10 +173,17 @@ function base64url(value: string): string {
 /** OAuth errors google-auth retries: the token endpoint was busy, not the key wrong. */
 const TEMPORARY_OAUTH_ERRORS = new Set(["temporarily_unavailable", "server_error", "internal_failure"]);
 
+/** Tries of the token exchange while Google's token endpoint is busy. */
+const TOKEN_TRIES = 3;
+
+/** Whether the answer names a temporary OAuth error, in `error` or, as google-auth reads it, `error_description`. */
 function oauthErrorIsTemporary(response: HttpResponse): boolean {
   try {
-    const error = asRecord(response.json()).error;
-    return typeof error === "string" && TEMPORARY_OAUTH_ERRORS.has(error);
+    const body = asRecord(response.json());
+    return [body.error, body.error_description].some(
+      (value) =>
+        typeof value === "string" && [...TEMPORARY_OAUTH_ERRORS].some((code) => value.includes(code)),
+    );
   } catch {
     return false;
   }
@@ -327,26 +335,31 @@ export class GoogleWorkspaceAdapter extends Adapter {
     } catch (error) {
       throw new ConfigurationError("Google could not sign in the service account.", { cause: error });
     }
+    // As google-auth: a busy token endpoint gets three tries, a short pause between them.
     let response: HttpResponse;
-    try {
-      response = await this.http().request("POST", key.tokenUri, {
-        form: { grant_type: JWT_GRANT_TYPE, assertion },
-      });
-    } catch (error) {
-      if (error instanceof HttpTimeoutError || error instanceof HttpTransportError) {
-        throw new TransientError("Could not reach Google to sign in the service account.", { cause: error });
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        response = await this.http().request("POST", key.tokenUri, {
+          form: { grant_type: JWT_GRANT_TYPE, assertion },
+        });
+      } catch (error) {
+        if (error instanceof HttpTimeoutError || error instanceof HttpTransportError) {
+          throw new TransientError("Could not reach Google to sign in the service account.", {
+            cause: error,
+          });
+        }
+        throw error;
       }
-      throw error;
-    }
-    // google-auth tries these answers three times before it gives up; the
-    // job's own retry takes that part here.
-    if (
-      response.status === 408 ||
-      response.status === 429 ||
-      response.status >= 500 ||
-      oauthErrorIsTemporary(response)
-    ) {
-      throw new TransientError("Could not reach Google to sign in the service account.");
+      const busy =
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500 ||
+        oauthErrorIsTemporary(response);
+      if (!busy) break;
+      if (attempt >= TOKEN_TRIES) {
+        throw new TransientError("Could not reach Google to sign in the service account.");
+      }
+      await timing.pause(attempt);
     }
     let token: unknown;
     if (response.status === 200) {

@@ -196,33 +196,37 @@ export async function recordManualChange(
   job: Pick<Job, "connectionId" | "personId" | "action" | "groups">,
 ): Promise<void> {
   const ensuring = job.action === "ensure_account";
-  // Locked: a comparison may be replacing this row with the account it
-  // listed. Then the row is gone once the lock is free, the insert below
-  // collides with the listed account, and the completion fails instead of
-  // losing the change (as Django's save() did).
-  const [existing] = await q()
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.connectionId, job.connectionId), eq(accounts.personId, job.personId)))
-    .limit(1)
-    .for("update", { of: accounts });
   const values: Partial<Account> = {
     status: ensuring ? "active" : "disabled",
     appliedGroups: ensuring ? sorted(job.groups) : [],
     observedAt: new Date(),
   };
   if (ensuring) values.observedGroups = sorted(job.groups);
-  if (existing) {
-    await q().update(accounts).set(values).where(eq(accounts.id, existing.id));
-  } else {
-    await q()
-      .insert(accounts)
-      .values({
-        ...values,
-        connectionId: job.connectionId,
-        personId: job.personId,
-      } as typeof accounts.$inferInsert);
+  // Locked: a comparison may be replacing this row with the account it listed.
+  // Then the row is gone once the lock is free, and the insert finds the
+  // listed account in its place: the change is recorded there.
+  const current = () =>
+    q()
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.connectionId, job.connectionId), eq(accounts.personId, job.personId)))
+      .limit(1)
+      .for("update", { of: accounts });
+  let [existing] = await current();
+  if (!existing) {
+    const inserted = await q().execute(sql`
+      insert into ${accounts} (connection_id, person_id, external_id, username, email, display_name, status,
+        observed_groups, applied_groups, observed_at, created_by_app, updated_at)
+      values (${job.connectionId}, ${job.personId}, '', '', '', '', ${values.status},
+        ${values.observedGroups ? JSON.stringify(values.observedGroups) : null}::jsonb,
+        ${JSON.stringify(values.appliedGroups)}::jsonb, now(), false, now())
+      on conflict (connection_id, person_id) where person_id is not null do nothing
+      returning id
+    `);
+    if (inserted.rows.length > 0) return;
+    [existing] = await current();
   }
+  await q().update(accounts).set(values).where(eq(accounts.id, existing!.id));
 }
 
 export type ListingSummary = { accounts: number; new_links: number; missing: number };

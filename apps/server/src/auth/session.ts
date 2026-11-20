@@ -29,16 +29,29 @@ export function secureCookies(): boolean {
   return config().APP_URL.startsWith("https://");
 }
 
-/** Starts a session for the user and sets its cookie. Returns the expiry. */
-export async function startSession(c: Context, user: Pick<User, "id">, idToken = ""): Promise<Date> {
+/**
+ * Starts a session for the user and sets its cookie; null when the user was
+ * turned off meanwhile. The user's row is locked while the session is
+ * written, so a user turned off at the same time loses it with the others.
+ */
+export async function startSession(c: Context, user: Pick<User, "id">, idToken = ""): Promise<Date | null> {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + config().SESSION_HOURS * 3600 * 1000);
-  const db = getDb();
   // A new sign-in replaces the session the browser had.
   await endSession(c);
-  await db.insert(sessions).values({ id: hash(token), userId: user.id, expiresAt, idToken });
-  await db.update(users).set({ lastLogin: new Date() }).where(eq(users.id, user.id));
-  await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
+  const started = await getDb().transaction(async (tx) => {
+    const [active] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, user.id), eq(users.isActive, true)))
+      .for("share");
+    if (!active) return false;
+    await tx.insert(sessions).values({ id: hash(token), userId: user.id, expiresAt, idToken });
+    await tx.update(users).set({ lastLogin: new Date() }).where(eq(users.id, user.id));
+    return true;
+  });
+  if (!started) return null;
+  await getDb().delete(sessions).where(lt(sessions.expiresAt, new Date()));
   setCookie(c, sessionCookie(), token, {
     httpOnly: true,
     secure: secureCookies(),

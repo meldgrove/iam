@@ -200,6 +200,8 @@ export function config(): Config {
     legacyOrigin ??
     (isDevelopment ? `http://localhost:${value.PORT}` : "");
   appUrl = appUrl.replace(/\/+$/, "");
+  // Scheme and host in lower case (HTTPS://… counts as https), no slash at the end.
+  if (appUrl && URL.canParse(appUrl)) appUrl = new URL(appUrl).href.replace(/\/+$/, "");
   if (!appUrl) problems.push("APP_URL: Set the public URL, e.g. https://iam.example.invalid");
   else if (!z.url({ protocol: /^https?$/ }).safeParse(appUrl).success) {
     problems.push("APP_URL: Must be an http:// or https:// URL");

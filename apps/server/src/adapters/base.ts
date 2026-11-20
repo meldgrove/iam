@@ -785,7 +785,8 @@ export function casefold(value: string): string {
   let folded = "";
   for (const character of value)
     folded += character === "ı" ? character : character.toUpperCase().toLowerCase();
-  return folded;
+  // Capital ẞ lowers to ß, which casefold writes as ss.
+  return folded.replaceAll("ß", "ss");
 }
 
 export function asError(error: unknown): Error {

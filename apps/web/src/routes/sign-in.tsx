@@ -103,7 +103,8 @@ export const signInRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
   validateSearch: searchSchema,
-  beforeLoad: ({ search }) => leaveWhenSignedIn(search.next),
+  // With an error to show, the page stays, signed in or not (a refused switch of accounts).
+  beforeLoad: ({ search }) => (search.error ? undefined : leaveWhenSignedIn(search.next)),
   component: SignInPage,
 });
 

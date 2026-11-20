@@ -13,6 +13,7 @@ import {
 import { GoogleWorkspaceAdapter, SCOPES } from "./google-workspace";
 import {
   answer,
+  answers,
   connectError,
   json,
   mockFetch,
@@ -464,6 +465,22 @@ describe("Google Workspace", () => {
     expect(delegated).toBeInstanceOf(ConfigurationError);
     expect(delegated.message).toMatch(/domain-wide delegation/);
     expect(delegated.message).not.toContain("secret detail");
+  });
+
+  it("tries a busy token endpoint three times, as google-auth did", async () => {
+    const config = { service_account_json: serviceAccountJson(), domain: "example.invalid" };
+    const recovering = transport(
+      answers(
+        answer(503),
+        json(400, { error: "invalid_grant", error_description: "temporarily_unavailable: try again" }),
+        json(200, { access_token: "token", expires_in: 3600 }),
+      ),
+    );
+    expect(await new SignIn(config, { fetch: recovering }).signIn()).toBe("token");
+    expect(recovering.requests).toHaveLength(3);
+    const busy = transport(() => answer(503));
+    expect(await failure(new SignIn(config, { fetch: busy }).signIn())).toBeInstanceOf(TransientError);
+    expect(busy.requests).toHaveLength(3);
   });
 
   it.each([

@@ -119,6 +119,7 @@ export async function startWorkflow(
       const settings = await loadSettings();
       const horizon = addDays(today(), settings.onboardingLeadDays);
       if (
+        !settings.automaticOnboarding ||
         person.status !== "planned" ||
         person.onboardingPaused ||
         !person.startDate ||

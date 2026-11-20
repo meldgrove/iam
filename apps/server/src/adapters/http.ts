@@ -135,26 +135,24 @@ function isTimeout(error: unknown): boolean {
 async function readText(response: Response, signal: AbortSignal, onChunk: () => void): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader();
-  const aborted = new Promise<never>((_resolve, reject) => {
-    const stop = () => {
-      reject(new DOMException("The answer took too long", "TimeoutError"));
-      reader.cancel().catch(() => undefined);
-    };
-    if (signal.aborted) stop();
-    else signal.addEventListener("abort", stop, { once: true });
-  });
-  aborted.catch(() => undefined);
-  const decoder = new TextDecoder();
-  let text = "";
-  for (;;) {
-    const { done, value } = await Promise.race([reader.read(), aborted]);
-    // A cancelled read ends as done: the body did not arrive in time.
-    if (signal.aborted) throw new DOMException("The answer took too long", "TimeoutError");
-    if (done) break;
-    onChunk();
-    text += decoder.decode(value, { stream: true });
+  // One listener: a cancelled read ends as done, and the check below tells why.
+  const stop = () => void reader.cancel().catch(() => undefined);
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    const decoder = new TextDecoder();
+    let text = "";
+    for (;;) {
+      if (signal.aborted) throw new DOMException("The answer took too long", "TimeoutError");
+      const { done, value } = await reader.read();
+      if (signal.aborted) throw new DOMException("The answer took too long", "TimeoutError");
+      if (done) break;
+      onChunk();
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    signal.removeEventListener("abort", stop);
   }
-  return text + decoder.decode();
 }
 
 export class HttpClient {

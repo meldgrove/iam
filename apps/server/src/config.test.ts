@@ -104,6 +104,11 @@ describe("config", () => {
     expect(configWith({ NODE_ENV: "development", HOST: undefined })().HOST).toBe("127.0.0.1");
   });
 
+  it("writes the scheme and host of APP_URL in lower case", () => {
+    const settings = configWith({ APP_URL: "HTTPS://IAM.Example.invalid/" })();
+    expect(settings.APP_URL).toBe("https://iam.example.invalid");
+  });
+
   it("checks the time zone", () => {
     expect(configWith({ TZ: "Europe/Berlin" })().TZ).toBe("Europe/Berlin");
     expect(configWith({ TZ: "Mars/Olympus" })).toThrow(/Not a time zone/);
