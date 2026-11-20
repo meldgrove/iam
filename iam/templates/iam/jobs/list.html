@@ -1,8 +1,0 @@
-{% extends "iam/base.html" %}{% load iam_tags %}
-{% block title %}Jobs{% endblock %}
-{% block content %}
-<div class="page-head"><div><h1>Jobs</h1><p class="sub">Each job is one change at one connection.</p></div></div>
-<div class="tabs"><a class="{% if status == 'attention' %}active{% endif %}" href="?status=attention">Needs attention</a><a class="{% if status == 'open' %}active{% endif %}" href="?status=open">Open</a>{% for value, label in statuses %}<a class="{% if status == value %}active{% endif %}" href="?status={{ value }}">{{ label }}</a>{% endfor %}<a class="{% if status == 'all' %}active{% endif %}" href="?status=all">All</a></div>
-<div class="table-wrap">{% include "iam/includes/jobs_table.html" with jobs=page.object_list show_person=True %}</div>
-{% include "iam/includes/pagination.html" %}
-{% endblock %}
