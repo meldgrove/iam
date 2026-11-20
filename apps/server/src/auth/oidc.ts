@@ -149,7 +149,9 @@ export async function discovery(): Promise<Endpoints> {
     ) {
       // Sign-in can use explicit endpoints while discovery is unavailable; it
       // is tried again on the next request so provider logout can recover.
-      return validateDiscovery({ issuer: settings.oidcIssuer }, explicit);
+      // ID tokens must name the issuer as configured, with or without the
+      // slash at the end some providers sign.
+      return validateDiscovery({ issuer: settings.oidcIssuerConfigured }, explicit);
     }
     throw new ProviderUnavailable("Could not read the discovery document.");
   }

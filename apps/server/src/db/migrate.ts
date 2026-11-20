@@ -5,7 +5,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { config } from "../config";
 import { SERVER_ROOT } from "../paths";
 import { connectionOptions } from "./client";
-import { adoptDjangoDatabase, endDjangoSessions } from "./django";
+import { adoptDjangoDatabase, endDjangoSessions, endSessionsBeforeDjangoSignIns } from "./django";
 import { logger } from "../logger";
 
 export function migrationsFolder(): string {
@@ -34,7 +34,8 @@ export async function runMigrations() {
 
 /**
  * Takes over a database of the Django version, applies the migrations and
- * ends Django's sessions. True when the database was taken over now.
+ * ends the sessions a rollback to it would leave behind, in both versions.
+ * True when the database was taken over now.
  */
 export async function migrateWith(client: pg.Client, folder: string): Promise<boolean> {
   const adopted = await adoptDjangoDatabase(client, folder);
@@ -42,5 +43,6 @@ export async function migrateWith(client: pg.Client, folder: string): Promise<bo
   await migrate(drizzle(client), { migrationsFolder: folder });
   logger.info("database migrations applied");
   await endDjangoSessions(client);
+  await endSessionsBeforeDjangoSignIns(client);
   return adopted;
 }

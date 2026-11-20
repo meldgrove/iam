@@ -156,6 +156,23 @@ describe("sign-in with OpenID Connect", () => {
     await expect(discovery()).rejects.toBeInstanceOf(ProviderUnavailable);
   });
 
+  it("signs in without discovery with the issuer as configured, slash and all", async () => {
+    await createUser("viewer", "ada@example.invalid");
+    provider.userInfo = claims();
+    provider.discovery = new Response("", { status: 404 });
+    provider.idToken = { claims: { iss: `${ISSUER}/` } };
+    overrideConfigForTests({
+      oidcIssuerConfigured: `${ISSUER}/`,
+      OIDC_AUTHORIZATION_ENDPOINT: DISCOVERY.authorization_endpoint,
+      OIDC_TOKEN_ENDPOINT: DISCOVERY.token_endpoint,
+      OIDC_USERINFO_ENDPOINT: DISCOVERY.userinfo_endpoint,
+      OIDC_JWKS_ENDPOINT: DISCOVERY.jwks_uri,
+    });
+    const { location, session } = await signIn(provider);
+    expect(location).toBe("/");
+    expect(session).toBeTruthy();
+  });
+
   it("keeps the sign-out of a discovery document when endpoints are set", async () => {
     overrideConfigForTests({
       OIDC_AUTHORIZATION_ENDPOINT: `${ISSUER}/auth`,

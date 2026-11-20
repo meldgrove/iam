@@ -249,7 +249,9 @@ automatic updates do not install it.
    after sign-out `/login/`.
 6. **Going back:** set `IAM_VERSION=0.2`, check out the release's files
    (`git checkout v0.2.0`), and run `docker compose up -d --pull always`.
-   Sessions end again. Changes made in 0.3 stay in the database.
+   Sessions end again. Changes made in 0.3 stay in the database. At the next
+   upgrade, `migrate` also ends the 0.3 sessions of everyone who signed in on
+   0.2 in between.
 
 An installation of 0.1 can go straight to 0.3: `migrate` adds the columns of
 0.2 too.

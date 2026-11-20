@@ -138,6 +138,26 @@ export async function endDjangoSessions(client: pg.Client): Promise<void> {
   if (rowCount) logger.info({ sessions: rowCount }, "ended the sessions of the Django version");
 }
 
+/**
+ * Ends this version's sessions of users who signed in on the Django version
+ * after them: after a rollback to 0.2 and an upgrade again, a person who
+ * signed out of 0.2 must not find the session of 0.3 from before. Only
+ * sign-ins set last_login, in both versions; this one sets it to the
+ * session's own creation time.
+ */
+export async function endSessionsBeforeDjangoSignIns(client: pg.Client): Promise<void> {
+  const { rowCount } = await client.query(`
+    delete from iam_session session
+    using iam_user app_user
+    where app_user.id = session.user_id
+      and app_user.last_login > (
+        select max(newest.created_at) from iam_session newest where newest.user_id = app_user.id
+      )
+  `);
+  if (rowCount)
+    logger.info({ sessions: rowCount }, "ended sessions from before a sign-in on the Django version");
+}
+
 const TYPES: [RegExp, string][] = [
   [/^bigint\b/, "bigint"],
   [/^integer\b/, "integer"],

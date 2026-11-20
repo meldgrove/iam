@@ -132,6 +132,40 @@ describe("taking over the database of the Django version", () => {
     expect(await count()).toBe(0);
   });
 
+  it("ends the sessions of people who signed in on 0.2 after a rollback", async () => {
+    await loadFixture();
+    expect(await upgrade(DJANGO)).toBe(true);
+    await withClient(DJANGO, async (client) => {
+      // Two people signed in on 0.3 (session and last_login at the same time).
+      const { rows } = await client.query<{ id: string }>("select id from iam_user order by id limit 2");
+      expect(rows).toHaveLength(2);
+      for (const { id } of rows) {
+        await client.query(
+          `insert into iam_session (id, user_id, created_at, expires_at, id_token)
+           values (md5(random()::text) || md5(random()::text), $1, '2026-11-20T10:00:00Z', now() + interval '1 day', '')`,
+          [id],
+        );
+        await client.query("update iam_user set last_login = '2026-11-20T10:00:00Z' where id = $1", [id]);
+      }
+      // After a rollback, the first signed in (and maybe out) on 0.2.
+      await client.query("update iam_user set last_login = '2026-11-20T11:00:00Z' where id = $1", [
+        rows[0]!.id,
+      ]);
+    });
+    expect(await upgrade(DJANGO)).toBe(false);
+    const left = await withClient(DJANGO, async (client) =>
+      (await client.query<{ user_id: string }>("select user_id from iam_session")).rows.map((row) =>
+        String(row.user_id),
+      ),
+    );
+    const ids = await withClient(DJANGO, async (client) =>
+      (await client.query<{ id: string }>("select id from iam_user order by id limit 2")).rows.map((row) =>
+        String(row.id),
+      ),
+    );
+    expect(left).toEqual([ids[1]]);
+  });
+
   it("does nothing the second time", async () => {
     expect(await upgrade(DJANGO)).toBe(false);
     expect(await upgrade(FRESH)).toBe(false);

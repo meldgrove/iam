@@ -168,6 +168,8 @@ export type Config = Omit<Parsed, "APP_URL" | "AUTH_SECRET" | "ENCRYPTION_KEY" |
   isDevelopment: boolean;
   /** The issuer of the sign-in provider without a trailing slash; empty: sign-in not set up. */
   oidcIssuer: string;
+  /** The issuer as configured: ID tokens name it so when the provider has no discovery document. */
+  oidcIssuerConfigured: string;
   oidcProviderKind: "keycloak" | "oidc";
   oidcProviderName: string;
   oidcEnabled: boolean;
@@ -251,6 +253,7 @@ export function config(): Config {
     encryptionKeys,
     isDevelopment,
     oidcIssuer,
+    oidcIssuerConfigured: fromKeycloak ? oidcIssuer : (value.OIDC_ISSUER ?? "").trim(),
     oidcProviderKind,
     oidcProviderName:
       value.OIDC_PROVIDER_NAME ?? (oidcProviderKind === "keycloak" ? "Keycloak" : "single sign-on"),
