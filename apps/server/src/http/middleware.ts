@@ -79,7 +79,10 @@ export function requireRole(c: Context<AppEnv>, role: Role): User {
 }
 
 /** The JSON body validated with a schema. */
-export async function jsonBody<T extends z.ZodType, E extends Env>(c: Context<E>, schema: T): Promise<z.infer<T>> {
+export async function jsonBody<T extends z.ZodType, E extends Env>(
+  c: Context<E>,
+  schema: T,
+): Promise<z.infer<T>> {
   let body: unknown;
   try {
     body = await c.req.json();

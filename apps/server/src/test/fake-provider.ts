@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject, createHmac } from "node:crypto";
 import { providerFetch, resetDiscoveryCache } from "../auth/oidc";
 import { config, resetConfigForTests } from "../config";
 import { testApp } from "./helpers";
@@ -39,6 +39,12 @@ const now = () => Math.floor(Date.now() / 1000);
 export function signJwt(payload: Claims, key: KeyObject, algorithm = "RS256", kid = "k1"): string {
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const input = `${encode({ alg: algorithm, typ: "JWT", kid })}.${encode(payload)}`;
+  if (algorithm.startsWith("HS")) {
+    // Symmetric: `key` holds the client secret (createSecretKey).
+    return `${input}.${createHmac(`sha${algorithm.slice(2)}`, key.export())
+      .update(input)
+      .digest("base64url")}`;
+  }
   const digest = { RS256: "sha256", RS384: "sha384", RS512: "sha512" }[algorithm];
   if (!digest) throw new Error(`No signer for ${algorithm}`);
   return `${input}.${sign(digest, Buffer.from(input), key).toString("base64url")}`;
@@ -83,7 +89,8 @@ export class FakeProvider {
   readonly fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     this.requests.push(url);
-    if (url === DISCOVERY_URL) return this.answer(typeof this.discovery === "function" ? this.discovery() : this.discovery);
+    if (url === DISCOVERY_URL)
+      return this.answer(typeof this.discovery === "function" ? this.discovery() : this.discovery);
     if (url === DISCOVERY.jwks_uri) {
       // No "alg": it is optional in a JWKS.
       const jwk = this.key.export({ format: "jwk" });
@@ -92,7 +99,8 @@ export class FakeProvider {
     if (url === DISCOVERY.token_endpoint) return this.token(init);
     if (url === DISCOVERY.userinfo_endpoint) {
       const authorization = new Headers(init.headers).get("authorization") ?? "";
-      if (!this.accessTokens.has(authorization.replace(/^Bearer /, ""))) return Response.json({}, { status: 401 });
+      if (!this.accessTokens.has(authorization.replace(/^Bearer /, "")))
+        return Response.json({}, { status: 401 });
       return Response.json(this.userInfo);
     }
     throw new TypeError("fetch failed", { cause: new Error(`No fake for ${url}`) });
@@ -125,7 +133,9 @@ export class FakeProvider {
     this.accessTokens.add(accessToken);
     const { claims: extra = {}, algorithm = "RS256", key = this.key, raw } = this.idToken;
     const payload = Object.fromEntries(
-      Object.entries({ ...this.idTokenClaims(authorization.nonce), ...extra }).filter(([, value]) => value !== undefined),
+      Object.entries({ ...this.idTokenClaims(authorization.nonce), ...extra }).filter(
+        ([, value]) => value !== undefined,
+      ),
     );
     return Response.json({
       access_token: accessToken,
@@ -199,5 +209,10 @@ export async function signIn(provider: FakeProvider, options: { cookie?: string;
     `/oidc/callback/?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
     { headers: { cookie: cookies } },
   );
-  return { start, callback, location: callback.headers.get("location") ?? "", session: setCookie(callback, "iam_session") };
+  return {
+    start,
+    callback,
+    location: callback.headers.get("location") ?? "",
+    session: setCookie(callback, "iam_session"),
+  };
 }

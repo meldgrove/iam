@@ -5,7 +5,13 @@ import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@meldgrove/ui/card";
 import { Page, PageHeader } from "@meldgrove/ui/page";
 import { ErrorState, LoadingState } from "@meldgrove/ui/states";
-import { teamInputSchema, type ActionResult, type GroupConnection, type TeamDetail, type TeamInput } from "@iam/shared/api/iam";
+import {
+  teamInputSchema,
+  type ActionResult,
+  type GroupConnection,
+  type TeamDetail,
+  type TeamInput,
+} from "@iam/shared/api/iam";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { otherErrors, serverFieldErrors, validate, type FieldErrors } from "@/lib/form";
 import { useRecordTitle } from "@/app/record-name";
@@ -18,8 +24,10 @@ export function TeamFormPage({ id }: { id?: number }) {
   const team = useQuery({ ...teamQuery(id ?? 0), enabled: id !== undefined });
   const connections = useQuery(groupConnectionsQuery);
   useRecordTitle(`/teams/${id}`, id === undefined ? undefined : team.data?.name);
-  const failed = (id !== undefined && team.isError ? team : null) ?? (connections.isError ? connections : null);
-  if (failed) return <ErrorState error={failed.error} onRetry={() => void failed.refetch()} />;
+  if (id !== undefined && team.isError)
+    return <ErrorState error={team.error} onRetry={() => void team.refetch()} />;
+  if (connections.isError)
+    return <ErrorState error={connections.error} onRetry={() => void connections.refetch()} />;
   if ((id !== undefined && team.isPending) || connections.isPending) return <LoadingState />;
   return <TeamForm team={id === undefined ? null : (team.data ?? null)} connections={connections.data} />;
 }
@@ -50,7 +58,11 @@ function TeamForm({ team, connections }: { team: TeamDetail | null; connections:
     event.preventDefault();
     // Only groups the picker shows: one that is no longer listed in its app drops out (as in the Django version).
     const shown = new Set(connections.flatMap((connection) => connection.groups.map((group) => group.id)));
-    const input: TeamInput = { name, description, groupIds: [...groupIds].filter((groupId) => shown.has(groupId)) };
+    const input: TeamInput = {
+      name,
+      description,
+      groupIds: [...groupIds].filter((groupId) => shown.has(groupId)),
+    };
     const invalid = validate(teamInputSchema, input);
     setErrors(invalid ?? {});
     if (!invalid) save.mutate(input);
@@ -71,7 +83,15 @@ function TeamForm({ team, connections }: { team: TeamDetail | null; connections:
       <form onSubmit={submit} noValidate className="grid gap-4">
         <Card>
           <CardContent className="grid gap-5">
-            <TextField id="name" label="Name" value={name} onChange={setName} error={errors.name} maxLength={200} required />
+            <TextField
+              id="name"
+              label="Name"
+              value={name}
+              onChange={setName}
+              error={errors.name}
+              maxLength={200}
+              required
+            />
             <TextareaField
               id="description"
               label="Description"

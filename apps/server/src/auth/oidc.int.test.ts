@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createSecretKey } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,7 +17,6 @@ import {
   rsaKey,
   setCookie,
   signIn,
-  signJwt,
   useFakeProvider,
   type FakeProvider,
 } from "../test/fake-provider";
@@ -39,7 +38,8 @@ const DENIED = "/login?error=denied";
 let provider: FakeProvider;
 let restore: () => void;
 
-const authenticate = (headers: Record<string, string> = {}) => testApp().request("/oidc/authenticate/", { headers });
+const authenticate = (headers: Record<string, string> = {}) =>
+  testApp().request("/oidc/authenticate/", { headers });
 
 /** Answers discovery with these documents in turn (then the last one again). */
 function discoveryAnswers(...documents: unknown[]) {
@@ -84,7 +84,10 @@ describe("sign-in with OpenID Connect", () => {
     ["no token endpoint", { ...DISCOVERY, token_endpoint: null }],
     ["a relative user info endpoint", { ...DISCOVERY, userinfo_endpoint: "/userinfo" }],
     ["a lone surrogate", { ...DISCOVERY, authorization_endpoint: `${ISSUER}/\ud800` }],
-    ["a label starting with a hyphen", { ...DISCOVERY, token_endpoint: "https://-sso.example.invalid/token" }],
+    [
+      "a label starting with a hyphen",
+      { ...DISCOVERY, token_endpoint: "https://-sso.example.invalid/token" },
+    ],
     ["a symbol IDNA 2008 refuses", { ...DISCOVERY, token_endpoint: "https://☕.example.invalid/token" }],
     [
       "a sign-in URL over the redirect limit",
@@ -92,16 +95,19 @@ describe("sign-in with OpenID Connect", () => {
     ],
     ["an invalid port", { ...DISCOVERY, jwks_uri: "https://sso.example.invalid:invalid/keys" }],
     ["no signing keys", withoutJwks],
-  ])("answers an invalid discovery document (%s) with the unavailable page and tries again", async (_, document) => {
-    discoveryAnswers(document, DISCOVERY);
-    const first = await authenticate();
-    expect(first.status).toBe(302);
-    expect(first.headers.get("location")).toBe(UNAVAILABLE);
-    expect(setCookie(first, "iam_oidc")).toBeUndefined();
-    const second = await authenticate();
-    expect(second.status).toBe(302);
-    expect(second.headers.get("location")!.startsWith(DISCOVERY.authorization_endpoint)).toBe(true);
-  });
+  ])(
+    "answers an invalid discovery document (%s) with the unavailable page and tries again",
+    async (_, document) => {
+      discoveryAnswers(document, DISCOVERY);
+      const first = await authenticate();
+      expect(first.status).toBe(302);
+      expect(first.headers.get("location")).toBe(UNAVAILABLE);
+      expect(setCookie(first, "iam_oidc")).toBeUndefined();
+      const second = await authenticate();
+      expect(second.status).toBe(302);
+      expect(second.headers.get("location")!.startsWith(DISCOVERY.authorization_endpoint)).toBe(true);
+    },
+  );
 
   it("takes a missing endpoint from a setting", async () => {
     provider.discovery = { ...DISCOVERY, token_endpoint: null };
@@ -116,7 +122,10 @@ describe("sign-in with OpenID Connect", () => {
   });
 
   it("answers a sign-in URL over the redirect limit with the unavailable page", async () => {
-    provider.discovery = { ...DISCOVERY, authorization_endpoint: `${ISSUER}/`.padEnd(MAX_REDIRECT_LENGTH, "a") };
+    provider.discovery = {
+      ...DISCOVERY,
+      authorization_endpoint: `${ISSUER}/`.padEnd(MAX_REDIRECT_LENGTH, "a"),
+    };
     const response = await authenticate();
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(UNAVAILABLE);
@@ -127,7 +136,9 @@ describe("sign-in with OpenID Connect", () => {
     async (badLogout) => {
       provider.discovery = { ...DISCOVERY, end_session_endpoint: badLogout };
       expect((await authenticate()).status).toBe(302);
-      expect((await authenticate()).headers.get("location")!.startsWith(DISCOVERY.authorization_endpoint)).toBe(true);
+      expect(
+        (await authenticate()).headers.get("location")!.startsWith(DISCOVERY.authorization_endpoint),
+      ).toBe(true);
       expect(await providerLogoutUrl("id-token")).toBe(`${config().APP_URL}/login/`);
     },
   );
@@ -218,7 +229,12 @@ describe("sign-in with OpenID Connect", () => {
 
     const me = await request("GET", "/api/v1/me", { headers: sessionCookie(session!) });
     expect(me.status).toBe(200);
-    expect(me.body).toMatchObject({ id: user.id, email: "ada@example.invalid", name: "Ada Lovelace", role: "approver" });
+    expect(me.body).toMatchObject({
+      id: user.id,
+      email: "ada@example.invalid",
+      name: "Ada Lovelace",
+      role: "approver",
+    });
     const [bound] = await getDb().select().from(users).where(eq(users.id, user.id));
     expect(bound!.oidcSubject).toBe("subject-1");
     expect(bound!.lastLogin).not.toBeNull();
@@ -226,7 +242,11 @@ describe("sign-in with OpenID Connect", () => {
 
   it("goes back only to a path of this app after sign-in", async () => {
     await createUser("viewer", "ada@example.invalid");
-    for (const next of ["https://evil.example.invalid/", "//evil.example.invalid/", "/\\evil.example.invalid"]) {
+    for (const next of [
+      "https://evil.example.invalid/",
+      "//evil.example.invalid/",
+      "/\\evil.example.invalid",
+    ]) {
       expect((await signIn(provider, { next })).location).toBe("/");
     }
   });
@@ -275,6 +295,19 @@ describe("sign-in with OpenID Connect", () => {
     overrideConfigForTests({ OIDC_SIGN_ALGO: "RS512" });
     resetDiscoveryCache();
     expect(await accepted({ algorithm: "RS512" })).toBe(true);
+  });
+
+  it("checks the signature of a symmetric ID token with the client secret", async () => {
+    await createUser("viewer", "ada@example.invalid");
+    overrideConfigForTests({ OIDC_SIGN_ALGO: "HS256" });
+    resetDiscoveryCache();
+    const accepted = async (secret: string, algorithm = "HS256") => {
+      provider.idToken = { algorithm, key: createSecretKey(Buffer.from(secret)) };
+      return Boolean((await signIn(provider)).session);
+    };
+    expect(await accepted(config().OIDC_CLIENT_SECRET)).toBe(true);
+    expect(await accepted("another-secret")).toBe(false);
+    expect(await accepted(config().OIDC_CLIENT_SECRET, "HS512")).toBe(false);
   });
 
   it("takes user info only about the subject of the ID token", async () => {
@@ -367,7 +400,9 @@ describe("sign-in with OpenID Connect", () => {
   it("has no development sign-in unless it is switched on", async () => {
     await createUser("admin");
     expect((await request("GET", "/api/v1/auth/dev-users")).status).toBe(404);
-    const login = await request("POST", "/api/v1/auth/dev-login", { body: { email: "admin@example.invalid" } });
+    const login = await request("POST", "/api/v1/auth/dev-login", {
+      body: { email: "admin@example.invalid" },
+    });
     expect(login.status).toBe(404);
     expect(login.headers.getSetCookie().some((line) => line.startsWith("iam_session="))).toBe(false);
   });

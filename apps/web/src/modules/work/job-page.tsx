@@ -10,7 +10,7 @@ import { Detail, Details, Section } from "@/components/detail";
 import { StatusBadge } from "@/components/status";
 import { Empty, EventsTable, TasksTable, TextLink } from "@/components/lists";
 import { jobQuery } from "./api";
-import { JobActions } from "./job-actions";
+import { JobActions } from "@/components/job-actions";
 
 /** A value of a job's result as text: yes or no for true and false, "—" for nothing. */
 export function resultText(value: unknown): string {
@@ -27,7 +27,10 @@ export function JobPage({ id }: { id: number }) {
   const format = useFormatter();
   const query = useQuery(jobQuery(id));
   const job = query.data;
-  useRecordTitle(`/jobs/${id}`, job ? `${JOB_ACTION_LABELS[job.action]} at ${job.connection.name}` : undefined);
+  useRecordTitle(
+    `/jobs/${id}`,
+    job ? `${JOB_ACTION_LABELS[job.action]} at ${job.connection.name}` : undefined,
+  );
   if (query.isPending) return <LoadingState />;
   if (query.isError || !job) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   const result = Object.entries(job.result);
@@ -43,7 +46,9 @@ export function JobPage({ id }: { id: number }) {
         description={
           <>
             For <TextLink to={`/people/${job.person.id}`}>{job.person.name}</TextLink> · part of{" "}
-            <TextLink to={`/workflows/${job.workflow.id}`}>{WORKFLOW_KIND_LABELS[job.workflow.kind].toLowerCase()}</TextLink>
+            <TextLink to={`/workflows/${job.workflow.id}`}>
+              {WORKFLOW_KIND_LABELS[job.workflow.kind].toLowerCase()}
+            </TextLink>
           </>
         }
         actions={<JobActions job={job} />}
@@ -59,8 +64,8 @@ export function JobPage({ id }: { id: number }) {
       {job.status === "held" ? (
         <Alert>
           <AlertDescription>
-            This automatic removal is over the daily limit (Admin › Settings). Approve it to run it, or reject it to keep
-            the account.
+            This automatic removal is over the daily limit (Admin › Settings). Approve it to run it, or reject
+            it to keep the account.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -69,7 +74,9 @@ export function JobPage({ id }: { id: number }) {
           <Details className="lg:grid-cols-2">
             <Detail label="Attempts">{job.attempts}</Detail>
             <Detail label="Created">{format.dateTime(job.createdAt)}</Detail>
-            {job.status === "queued" ? <Detail label="Next attempt">{format.dateTime(job.nextAttemptAt)}</Detail> : null}
+            {job.status === "queued" ? (
+              <Detail label="Next attempt">{format.dateTime(job.nextAttemptAt)}</Detail>
+            ) : null}
             {job.finishedAt ? <Detail label="Finished">{format.dateTime(job.finishedAt)}</Detail> : null}
             <Detail label="Groups">{job.groups.length > 0 ? job.groups.join(", ") : "—"}</Detail>
             {job.lastError ? (

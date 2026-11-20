@@ -51,15 +51,17 @@ export function TeamsPage() {
                       <TableCell className="whitespace-normal">
                         <TextLink to={`/teams/${team.id}`}>{team.name}</TextLink>
                         {team.description ? (
-                          <div className="text-muted-foreground text-xs">{truncate(team.description, 100)}</div>
+                          <div className="text-muted-foreground text-xs">
+                            {truncate(team.description, 100)}
+                          </div>
                         ) : null}
                       </TableCell>
                       <TableCell className="tabular-nums">{team.memberCount}</TableCell>
                       <TableCell className="text-sm whitespace-normal">
                         {team.groups.length === 0
                           ? "—"
-                          : team.groups.map((group) => (
-                              <div key={`${group.connection}:${group.label}`}>
+                          : team.groups.map((group, index) => (
+                              <div key={`${index}:${group.connection}:${group.label}`}>
                                 {group.connection}: {group.label}
                               </div>
                             ))}

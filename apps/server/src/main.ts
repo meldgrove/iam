@@ -23,8 +23,10 @@ async function main() {
     return;
   }
   if (settings.RUN_MIGRATIONS) await runMigrations();
-  if (settings.DEV_LOGIN) logger.warn("DEV_LOGIN is on: anyone can sign in as any app user. Development only.");
-  if (settings.READ_ONLY) logger.warn("read-only mode: connected apps are read, never changed, and no email is sent");
+  if (settings.DEV_LOGIN)
+    logger.warn("DEV_LOGIN is on: anyone can sign in as any app user. Development only.");
+  if (settings.READ_ONLY)
+    logger.warn("read-only mode: connected apps are read, never changed, and no email is sent");
   let server: ReturnType<typeof serve> | undefined;
   const stops: Stop[] = [];
   if (role === "all" || role === "web") {

@@ -62,7 +62,9 @@ export function breadcrumbsFor(
   if (path === PREFERENCES_PATH) return [{ label: options.preferences }];
   const item = options.items
     .filter((candidate) =>
-      candidate.href === "/" ? path === "/" : path === candidate.href || path.startsWith(`${candidate.href}/`),
+      candidate.href === "/"
+        ? path === "/"
+        : path === candidate.href || path.startsWith(`${candidate.href}/`),
     )
     .sort((a, b) => b.href.length - a.href.length)[0];
   if (!item) return [];
@@ -71,7 +73,9 @@ export function breadcrumbsFor(
   const [first, second, third] = path.slice(item.href.length + 1).split("/");
   if (first === "new") {
     // /admin/connections/new/<adapter>: the choice of app, then the form.
-    return second ? [parent, { label: "New", href: `${item.href}/new` }, { label: options.record ?? "Form" }] : [parent, { label: "New" }];
+    return second
+      ? [parent, { label: "New", href: `${item.href}/new` }, { label: options.record ?? "Form" }]
+      : [parent, { label: "New" }];
   }
   const record = { label: options.record ?? "Details", href: `${item.href}/${first}` };
   if (second && SUB_PAGES[second] && !third) return [parent, record, { label: SUB_PAGES[second]! }];

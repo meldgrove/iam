@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { domainToASCII, domainToUnicode } from "node:url";
 import * as client from "openid-client";
 import { config } from "../config";
@@ -32,7 +32,11 @@ export const providerFetch: { fetch: typeof fetch } = { fetch: (...args) => fetc
 /** Whether a value is an http(s) URL an endpoint may have: a valid host, no credentials, no fragment. */
 export function isEndpointUrl(value: unknown, options: { redirect?: boolean } = {}): value is string {
   // Backslashes, fragments, whitespace and control characters (code points below 32, and 127).
-  if (typeof value !== "string" || /[\\#\s]/.test(value) || [...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) {
+  if (
+    typeof value !== "string" ||
+    /[\\#\s]/.test(value) ||
+    [...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
+  ) {
     return false;
   }
   // A lone surrogate cannot be sent; URL() would quietly replace it.
@@ -43,14 +47,21 @@ export function isEndpointUrl(value: unknown, options: { redirect?: boolean } = 
   } catch {
     return false;
   }
-  if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password) return false;
+  if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password)
+    return false;
   if (url.port === "0") return false;
   if (options.redirect && value.length > MAX_REDIRECT_LENGTH) return false;
   if (url.hostname.startsWith("[")) return true;
-  // IDNA 2008, as the Django version checked: labels of letters, marks, digits and hyphens, no symbols such as "☕".
-  if (!domainToUnicode(url.hostname).split(".").every((label) => /^[\p{L}\p{M}\p{N}-]*$/u.test(label))) return false;
+  // IDNA 2008, as the Django version checked: labels of letters, marks,
+  // digits and hyphens, no symbols such as "☕" (URL() accepts them).
+  const labels = domainToUnicode(url.hostname).split(".");
+  if (!labels.every((label) => /^[\p{L}\p{M}\p{N}-]*$/u.test(label))) return false;
   const hostname = domainToASCII(url.hostname).replace(/\.$/, "");
-  return hostname.length > 0 && hostname.length <= 253 && hostname.split(".").every((label) => DNS_LABEL.test(label));
+  return (
+    hostname.length > 0 &&
+    hostname.length <= 253 &&
+    hostname.split(".").every((label) => DNS_LABEL.test(label))
+  );
 }
 
 type Endpoints = {
@@ -109,7 +120,8 @@ export function resetDiscoveryCache() {
 /** The provider's OpenID configuration, with explicit settings winning. */
 export async function discovery(): Promise<Endpoints> {
   const settings = config();
-  if (!settings.oidcIssuer) throw new ProviderUnavailable("Set OIDC_ISSUER, or KEYCLOAK_URL and KEYCLOAK_REALM.");
+  if (!settings.oidcIssuer)
+    throw new ProviderUnavailable("Set OIDC_ISSUER, or KEYCLOAK_URL and KEYCLOAK_REALM.");
   const explicit = overrides();
   const key = createHash("sha256")
     .update(JSON.stringify([settings.oidcIssuer, settings.OIDC_SIGN_ALGO, explicit]))
@@ -129,7 +141,12 @@ export async function discovery(): Promise<Endpoints> {
     }
   } catch (error) {
     if (error instanceof ProviderUnavailable) throw error;
-    if (explicit.authorization_endpoint && explicit.token_endpoint && explicit.userinfo_endpoint && explicit.jwks_uri) {
+    if (
+      explicit.authorization_endpoint &&
+      explicit.token_endpoint &&
+      explicit.userinfo_endpoint &&
+      explicit.jwks_uri
+    ) {
       // Sign-in can use explicit endpoints while discovery is unavailable; it
       // is tried again on the next request so provider logout can recover.
       return validateDiscovery({ issuer: settings.oidcIssuer }, explicit);
@@ -222,14 +239,34 @@ export async function completeSignIn(
   });
   const idClaims = tokens.claims();
   if (!idClaims || typeof idClaims.exp !== "number") throw new Error("ID token without an expiry");
-  // openid-client checks only that iat is a number; a token issued in the future is not valid yet (as PyJWT checked).
+  // openid-client verifies signatures only with the provider's public keys
+  // (enableNonRepudiationChecks); a symmetric one is checked here with the
+  // client secret, as the Django version did.
+  if (config().OIDC_SIGN_ALGO.startsWith("HS")) verifyHmac(tokens.id_token ?? "", config().OIDC_SIGN_ALGO);
+  // openid-client checks only that iat is a number; a token issued in the
+  // future is not valid yet (PyJWT checked this for the Django version).
   if (idClaims.iat > Date.now() / 1000 + CLOCK_SKEW_SECONDS) throw new Error("ID token issued in the future");
-  if (String(idClaims.iss).replace(/\/+$/, "") !== config().oidcIssuer) throw new Error("ID token from an unexpected issuer");
+  if (String(idClaims.iss).replace(/\/+$/, "") !== config().oidcIssuer)
+    throw new Error("ID token from an unexpected issuer");
   // Security: the user is chosen from these claims, so they must be about the
   // subject of the verified ID token (OpenID Connect Core 5.3.2).
   const userInfo = await client.fetchUserInfo(configuration, tokens.access_token, idClaims.sub);
   if (userInfo.sub !== idClaims.sub) throw new Error("User info for another subject than the ID token");
   return { claims: userInfo as Record<string, unknown>, idToken: tokens.id_token ?? "" };
+}
+
+/** Checks the HMAC signature of an ID token signed with the client secret (HS256, HS384, HS512). */
+function verifyHmac(idToken: string, algorithm: string): void {
+  const [header, payload, signature] = idToken.split(".");
+  if (!header || !payload || signature === undefined) throw new Error("ID token is not a signed JWT");
+  const { alg } = JSON.parse(Buffer.from(header, "base64url").toString("utf8")) as { alg?: unknown };
+  if (alg !== algorithm) throw new Error("ID token signed with an unexpected algorithm");
+  const expected = createHmac(`sha${algorithm.slice(2)}`, config().OIDC_CLIENT_SECRET)
+    .update(`${header}.${payload}`)
+    .digest();
+  const given = Buffer.from(signature, "base64url");
+  if (given.length !== expected.length || !timingSafeEqual(given, expected))
+    throw new Error("ID token signature is invalid");
 }
 
 /** Where sign-out sends the browser: the provider's sign-out, or the sign-in page. */
@@ -239,7 +276,8 @@ export async function providerLogoutUrl(idToken: string): Promise<string> {
   try {
     endpoint = (await discovery()).end_session_endpoint;
   } catch (error) {
-    if (!(error instanceof ProviderUnavailable)) logger.warn({ err: error }, "could not read the provider's sign-out");
+    if (!(error instanceof ProviderUnavailable))
+      logger.warn({ err: error }, "could not read the provider's sign-out");
   }
   if (!endpoint) return postLogout;
   const url = new URL(endpoint);
@@ -252,5 +290,7 @@ export async function providerLogoutUrl(idToken: string): Promise<string> {
 /** Where people manage their own sign-in (Keycloak's account console). */
 export function accountUrl(): string {
   const settings = config();
-  return settings.oidcProviderKind === "keycloak" && settings.oidcIssuer ? `${settings.oidcIssuer}/account/` : "";
+  return settings.oidcProviderKind === "keycloak" && settings.oidcIssuer
+    ? `${settings.oidcIssuer}/account/`
+    : "";
 }

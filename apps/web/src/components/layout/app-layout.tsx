@@ -19,7 +19,9 @@ import { AdminUpdates } from "@/modules/updates/updates";
  * Exact, so that the router marks only the page itself as current, not the
  * breadcrumb of its parent; the frame marks the sidebar item.
  */
-const AppLink: FrameLink = ({ href, ...props }) => <Link to={href} activeOptions={{ exact: true }} {...props} />;
+const AppLink: FrameLink = ({ href, ...props }) => (
+  <Link to={href} activeOptions={{ exact: true }} {...props} />
+);
 
 function Count({ value, alert }: { value: number; alert?: boolean }) {
   if (!value) return null;
@@ -79,7 +81,9 @@ export function AppLayout() {
   });
 
   const signOut = async () => {
-    const { redirect } = await api.post<{ redirect: string }>("/auth/logout").catch(() => ({ redirect: "/login" }));
+    const { redirect } = await api
+      .post<{ redirect: string }>("/auth/logout")
+      .catch(() => ({ redirect: "/login" }));
     queryClient.clear();
     window.location.assign(redirect);
   };
@@ -87,7 +91,11 @@ export function AppLayout() {
   return (
     <AdminUpdates appName="Meldgrove IAM">
       <AppFrame
-        app={{ name: appName, icon: <ShieldCheck />, description: me.version ? `Meldgrove IAM ${me.version}` : "Meldgrove IAM" }}
+        app={{
+          name: appName,
+          icon: <ShieldCheck />,
+          description: me.version ? `Meldgrove IAM ${me.version}` : "Meldgrove IAM",
+        }}
         nav={nav}
         pathname={pathname}
         link={AppLink}
@@ -106,8 +114,8 @@ export function AppLayout() {
             <Alert>
               <AlertDescription>
                 <span>
-                  <strong>Read-only mode.</strong> The app reads connected apps but changes nothing in them and sends no
-                  email. Workflows run as rehearsals: each job only checks what it would change.
+                  <strong>Read-only mode.</strong> The app reads connected apps but changes nothing in them
+                  and sends no email. Workflows run as rehearsals: each job only checks what it would change.
                 </span>
               </AlertDescription>
             </Alert>

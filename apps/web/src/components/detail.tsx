@@ -3,7 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@meld
 import { cn } from "@meldgrove/ui/utils";
 
 /** A titled section of a record's page (a card with an h2), e.g. "History". */
-export function Section(props: { title: ReactNode; description?: ReactNode; children: ReactNode; className?: string }) {
+export function Section(props: {
+  title: ReactNode;
+  description?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <Card className={props.className}>
       <CardHeader>

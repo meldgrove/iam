@@ -12,6 +12,8 @@ import {
 } from "@iam/shared/labels";
 import type { EventRow, JobRow, Paged, TaskRow, WorkflowRow } from "@iam/shared/api/iam";
 import { useFormatter } from "@/lib/format";
+import { useMe } from "@/hooks/use-me";
+import { JobActions } from "./job-actions";
 import { StatusBadge } from "./status";
 
 /** The lists several pages share: audit events, tasks, jobs, workflows, and the pager of a paged list. */
@@ -46,11 +48,19 @@ export function EventsTable({ events, showPerson = false }: { events: EventRow[]
       <TableBody>
         {events.map((event) => (
           <TableRow key={event.id}>
-            <TableCell className="text-muted-foreground whitespace-nowrap">{format.dateTime(event.createdAt)}</TableCell>
+            <TableCell className="text-muted-foreground whitespace-nowrap">
+              {format.dateTime(event.createdAt)}
+            </TableCell>
             <TableCell className="text-muted-foreground">{event.actorLabel}</TableCell>
             <TableCell className="whitespace-normal">{event.summary}</TableCell>
             {showPerson ? (
-              <TableCell>{event.person ? <TextLink to={`/people/${event.person.id}`}>{event.person.name}</TextLink> : "—"}</TableCell>
+              <TableCell>
+                {event.person ? (
+                  <TextLink to={`/people/${event.person.id}`}>{event.person.name}</TextLink>
+                ) : (
+                  "—"
+                )}
+              </TableCell>
             ) : null}
           </TableRow>
         ))}
@@ -80,9 +90,13 @@ export function TasksTable({ tasks, showPerson = true }: { tasks: TaskRow[]; sho
               <div className="text-muted-foreground text-xs">{TASK_KIND_LABELS[task.kind]}</div>
             </TableCell>
             {showPerson ? (
-              <TableCell>{task.person ? <TextLink to={`/people/${task.person.id}`}>{task.person.name}</TextLink> : "—"}</TableCell>
+              <TableCell>
+                {task.person ? <TextLink to={`/people/${task.person.id}`}>{task.person.name}</TextLink> : "—"}
+              </TableCell>
             ) : null}
-            <TableCell className="text-muted-foreground whitespace-nowrap">{format.dateTime(task.createdAt)}</TableCell>
+            <TableCell className="text-muted-foreground whitespace-nowrap">
+              {format.dateTime(task.createdAt)}
+            </TableCell>
             <TableCell>
               <StatusBadge value={task.status} labels={TASK_STATUS_LABELS} />
             </TableCell>
@@ -93,26 +107,53 @@ export function TasksTable({ tasks, showPerson = true }: { tasks: TaskRow[]; sho
   );
 }
 
-/** `actions`: buttons at the end of each row (e.g. Retry), for the roles that may use them. */
+/** Django's `truncatechars`: at most `length` characters, the last one "…". */
+function truncate(text: string, length: number): string {
+  return text.length > length ? `${text.slice(0, length - 1)}…` : text;
+}
+
+/** A group list of a result ("none" or empty: nothing to change). */
+const groupsOf = (value: unknown) => (value && value !== "none" ? String(value) : "");
+
+/** In read-only mode: what the job would have done. */
+function rehearsal(result: JobRow["result"]): string {
+  const add = groupsOf(result.groups_to_add);
+  const remove = groupsOf(result.groups_to_remove);
+  return [
+    `Would ${String(result.would ?? "")}`,
+    add ? `add to ${add}` : null,
+    remove ? `remove from ${remove}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * Jobs, as Django's jobs table: the change (with its error, or in read-only
+ * mode what it would do), the connection, status and attempts, and per row
+ * Retry for approvers (failed jobs) and Approve or Reject for admins (held removals).
+ */
 export function JobsTable({
   jobs,
   showPerson = true,
-  actions,
+  empty = "No jobs.",
 }: {
   jobs: JobRow[];
   showPerson?: boolean;
-  actions?: (job: JobRow) => ReactNode;
+  empty?: string;
 }) {
-  if (jobs.length === 0) return <Empty>No open jobs.</Empty>;
+  const me = useMe();
+  if (jobs.length === 0) return <Empty>{empty}</Empty>;
   return (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead>Change</TableHead>
-          <TableHead>App</TableHead>
           {showPerson ? <TableHead>Person</TableHead> : null}
+          <TableHead>Connection</TableHead>
           <TableHead>Status</TableHead>
-          {actions ? (
+          <TableHead>Attempts</TableHead>
+          {me.isApprover ? (
             <TableHead>
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -126,21 +167,27 @@ export function JobsTable({
               <TextLink to={`/jobs/${job.id}`}>{JOB_ACTION_LABELS[job.action]}</TextLink>
               {/* A finished job keeps the error of an earlier attempt; it no longer matters. */}
               {job.lastError && job.status !== "succeeded" && job.status !== "rehearsed" ? (
-                <div className="text-muted-foreground line-clamp-2 text-xs">{job.lastError}</div>
+                <div className="text-muted-foreground text-xs">{truncate(job.lastError, 140)}</div>
+              ) : null}
+              {job.status === "rehearsed" ? (
+                <div className="text-muted-foreground text-xs">{rehearsal(job.result)}</div>
               ) : null}
             </TableCell>
-            <TableCell>{job.connection.name}</TableCell>
             {showPerson ? (
               <TableCell>
                 <TextLink to={`/people/${job.person.id}`}>{job.person.name}</TextLink>
               </TableCell>
             ) : null}
+            <TableCell>{job.connection.name}</TableCell>
             <TableCell>
               <StatusBadge value={job.status} labels={JOB_STATUS_LABELS} />
             </TableCell>
-            {actions ? (
+            <TableCell className="text-muted-foreground tabular-nums">{job.attempts}</TableCell>
+            {me.isApprover ? (
               <TableCell>
-                <div className="flex justify-end gap-2">{actions(job)}</div>
+                <div className="flex justify-end gap-2">
+                  <JobActions job={job} compact />
+                </div>
               </TableCell>
             ) : null}
           </TableRow>
@@ -150,7 +197,13 @@ export function JobsTable({
   );
 }
 
-export function WorkflowsTable({ workflows, showPerson = true }: { workflows: WorkflowRow[]; showPerson?: boolean }) {
+export function WorkflowsTable({
+  workflows,
+  showPerson = true,
+}: {
+  workflows: WorkflowRow[];
+  showPerson?: boolean;
+}) {
   const format = useFormatter();
   if (workflows.length === 0) return <Empty>None yet.</Empty>;
   return (
@@ -168,7 +221,9 @@ export function WorkflowsTable({ workflows, showPerson = true }: { workflows: Wo
           <TableRow key={workflow.id}>
             <TableCell className="whitespace-normal">
               <TextLink to={`/workflows/${workflow.id}`}>{WORKFLOW_KIND_LABELS[workflow.kind]}</TextLink>
-              {workflow.reason ? <div className="text-muted-foreground text-xs">{workflow.reason}</div> : null}
+              {workflow.reason ? (
+                <div className="text-muted-foreground text-xs">{workflow.reason}</div>
+              ) : null}
             </TableCell>
             {showPerson ? (
               <TableCell>

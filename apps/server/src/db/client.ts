@@ -16,12 +16,24 @@ pg.types.setTypeParser(pg.types.builtins.INT8, (value) => Number(value));
 let pool: pg.Pool | undefined;
 let database: Db | undefined;
 
+/** `?connect_timeout=` (seconds) of a database URL, in milliseconds. */
+function urlConnectTimeoutMs(url: string): number | undefined {
+  try {
+    const seconds = Number(new URL(url).searchParams.get("connect_timeout") ?? "");
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** How every connection connects: waiting fails instead of hanging, and dead connections are noticed. */
 export function connectionOptions(): pg.ClientConfig {
   return {
     connectionString: config().DATABASE_URL,
-    // Also the longest wait for a free connection of the pool.
-    connectionTimeoutMillis: 10_000,
+    // Also the longest wait for a free connection of the pool. A
+    // connect_timeout in DATABASE_URL wins, as it did in the Django version
+    // (node-postgres itself reads it only for its native driver).
+    connectionTimeoutMillis: urlConnectTimeoutMs(config().DATABASE_URL) ?? 10_000,
     // Probes idle connections, so ones the network or a failover cut are dropped.
     keepAlive: true,
     keepAliveInitialDelayMillis: 10_000,

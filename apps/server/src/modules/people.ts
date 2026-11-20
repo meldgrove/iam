@@ -29,7 +29,14 @@ import type { AppEnv } from "../http/env";
 import { idParam, jsonBody, requireRole } from "../http/middleware";
 import { AppError, notFound, validationError } from "../http/errors";
 import { record } from "../engine/audit";
-import { archivePerson, canArchive, canStart, higherRoleAppUser, LifecycleError, startWorkflow } from "../engine/lifecycle";
+import {
+  archivePerson,
+  canArchive,
+  canStart,
+  higherRoleAppUser,
+  LifecycleError,
+  startWorkflow,
+} from "../engine/lifecycle";
 import { lockPerson } from "../engine/jobs";
 import { fullName, loginName } from "../engine/people";
 import { entitledAccess } from "../engine/policy";
@@ -63,28 +70,33 @@ router.get("/people", async (c) => {
   if (/^[0-9]+$/.test(team)) filters.push(eq(people.teamId, Number(team)));
   const where = and(...filters);
   const total = await countOf(people, where);
-  const page = await paginate<PersonRow>(total, pageNumber(c.req.query("page")), PER_PAGE, async (limit, offset) => {
-    const rows = await q()
-      .select({ person: people, team: teams.name, profile: accessProfiles.name })
-      .from(people)
-      .leftJoin(teams, eq(teams.id, people.teamId))
-      .leftJoin(accessProfiles, eq(accessProfiles.id, people.accessProfileId))
-      .where(where)
-      .orderBy(asc(people.lastName), asc(people.firstName), asc(people.id))
-      .limit(limit)
-      .offset(offset);
-    return rows.map(({ person, team: teamName, profile }) => ({
-      id: person.id,
-      name: fullName(person),
-      workEmail: person.workEmail,
-      personType: person.personType,
-      status: person.status,
-      team: teamName,
-      accessProfile: profile,
-      startDate: person.startDate,
-      endDate: person.endDate,
-    }));
-  });
+  const page = await paginate<PersonRow>(
+    total,
+    pageNumber(c.req.query("page")),
+    PER_PAGE,
+    async (limit, offset) => {
+      const rows = await q()
+        .select({ person: people, team: teams.name, profile: accessProfiles.name })
+        .from(people)
+        .leftJoin(teams, eq(teams.id, people.teamId))
+        .leftJoin(accessProfiles, eq(accessProfiles.id, people.accessProfileId))
+        .where(where)
+        .orderBy(asc(people.lastName), asc(people.firstName), asc(people.id))
+        .limit(limit)
+        .offset(offset);
+      return rows.map(({ person, team: teamName, profile }) => ({
+        id: person.id,
+        name: fullName(person),
+        workEmail: person.workEmail,
+        personType: person.personType,
+        status: person.status,
+        team: teamName,
+        accessProfile: profile,
+        startDate: person.startDate,
+        endDate: person.endDate,
+      }));
+    },
+  );
   return c.json(page);
 });
 
@@ -98,7 +110,10 @@ router.get("/people/options", async (c) => {
     .where(and(ne(people.status, "archived"), except > 0 ? ne(people.id, except) : undefined))
     .orderBy(asc(people.lastName), asc(people.firstName), asc(people.id));
   const body: PersonOptions = {
-    teams: (await q().select().from(teams).orderBy(asc(teams.name))).map((team) => ({ id: team.id, name: team.name })),
+    teams: (await q().select().from(teams).orderBy(asc(teams.name))).map((team) => ({
+      id: team.id,
+      name: team.name,
+    })),
     profiles: (await q().select().from(accessProfiles).orderBy(asc(accessProfiles.name))).map((profile) => ({
       id: profile.id,
       name: profile.name,
@@ -135,7 +150,11 @@ router.get("/people/:id", async (c) => {
   const shown =
     connectionIds.length === 0
       ? []
-      : await q().select().from(connections).where(inArray(connections.id, connectionIds)).orderBy(asc(connections.name));
+      : await q()
+          .select()
+          .from(connections)
+          .where(inArray(connections.id, connectionIds))
+          .orderBy(asc(connections.name));
   const accessRows: AccessRow[] = shown.map((connection) => {
     const grant = entitled.get(connection.id);
     const account = byConnection.get(connection.id);
@@ -150,7 +169,11 @@ router.get("/people/:id", async (c) => {
           }
         : null,
       account: account
-        ? { label: account.username || account.email || "", status: account.status, observedAt: iso(account.observedAt) }
+        ? {
+            label: account.username || account.email || "",
+            status: account.status,
+            observedAt: iso(account.observedAt),
+          }
         : null,
     };
   });
@@ -193,7 +216,10 @@ router.get("/people/:id", async (c) => {
 type Values = Omit<typeof people.$inferInsert, "id">;
 
 /** Validates the form as Django's PersonForm did, beyond the schema: choices that exist, a unique work email. */
-async function cleanPerson(input: ReturnType<typeof personInputSchema.parse>, personId: number | null): Promise<Values> {
+async function cleanPerson(
+  input: ReturnType<typeof personInputSchema.parse>,
+  personId: number | null,
+): Promise<Values> {
   const errors: Record<string, string> = {};
   const workEmail = input.workEmail ? input.workEmail.toLowerCase() : null;
   if (workEmail) {
@@ -214,7 +240,8 @@ async function cleanPerson(input: ReturnType<typeof personInputSchema.parse>, pe
   if (!(await exists(accessProfiles, input.accessProfileId))) errors.accessProfileId = invalidChoice;
   if (input.managerId !== null) {
     const [manager] = await q().select().from(people).where(eq(people.id, input.managerId));
-    if (!manager || manager.status === "archived" || manager.id === personId) errors.managerId = invalidChoice;
+    if (!manager || manager.status === "archived" || manager.id === personId)
+      errors.managerId = invalidChoice;
   }
   if (Object.keys(errors).length > 0) throw validationError(errors);
   return {
@@ -313,7 +340,10 @@ router.post("/people/:id/start/:kind", async (c) => {
   const { reason } = await jsonBody(c, startWorkflowSchema);
   try {
     const workflow = await startWorkflow(id, kind, { actor: user, reason: (reason ?? "").trim() });
-    return c.json({ id: workflow.id, message: `Started ${WORKFLOW_KIND_LABELS[workflow.kind].toLowerCase()}.` });
+    return c.json({
+      id: workflow.id,
+      message: `Started ${WORKFLOW_KIND_LABELS[workflow.kind].toLowerCase()}.`,
+    });
   } catch (error) {
     if (error instanceof LifecycleError) throw new AppError(409, "lifecycle", error.message);
     throw error;

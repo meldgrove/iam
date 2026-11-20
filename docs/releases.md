@@ -94,7 +94,6 @@ gh attestation verify oci://ghcr.io/meldgrove/iam:X.Y.Z \
   --repo meldgrove/iam --signer-repo meldgrove/.github
 ```
 
-
 ## Repository settings
 
 - **Package visibility:** after the first release, make the `iam`

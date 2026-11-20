@@ -189,7 +189,9 @@ export function config(): Config {
 
   const legacyOrigin = splitList(value.CSRF_TRUSTED_ORIGINS ?? "")[0];
   let appUrl =
-    splitList(value.APP_URL ?? "")[0] ?? legacyOrigin ?? (isDevelopment ? `http://localhost:${value.PORT}` : "");
+    splitList(value.APP_URL ?? "")[0] ??
+    legacyOrigin ??
+    (isDevelopment ? `http://localhost:${value.PORT}` : "");
   appUrl = appUrl.replace(/\/+$/, "");
   if (!appUrl) problems.push("APP_URL: Set the public URL, e.g. https://iam.example.invalid");
   else if (!z.url({ protocol: /^https?$/ }).safeParse(appUrl).success) {
@@ -206,7 +208,9 @@ export function config(): Config {
 
   const encryptionKeys = splitList(value.ENCRYPTION_KEY ?? "");
   if (encryptionKeys.length === 0 && !isDevelopment) {
-    problems.push("ENCRYPTION_KEY: Set a Fernet key to encrypt connection secrets (npm run cli generate-key)");
+    problems.push(
+      "ENCRYPTION_KEY: Set a Fernet key to encrypt connection secrets (npm run cli generate-key)",
+    );
   }
   for (const key of encryptionKeys) {
     if (Buffer.from(key, "base64url").length !== 32 || !/^[A-Za-z0-9_-]{43}=?$/.test(key)) {

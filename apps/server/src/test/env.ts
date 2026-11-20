@@ -2,7 +2,8 @@
  * Environment of every test process. Integration tests use TEST_DATABASE_URL
  * (default: the iam_test database of compose.dev.yaml).
  */
-export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "postgres://iam:iam@localhost:55438/iam_test";
+export const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ?? "postgres://iam:iam@localhost:55438/iam_test";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL = TEST_DATABASE_URL;

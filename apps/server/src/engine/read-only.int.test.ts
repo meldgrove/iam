@@ -30,6 +30,7 @@ import { makePerson, makeUser, standardSetup, useEngineFixtures } from "../test/
 import { request, signInWithTestHeader } from "../test/helpers";
 import { answer, json, mockFetch, type SeenRequest } from "../test/mock-fetch";
 import { buildAdapter, encryptSecrets } from "./connections";
+import type * as ConnectionsModule from "./connections";
 import { notifyTasks, sendEmail } from "./email";
 import { claimNextJob, runJob } from "./jobs";
 import { startWorkflow } from "./lifecycle";
@@ -48,7 +49,7 @@ import { compareAccounts, importGroups } from "./sync";
  */
 const hooks = vi.hoisted(() => ({ fetch: null as FetchLike | null }));
 vi.mock("./connections", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./connections")>();
+  const actual = await importOriginal<typeof ConnectionsModule>();
   return {
     ...actual,
     buildAdapter: (connection: Connection, options: Parameters<typeof actual.buildAdapter>[1] = {}) =>

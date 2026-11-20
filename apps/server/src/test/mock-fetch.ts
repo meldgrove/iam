@@ -69,7 +69,9 @@ export function answers(...queue: Answer[]): Handler {
 
 /** A refused connection, as fetch reports it. */
 export function connectError(): Error {
-  return new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+  return new TypeError("fetch failed", {
+    cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+  });
 }
 
 /** A request that timed out, as fetch reports it. */

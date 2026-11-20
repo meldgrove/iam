@@ -26,7 +26,13 @@ type StoredState = SignInState & { expires: number };
 export function safeNext(value: string | undefined | null): string {
   if (!value || value.length > 2000) return "/";
   const controls = [...value].some((character) => character.charCodeAt(0) < 32);
-  if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\") || controls || value.includes("\\")) {
+  if (
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.startsWith("/\\") ||
+    controls ||
+    value.includes("\\")
+  ) {
     return "/";
   }
   try {
@@ -66,7 +72,9 @@ export function signInRoutes() {
     if (!config().oidcEnabled) return toSignIn(c, "unavailable");
     try {
       const { url, state } = await authorizationUrl(safeNext(c.req.query("next")));
-      const states = [...readStates(c), { ...state, expires: Date.now() + STATE_SECONDS * 1000 }].slice(-MAX_STATES);
+      const states = [...readStates(c), { ...state, expires: Date.now() + STATE_SECONDS * 1000 }].slice(
+        -MAX_STATES,
+      );
       writeStates(c, states);
       c.header("cache-control", "no-store");
       return c.redirect(url, 302);

@@ -39,6 +39,8 @@ import { PROGRESS_SECONDS, Worker } from "../worker";
 import { accountSeams, recordJobResult, recordListing } from "./accounts";
 import { loadJob, locked } from "./jobs";
 import { startWorkflow } from "./lifecycle";
+import type * as LifecycleModule from "./lifecycle";
+import type * as ScheduleModule from "./schedule";
 import {
   runDueSync,
   runSchedule,
@@ -63,7 +65,7 @@ const hooks = vi.hoisted(() => ({
   startWorkflow: null as null | ((...args: never[]) => Promise<unknown>),
 }));
 vi.mock("./schedule", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./schedule")>();
+  const actual = await importOriginal<typeof ScheduleModule>();
   return {
     ...actual,
     runDueSync: () => (hooks.runDueSync ?? actual.runDueSync)(),
@@ -71,7 +73,7 @@ vi.mock("./schedule", async (importOriginal) => {
   };
 });
 vi.mock("./lifecycle", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./lifecycle")>();
+  const actual = await importOriginal<typeof LifecycleModule>();
   type Args = Parameters<typeof actual.startWorkflow>;
   return {
     ...actual,
@@ -577,7 +579,7 @@ describe("reads from connections", () => {
       startDate: today(),
     });
     await updatePerson(person.id, { startDate: today() });
-    const { startWorkflow: original } = await vi.importActual<typeof import("./lifecycle")>("./lifecycle");
+    const { startWorkflow: original } = await vi.importActual<typeof LifecycleModule>("./lifecycle");
     hooks.startWorkflow = ((personId: number, ...rest: [never, never]) => {
       if (personId === person.id) throw new Error("database hiccup");
       return original(personId, ...rest);

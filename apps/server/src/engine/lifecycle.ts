@@ -21,7 +21,7 @@ import {
   type WorkflowKind,
 } from "../db/schema";
 import { atomic, q } from "../db/tx";
-import { formatDate, today } from "../core/time";
+import { addDays, formatDate, today } from "../core/time";
 import { removableGroups } from "./accounts";
 import { record } from "./audit";
 import { lockPerson, refreshWorkflow, startJobs, stopWorkflow, type JobState } from "./jobs";
@@ -111,6 +111,22 @@ export async function startWorkflow(
           "Clear or change it before onboarding.",
       );
     }
+    if (kind === "onboarding" && automatic) {
+      // The schedule chose the person a moment ago: under the lock, the
+      // onboarding must still be due (a postponed start date, or a cancel
+      // that paused it, stops it).
+      const settings = await loadSettings();
+      const horizon = addDays(today(), settings.onboardingLeadDays);
+      if (
+        person.status !== "planned" ||
+        person.onboardingPaused ||
+        !person.startDate ||
+        person.startDate > horizon
+      ) {
+        throw new LifecycleError("Onboarding is no longer due.");
+      }
+      reason = `starts on ${formatDate(person.startDate)}`;
+    }
     if (kind === "access_update" && person.status === "onboarding") {
       // Applying access during onboarding restarts the onboarding with the new
       // access, so the person still becomes active at its end.
@@ -132,7 +148,10 @@ export async function startWorkflow(
     const superseded = await supersedeOpenWorkflows(person.id);
     const during = STATUS_DURING[kind];
     if (during) {
-      await q().update(people).set({ status: during, onboardingPaused: false }).where(eq(people.id, person.id));
+      await q()
+        .update(people)
+        .set({ status: during, onboardingPaused: false })
+        .where(eq(people.id, person.id));
       person.status = during;
       person.onboardingPaused = false;
     }
@@ -152,7 +171,8 @@ export async function startWorkflow(
     const cancelledTasks = await startJobs(person.id, planned, { actor });
     await record(
       `workflow.${kind}`,
-      `Started ${WORKFLOW_KIND_LABELS[kind].toLowerCase()} of ${fullName(person)}` + (reason ? ` (${reason})` : ""),
+      `Started ${WORKFLOW_KIND_LABELS[kind].toLowerCase()} of ${fullName(person)}` +
+        (reason ? ` (${reason})` : ""),
       {
         actor,
         personId: person.id,
@@ -185,7 +205,10 @@ async function supersedeOpenWorkflows(personId: number): Promise<number[]> {
   return ids;
 }
 
-export async function higherRoleAppUser(person: Pick<Person, "id">, actor: Pick<User, "role">): Promise<User | null> {
+export async function higherRoleAppUser(
+  person: Pick<Person, "id">,
+  actor: Pick<User, "role">,
+): Promise<User | null> {
   const [user] = await q()
     .select()
     .from(users)
@@ -222,11 +245,15 @@ async function deactivateAppUser(person: Person, actor: Actor): Promise<void> {
     .limit(1);
   if (!user) return;
   await q().update(users).set({ isActive: false }).where(eq(users.id, user.id));
-  await record("user.deactivated", `Deactivated app user ${user.email} because ${fullName(person)} is offboarded`, {
-    actor,
-    personId: person.id,
-    target: { type: "user", id: user.id },
-  });
+  await record(
+    "user.deactivated",
+    `Deactivated app user ${user.email} because ${fullName(person)} is offboarded`,
+    {
+      actor,
+      personId: person.id,
+      target: { type: "user", id: user.id },
+    },
+  );
 }
 
 async function planJobs(workflow: Workflow, person: Person): Promise<JobState[]> {
@@ -242,7 +269,9 @@ async function planJobs(workflow: Workflow, person: Person): Promise<JobState[]>
       await q()
         .select({ connectionId: jobs.connectionId })
         .from(jobs)
-        .where(and(eq(jobs.personId, person.id), eq(jobs.status, "running"), eq(jobs.action, "ensure_account")))
+        .where(
+          and(eq(jobs.personId, person.id), eq(jobs.status, "running"), eq(jobs.action, "ensure_account")),
+        )
     ).map((row) => row.connectionId),
   );
   const known = ["active", "unknown"];
@@ -255,7 +284,9 @@ async function planJobs(workflow: Workflow, person: Person): Promise<JobState[]>
   const planned: JobState[] = [];
   for (const connection of await provisioningConnections({ includeDisabled: offboarding })) {
     const account = byConnection.get(connection.id);
-    const managed = [...(await removableGroups(connection.id, person.id, await managedGroupIds(connection.id)))].sort();
+    const managed = [
+      ...(await removableGroups(connection.id, person.id, await managedGroupIds(connection.id))),
+    ].sort();
     const grant = desired.get(connection.id);
     let values: typeof jobs.$inferInsert;
     if (grant !== undefined) {
@@ -311,7 +342,10 @@ async function overRemovalLimit(connection: Connection, limit: number): Promise<
  * already running: the cancel comes too late for them, and their changes go
  * ahead.
  */
-export async function cancelWorkflow(workflowId: number, options: { actor: Pick<User, "id" | "email"> }): Promise<JobState[]> {
+export async function cancelWorkflow(
+  workflowId: number,
+  options: { actor: Pick<User, "id" | "email"> },
+): Promise<JobState[]> {
   const [current] = await q().select().from(workflows).where(eq(workflows.id, workflowId));
   if (!current) throw new LifecycleError("This workflow does not exist.");
   if (current.kind === "offboarding") {
@@ -328,7 +362,10 @@ export async function cancelWorkflow(workflowId: number, options: { actor: Pick<
     if (workflow.kind === "onboarding" && person!.status === "onboarding") {
       // Cancelled stays cancelled: the schedule waits for a new start date or
       // access profile.
-      await q().update(people).set({ status: "planned", onboardingPaused: true }).where(eq(people.id, person!.id));
+      await q()
+        .update(people)
+        .set({ status: "planned", onboardingPaused: true })
+        .where(eq(people.id, person!.id));
     }
     const summary = `Cancelled ${WORKFLOW_KIND_LABELS[workflow.kind].toLowerCase()} of ${fullName(person!)}`;
     await record("workflow.cancelled", running.length > 0 ? `${summary}. ${tooLateFor(running)}` : summary, {
@@ -350,14 +387,18 @@ export function tooLateFor(running: { connection: { name: string } }[]): string 
   return `Too late for the jobs at ${where}: they were already running, so their changes go ahead.`;
 }
 
-export async function archivePerson(personId: number, options: { actor: Pick<User, "id" | "email"> }): Promise<void> {
+export async function archivePerson(
+  personId: number,
+  options: { actor: Pick<User, "id" | "email"> },
+): Promise<void> {
   await atomic(async () => {
     // Serialize with workflow transitions before checking eligibility.
     const person = await lockPerson(personId);
     if (!ARCHIVABLE.includes(person.status)) {
       throw new LifecycleError("Only planned or offboarded people can be archived.");
     }
-    if (await hasOpenWorkflow(person.id)) throw new LifecycleError("Finish or cancel the open workflow first.");
+    if (await hasOpenWorkflow(person.id))
+      throw new LifecycleError("Finish or cancel the open workflow first.");
     await q().update(people).set({ status: "archived" }).where(eq(people.id, person.id));
     await record("person.archived", `Archived ${fullName(person)}`, {
       actor: options.actor,
@@ -366,4 +407,3 @@ export async function archivePerson(personId: number, options: { actor: Pick<Use
     });
   });
 }
-

@@ -1,9 +1,20 @@
 import { and, desc, eq, gte, inArray, isNotNull, lt, lte, or, isNull } from "drizzle-orm";
 import { AdapterKind } from "../adapters/base";
 import { addDays, formatDate, today } from "../core/time";
-import { accounts, connections, people, syncRuns, users, type Connection, type SyncKind, type SyncRun, type Workflow } from "../db/schema";
+import {
+  accounts,
+  connections,
+  people,
+  syncRuns,
+  users,
+  type Connection,
+  type SyncKind,
+  type SyncRun,
+  type Workflow,
+} from "../db/schema";
 import { q } from "../db/tx";
-import { getPool } from "../db/client";
+import pg from "pg";
+import { connectionOptions } from "../db/client";
 import { logger } from "../logger";
 import { kindOf, syncIntervalMinutes } from "./connections";
 import { settleFinishedWorkflows } from "./jobs";
@@ -58,7 +69,8 @@ export async function startDueOnboarding(): Promise<Workflow[]> {
       );
     } catch (error) {
       // One person must not stop the schedule.
-      if (error instanceof LifecycleError) logger.info({ personId: person.id, reason: error.message }, "onboarding not started");
+      if (error instanceof LifecycleError)
+        logger.info({ personId: person.id, reason: error.message }, "onboarding not started");
       else logger.error({ err: error, personId: person.id }, "onboarding failed to start");
     }
   }
@@ -82,7 +94,11 @@ export async function startDueOffboarding(): Promise<Workflow[]> {
   const started: Workflow[] = [];
   for (const person of due) {
     if (person.status === "planned") {
-      const [account] = await q().select({ id: accounts.id }).from(accounts).where(eq(accounts.personId, person.id)).limit(1);
+      const [account] = await q()
+        .select({ id: accounts.id })
+        .from(accounts)
+        .where(eq(accounts.personId, person.id))
+        .limit(1);
       const [user] = await q()
         .select({ id: users.id })
         .from(users)
@@ -93,7 +109,8 @@ export async function startDueOffboarding(): Promise<Workflow[]> {
     try {
       started.push(await startWorkflow(person.id, "offboarding", { automatic: true }));
     } catch (error) {
-      if (error instanceof LifecycleError) logger.info({ personId: person.id, reason: error.message }, "offboarding not started");
+      if (error instanceof LifecycleError)
+        logger.info({ personId: person.id, reason: error.message }, "offboarding not started");
       else logger.error({ err: error, personId: person.id }, "offboarding failed to start");
     }
   }
@@ -165,16 +182,20 @@ export async function runDueSync(): Promise<SyncRun | null> {
  * held until `fn` ends.
  */
 export async function exclusive<T>(lockId: number, fn: () => Promise<T>): Promise<T | null> {
-  const client = await getPool().connect();
-  let acquired = false;
+  // A connection outside the pool: `fn` needs the pool's connections, even
+  // with DATABASE_POOL_SIZE=1. Ending it releases the lock, also after a failure.
+  const client = new pg.Client(connectionOptions());
+  client.on("error", (error) => logger.warn({ err: error }, "lock connection error"));
+  await client.connect();
   try {
-    const { rows } = await client.query<{ acquired: boolean }>("select pg_try_advisory_lock($1) as acquired", [lockId]);
-    acquired = rows[0]!.acquired;
-    if (!acquired) return null;
+    const { rows } = await client.query<{ acquired: boolean }>(
+      "select pg_try_advisory_lock($1) as acquired",
+      [lockId],
+    );
+    if (!rows[0]!.acquired) return null;
     return await fn();
   } finally {
-    if (acquired) await client.query("select pg_advisory_unlock($1)", [lockId]).catch(() => undefined);
-    client.release();
+    await client.end().catch(() => undefined);
   }
 }
 

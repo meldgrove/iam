@@ -39,7 +39,11 @@ function Filters({ search, onSearch }: { search: PeopleSearch; onSearch: (search
         aria-label="Status"
         value={search.status ?? ""}
         onChange={(event) =>
-          onSearch({ ...search, status: (event.target.value || undefined) as PersonStatus | undefined, page: undefined })
+          onSearch({
+            ...search,
+            status: (event.target.value || undefined) as PersonStatus | undefined,
+            page: undefined,
+          })
         }
       >
         <NativeSelectOption value="">Not archived</NativeSelectOption>
@@ -53,7 +57,11 @@ function Filters({ search, onSearch }: { search: PeopleSearch; onSearch: (search
         aria-label="Team"
         value={search.team ? String(search.team) : ""}
         onChange={(event) =>
-          onSearch({ ...search, team: event.target.value ? Number(event.target.value) : undefined, page: undefined })
+          onSearch({
+            ...search,
+            team: event.target.value ? Number(event.target.value) : undefined,
+            page: undefined,
+          })
         }
       >
         <NativeSelectOption value="">All teams</NativeSelectOption>
@@ -71,7 +79,13 @@ function Filters({ search, onSearch }: { search: PeopleSearch; onSearch: (search
 }
 
 /** /people: everyone whose access this app manages, filtered by the address. */
-export function PeoplePage({ search, onSearch }: { search: PeopleSearch; onSearch: (search: PeopleSearch) => void }) {
+export function PeoplePage({
+  search,
+  onSearch,
+}: {
+  search: PeopleSearch;
+  onSearch: (search: PeopleSearch) => void;
+}) {
   const me = useMe();
   const format = useFormatter();
   const query = useQuery(peopleQuery(search));
@@ -135,7 +149,10 @@ export function PeoplePage({ search, onSearch }: { search: PeopleSearch; onSearc
               </TableBody>
             </Table>
           </Card>
-          <PageControls data={query.data} onPage={(page) => onSearch({ ...search, page: page > 1 ? page : undefined })} />
+          <PageControls
+            data={query.data}
+            onPage={(page) => onSearch({ ...search, page: page > 1 ? page : undefined })}
+          />
         </>
       )}
     </Page>

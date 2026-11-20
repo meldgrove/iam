@@ -19,6 +19,7 @@ import {
 import { PERSON_TYPE_LABELS, type PersonType } from "@iam/shared/labels";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { otherErrors, serverFieldErrors, validate, type FieldErrors } from "@/lib/form";
+import { shortMode } from "@/lib/text";
 import { useRecordTitle } from "@/app/record-name";
 import { TextLink } from "@/components/lists";
 import { CheckboxField, FormActions, FormErrors, TextareaField, TextField } from "@/components/form-fields";
@@ -30,29 +31,45 @@ export function ProfileFormPage({ id }: { id?: number }) {
   const profile = useQuery({ ...profileQuery(id ?? 0), enabled: id !== undefined });
   const connections = useQuery(groupConnectionsQuery);
   useRecordTitle(`/profiles/${id}`, id === undefined ? undefined : profile.data?.name);
-  const failed = (id !== undefined && profile.isError ? profile : null) ?? (connections.isError ? connections : null);
-  if (failed) return <ErrorState error={failed.error} onRetry={() => void failed.refetch()} />;
+  if (id !== undefined && profile.isError) {
+    return <ErrorState error={profile.error} onRetry={() => void profile.refetch()} />;
+  }
+  if (connections.isError)
+    return <ErrorState error={connections.error} onRetry={() => void connections.refetch()} />;
   if ((id !== undefined && profile.isPending) || connections.isPending) return <LoadingState />;
-  return <ProfileForm profile={id === undefined ? null : (profile.data ?? null)} connections={connections.data} />;
+  return (
+    <ProfileForm profile={id === undefined ? null : (profile.data ?? null)} connections={connections.data} />
+  );
 }
 
 /** The groups chosen per connection that grants an account. */
 type Grants = ReadonlyMap<number, ReadonlySet<number>>;
 
-function ProfileForm({ profile, connections }: { profile: ProfileDetail | null; connections: GroupConnection[] }) {
+function ProfileForm({
+  profile,
+  connections,
+}: {
+  profile: ProfileDetail | null;
+  connections: GroupConnection[];
+}) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [name, setName] = useState(profile?.name ?? "");
   const [description, setDescription] = useState(profile?.description ?? "");
   const [defaultFor, setDefaultFor] = useState<PersonType[]>(profile?.defaultFor ?? []);
   const [grants, setGrants] = useState<Grants>(
-    () => new Map(profile?.grants.map((grant) => [grant.connection.id, new Set(grant.groups.map((group) => group.id))])),
+    () =>
+      new Map(
+        profile?.grants.map((grant) => [grant.connection.id, new Set(grant.groups.map((group) => group.id))]),
+      ),
   );
   const [errors, setErrors] = useState<FieldErrors>({});
 
   const save = useMutation({
     mutationFn: (input: ProfileInput) =>
-      profile ? api.put<ActionResult>(`/profiles/${profile.id}`, input) : api.post<ActionResult>("/profiles", input),
+      profile
+        ? api.put<ActionResult>(`/profiles/${profile.id}`, input)
+        : api.post<ActionResult>("/profiles", input),
     onSuccess: async (result) => {
       toast.success(result.message);
       await navigate({ to: `/profiles/${result.id ?? profile?.id}` });
@@ -75,7 +92,9 @@ function ProfileForm({ profile, connections }: { profile: ProfileDetail | null; 
         .filter((connection) => grants.has(connection.id))
         .map((connection) => ({
           connectionId: connection.id,
-          groupIds: connection.groups.map((group) => group.id).filter((groupId) => grants.get(connection.id)!.has(groupId)),
+          groupIds: connection.groups
+            .map((group) => group.id)
+            .filter((groupId) => grants.get(connection.id)!.has(groupId)),
         })),
     };
     const invalid = validate(profileInputSchema, input);
@@ -103,11 +122,22 @@ function ProfileForm({ profile, connections }: { profile: ProfileDetail | null; 
   const title = profile ? `Edit ${profile.name}` : "Add access profile";
   return (
     <Page className="max-w-4xl">
-      <PageHeader title={title} description="Changes apply to people when an access update, onboarding or offboarding runs." />
+      <PageHeader
+        title={title}
+        description="Changes apply to people when an access update, onboarding or offboarding runs."
+      />
       <form onSubmit={submit} noValidate className="grid gap-4">
         <Card>
           <CardContent className="grid gap-5">
-            <TextField id="name" label="Name" value={name} onChange={setName} error={errors.name} maxLength={200} required />
+            <TextField
+              id="name"
+              label="Name"
+              value={name}
+              onChange={setName}
+              error={errors.name}
+              maxLength={200}
+              required
+            />
             <TextareaField
               id="description"
               label="Description"
@@ -116,11 +146,15 @@ function ProfileForm({ profile, connections }: { profile: ProfileDetail | null; 
               error={errors.description}
               rows={3}
             />
-            <FieldSet data-invalid={errors.defaultFor ? true : undefined} aria-describedby="default-for-hint">
+            <FieldSet
+              data-invalid={errors.defaultFor ? true : undefined}
+              aria-describedby={errors.defaultFor ? "default-for-hint default-for-error" : "default-for-hint"}
+              className="gap-3"
+            >
               <FieldLegend variant="label" className="mb-0">
                 Default for
               </FieldLegend>
-              <div className="flex flex-wrap gap-x-6 gap-y-2">
+              <div className="grid gap-x-6 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
                 {PERSON_TYPES.map((type) => (
                   <CheckboxField
                     key={type}
@@ -128,15 +162,17 @@ function ProfileForm({ profile, connections }: { profile: ProfileDetail | null; 
                     label={PERSON_TYPE_LABELS[type]}
                     checked={defaultFor.includes(type)}
                     onChange={(checked) =>
-                      setDefaultFor((current) => (checked ? [...current, type] : current.filter((item) => item !== type)))
+                      setDefaultFor((current) =>
+                        checked ? [...current, type] : current.filter((item) => item !== type),
+                      )
                     }
                   />
                 ))}
               </div>
-              <FieldDescription id="default-for-hint" className="-mt-3">
+              <FieldDescription id="default-for-hint">
                 People of these types get this profile when they are added without one.
               </FieldDescription>
-              {errors.defaultFor ? <FieldError className="-mt-4">{errors.defaultFor}</FieldError> : null}
+              {errors.defaultFor ? <FieldError id="default-for-error">{errors.defaultFor}</FieldError> : null}
             </FieldSet>
           </CardContent>
         </Card>
@@ -147,7 +183,8 @@ function ProfileForm({ profile, connections }: { profile: ProfileDetail | null; 
           <CardContent className="grid gap-3">
             {connections.length === 0 ? (
               <p className="text-muted-foreground text-sm">
-                No account connections yet. Add one in <TextLink to="/admin/connections">Admin › Connections</TextLink>.
+                No account connections yet. Add one in{" "}
+                <TextLink to="/admin/connections">Admin › Connections</TextLink>.
               </p>
             ) : null}
             {connections.map((connection) => {
@@ -166,7 +203,10 @@ function ProfileForm({ profile, connections }: { profile: ProfileDetail | null; 
                         Account in {connection.name}
                       </Label>
                     </div>
-                    {connection.enabled ? null : <span className="text-muted-foreground text-sm">turned off</span>}
+                    <span className="text-muted-foreground text-sm">
+                      {connection.enabled ? "" : "turned off · "}
+                      {shortMode(connection.mode)}
+                    </span>
                   </div>
                   {connection.supportsGroups ? (
                     <GroupChecklist

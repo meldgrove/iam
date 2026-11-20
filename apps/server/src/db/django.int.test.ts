@@ -139,7 +139,9 @@ describe("taking over the database of the Django version", () => {
       await client.query("begin");
       try {
         await client.query("delete from iam_team where name = 'Product'");
-        const team = await client.query("select count(*)::int as n from iam_person where team_id is not null");
+        const team = await client.query(
+          "select count(*)::int as n from iam_person where team_id is not null",
+        );
         expect(team.rows[0].n).toBe(0);
         await expect(client.query("delete from iam_accessprofile where name = 'Staff'")).rejects.toThrow(
           /foreign key/,
@@ -186,6 +188,18 @@ describe("taking over the database of the Django version", () => {
       "0003_person_onboarding_paused",
       "0004_job_rehearsed",
     ]);
+  });
+
+  it("refuses a database that lacks a column of IAM 0.2, and changes nothing", async () => {
+    await loadFixture();
+    await withClient(DJANGO, (client) =>
+      client.query("alter table iam_person drop column work_email cascade"),
+    );
+    await expect(upgrade(DJANGO)).rejects.toThrow(/iam_person.work_email is missing/);
+    const { rows } = await withClient(DJANGO, (client) =>
+      client.query("select to_regclass('drizzle.__drizzle_migrations') is null as untouched"),
+    );
+    expect(rows[0].untouched).toBe(true);
   });
 
   it("refuses IAM tables without migration records", async () => {

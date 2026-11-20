@@ -52,7 +52,9 @@ export function groupLabel(group: Pick<ProviderGroup, "path" | "name">): string 
   return group.path || group.name;
 }
 
-export async function provisioningConnections(options: { includeDisabled?: boolean } = {}): Promise<Connection[]> {
+export async function provisioningConnections(
+  options: { includeDisabled?: boolean } = {},
+): Promise<Connection[]> {
   const rows = await q()
     .select()
     .from(connections)
@@ -135,7 +137,9 @@ export async function managedGroupIds(connectionId: number): Promise<Set<string>
 }
 
 /** The JSON form of desired access a workflow keeps. */
-export async function snapshot(person: Pick<Person, "status" | "accessProfileId" | "teamId">): Promise<DesiredSnapshot> {
+export async function snapshot(
+  person: Pick<Person, "status" | "accessProfileId" | "teamId">,
+): Promise<DesiredSnapshot> {
   const result: DesiredSnapshot = {};
   for (const [connectionId, grant] of await desiredAccess(person)) {
     result[String(connectionId)] = {

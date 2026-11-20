@@ -1,11 +1,23 @@
 import { and, eq, type SQL } from "drizzle-orm";
 import { addDays, today } from "../core/time";
-import { accessProfiles, connections, people, profileGrants, providerGroups, teamGroups, teams, users } from "../db/schema";
+import {
+  accessProfiles,
+  connections,
+  people,
+  profileGrants,
+  providerGroups,
+  teamGroups,
+  teams,
+  users,
+} from "../db/schema";
 import { q } from "../db/tx";
 
 /** Demo data for development and screenshots: a manual app, profiles, teams and people. */
 export async function seedDemo(adminEmail: string): Promise<void> {
-  await q().insert(users).values({ email: adminEmail, role: "admin", displayName: "Demo Admin" }).onConflictDoNothing();
+  await q()
+    .insert(users)
+    .values({ email: adminEmail, role: "admin", displayName: "Demo Admin" })
+    .onConflictDoNothing();
   const figma = await getOrCreate(connections, eq(connections.name, "Figma"), {
     adapter: "manual",
     name: "Figma",
@@ -28,9 +40,18 @@ export async function seedDemo(adminEmail: string): Promise<void> {
     description: "Volunteers",
     defaultFor: ["volunteer"],
   });
-  await q().insert(profileGrants).values({ profileId: staff.id, connectionId: figma.id }).onConflictDoNothing();
-  const product = await getOrCreate(teams, eq(teams.name, "Product"), { name: "Product", description: "Product and design" });
-  await q().insert(teamGroups).values({ teamId: product.id, providerGroupId: design.id }).onConflictDoNothing();
+  await q()
+    .insert(profileGrants)
+    .values({ profileId: staff.id, connectionId: figma.id })
+    .onConflictDoNothing();
+  const product = await getOrCreate(teams, eq(teams.name, "Product"), {
+    name: "Product",
+    description: "Product and design",
+  });
+  await q()
+    .insert(teamGroups)
+    .values({ teamId: product.id, providerGroupId: design.id })
+    .onConflictDoNothing();
   await getOrCreate(teams, eq(teams.name, "Operations"), { name: "Operations" });
   const day = today();
   const list = [

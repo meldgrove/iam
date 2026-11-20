@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Badge } from "@meldgrove/ui/badge";
 import { Button } from "@meldgrove/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@meldgrove/ui/card";
 import { Page, PageHeader } from "@meldgrove/ui/page";
@@ -71,9 +72,17 @@ export function ProfilePage({ id }: { id: number }) {
                     <TableRow key={grant.connection.id}>
                       <TableCell className="align-top font-medium">
                         {me.isAdmin ? (
-                          <TextLink to={`/admin/connections/${grant.connection.id}`}>{grant.connection.name}</TextLink>
+                          <TextLink to={`/admin/connections/${grant.connection.id}`}>
+                            {grant.connection.name}
+                          </TextLink>
                         ) : (
                           grant.connection.name
+                        )}
+                        {grant.connection.enabled ? null : (
+                          <>
+                            {" "}
+                            <Badge variant="outline">off</Badge>
+                          </>
                         )}
                       </TableCell>
                       <TableCell className="text-sm whitespace-normal">

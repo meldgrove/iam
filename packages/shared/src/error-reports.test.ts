@@ -83,9 +83,9 @@ describe("redactErrorReport", () => {
     });
     const filenameOf = (report: ReturnType<typeof frame>) =>
       report.exception.values[0]!.stacktrace.frames[0]!.filename;
-    expect(filenameOf(redactErrorReport(frame("https://support.example.invalid/assets/index-a1.js?v=2#x")))).toBe(
-      "https://support.example.invalid/assets/index-a1.js",
-    );
+    expect(
+      filenameOf(redactErrorReport(frame("https://support.example.invalid/assets/index-a1.js?v=2#x"))),
+    ).toBe("https://support.example.invalid/assets/index-a1.js");
     expect(filenameOf(redactErrorReport(frame(`https://support.example.invalid/agents?q=${PRIVATE}`)))).toBe(
       "https://support.example.invalid",
     );
@@ -115,7 +115,11 @@ describe("redactErrorReport", () => {
       debug_meta: {
         images: [
           { type: "sourcemap", code_file: "/app/apps/server/dist/main.mjs", debug_id: "d-1" },
-          { type: "sourcemap", code_file: "https://support.example.invalid/assets/index-a1.js", debug_id: "d-2" },
+          {
+            type: "sourcemap",
+            code_file: "https://support.example.invalid/assets/index-a1.js",
+            debug_id: "d-2",
+          },
         ],
       },
     });
@@ -156,9 +160,9 @@ describe("redactErrorReport", () => {
 describe("scrubbing addresses", async () => {
   const { scrubPath, scrubSpan, scrubText } = await import("./error-reports");
   it("keeps route patterns only", () => {
-    expect(scrubPath("https://backups.example.invalid/sources/11111111-1111-4111-8111-111111111111?x=1")).toBe(
-      "https://backups.example.invalid/sources/:id",
-    );
+    expect(
+      scrubPath("https://backups.example.invalid/sources/11111111-1111-4111-8111-111111111111?x=1"),
+    ).toBe("https://backups.example.invalid/sources/:id");
     expect(
       scrubPath("/api/v1/sources/11111111-1111-4111-8111-111111111111/snapshots/0a1b2c3d/download"),
     ).toBe("/api/v1/sources/:id/snapshots/:snapshot/download");

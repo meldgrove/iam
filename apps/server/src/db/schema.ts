@@ -90,14 +90,21 @@ export const users = pgTable(
     id: id(),
     lastLogin: stamp("last_login"),
     email: varchar("email", { length: 254 }).notNull(),
-    displayName: varchar("display_name", { length: 200 }).notNull().$default(() => ""),
+    displayName: varchar("display_name", { length: 200 })
+      .notNull()
+      .$default(() => ""),
     oidcSubject: varchar("oidc_subject", { length: 255 }),
-    role: varchar("role", { length: 20 }).$type<Role>().notNull().$default(() => "viewer"),
+    role: varchar("role", { length: 20 })
+      .$type<Role>()
+      .notNull()
+      .$default(() => "viewer"),
     roleSource: varchar("role_source", { length: 20 })
       .$type<RoleSource>()
       .notNull()
       .$default(() => "local"),
-    isActive: boolean("is_active").notNull().$default(() => true),
+    isActive: boolean("is_active")
+      .notNull()
+      .$default(() => true),
     createdAt: stamp("created_at").notNull().$defaultFn(now),
     personId: ref("person_id"),
   },
@@ -122,7 +129,9 @@ export const sessions = pgTable(
     createdAt: stamp("created_at").notNull().$defaultFn(now),
     expiresAt: stamp("expires_at").notNull(),
     /** The provider's ID token: the hint of the provider's sign-out. */
-    idToken: text("id_token").notNull().$default(() => ""),
+    idToken: text("id_token")
+      .notNull()
+      .$default(() => ""),
   },
   (t) => [
     index("iam_session_user_id_idx").on(t.userId),
@@ -143,11 +152,21 @@ export const appSettings = pgTable(
     organizationName: varchar("organization_name", { length: 200 })
       .notNull()
       .$default(() => "Meldgrove IAM"),
-    onboardingLeadDays: integer("onboarding_lead_days").notNull().$default(() => 7),
-    automaticOnboarding: boolean("automatic_onboarding").notNull().$default(() => true),
-    automaticOffboarding: boolean("automatic_offboarding").notNull().$default(() => true),
-    removalLimitPerDay: integer("removal_limit_per_day").notNull().$default(() => 5),
-    notificationEmails: text("notification_emails").notNull().$default(() => ""),
+    onboardingLeadDays: integer("onboarding_lead_days")
+      .notNull()
+      .$default(() => 7),
+    automaticOnboarding: boolean("automatic_onboarding")
+      .notNull()
+      .$default(() => true),
+    automaticOffboarding: boolean("automatic_offboarding")
+      .notNull()
+      .$default(() => true),
+    removalLimitPerDay: integer("removal_limit_per_day")
+      .notNull()
+      .$default(() => 5),
+    notificationEmails: text("notification_emails")
+      .notNull()
+      .$default(() => ""),
     updatedAt: stamp("updated_at").notNull().$defaultFn(now).$onUpdateFn(now),
   },
   (t) => [
@@ -163,15 +182,27 @@ export const connections = pgTable(
     id: id(),
     adapter: varchar("adapter", { length: 50 }).notNull(),
     name: varchar("name", { length: 100 }).notNull(),
-    enabled: boolean("enabled").notNull().$default(() => false),
-    mode: varchar("mode", { length: 20 }).$type<ConnectionMode>().notNull().$default(() => "automatic"),
-    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().$default(() => ({})),
-    secretData: text("secret_data").notNull().$default(() => ""),
+    enabled: boolean("enabled")
+      .notNull()
+      .$default(() => false),
+    mode: varchar("mode", { length: 20 })
+      .$type<ConnectionMode>()
+      .notNull()
+      .$default(() => "automatic"),
+    settings: jsonb("settings")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .$default(() => ({})),
+    secretData: text("secret_data")
+      .notNull()
+      .$default(() => ""),
     status: varchar("status", { length: 20 })
       .$type<ConnectionStatus>()
       .notNull()
       .$default(() => "untested"),
-    statusMessage: text("status_message").notNull().$default(() => ""),
+    statusMessage: text("status_message")
+      .notNull()
+      .$default(() => ""),
     checkedAt: stamp("checked_at"),
     groupsSyncedAt: stamp("groups_synced_at"),
     lastSyncAt: stamp("last_sync_at"),
@@ -188,12 +219,20 @@ export const providerGroups = pgTable(
     id: id(),
     externalId: varchar("external_id", { length: 255 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
-    path: varchar("path", { length: 500 }).notNull().$default(() => ""),
-    description: text("description").notNull().$default(() => ""),
+    path: varchar("path", { length: 500 })
+      .notNull()
+      .$default(() => ""),
+    description: text("description")
+      .notNull()
+      .$default(() => ""),
     /** A group the provider no longer lists. Kept so policy shows what broke. */
-    missing: boolean("missing").notNull().$default(() => false),
+    missing: boolean("missing")
+      .notNull()
+      .$default(() => false),
     /** Added by hand, not imported. */
-    manual: boolean("manual").notNull().$default(() => false),
+    manual: boolean("manual")
+      .notNull()
+      .$default(() => false),
     seenAt: stamp("seen_at"),
     connectionId: ref("connection_id").notNull(),
   },
@@ -213,7 +252,9 @@ export const teams = pgTable(
   {
     id: id(),
     name: varchar("name", { length: 200 }).notNull(),
-    description: text("description").notNull().$default(() => ""),
+    description: text("description")
+      .notNull()
+      .$default(() => ""),
     createdAt: stamp("created_at").notNull().$defaultFn(now),
   },
   (t) => [unique("iam_team_name_key").on(t.name)],
@@ -250,9 +291,14 @@ export const accessProfiles = pgTable(
   {
     id: id(),
     name: varchar("name", { length: 200 }).notNull(),
-    description: text("description").notNull().$default(() => ""),
+    description: text("description")
+      .notNull()
+      .$default(() => ""),
     /** Person types that get this profile when added without one. */
-    defaultFor: jsonb("default_for").$type<string[]>().notNull().$default(() => []),
+    defaultFor: jsonb("default_for")
+      .$type<string[]>()
+      .notNull()
+      .$default(() => []),
     createdAt: stamp("created_at").notNull().$defaultFn(now),
   },
   (t) => [unique("iam_accessprofile_name_key").on(t.name)],
@@ -318,20 +364,33 @@ export const people = pgTable(
     firstName: varchar("first_name", { length: 150 }).notNull(),
     lastName: varchar("last_name", { length: 150 }).notNull(),
     workEmail: varchar("work_email", { length: 254 }),
-    personalEmail: varchar("personal_email", { length: 254 }).notNull().$default(() => ""),
+    personalEmail: varchar("personal_email", { length: 254 })
+      .notNull()
+      .$default(() => ""),
     /** Login name in connected apps. Empty: the part of the work email before @. */
-    username: varchar("username", { length: 150 }).notNull().$default(() => ""),
-    jobTitle: varchar("job_title", { length: 200 }).notNull().$default(() => ""),
+    username: varchar("username", { length: 150 })
+      .notNull()
+      .$default(() => ""),
+    jobTitle: varchar("job_title", { length: 200 })
+      .notNull()
+      .$default(() => ""),
     personType: varchar("person_type", { length: 20 })
       .$type<PersonType>()
       .notNull()
       .$default(() => "employee"),
-    status: varchar("status", { length: 20 }).$type<PersonStatus>().notNull().$default(() => "planned"),
+    status: varchar("status", { length: 20 })
+      .$type<PersonStatus>()
+      .notNull()
+      .$default(() => "planned"),
     startDate: date("start_date", { mode: "string" }),
     /** Last working day. */
     endDate: date("end_date", { mode: "string" }),
-    sourceId: varchar("source_id", { length: 255 }).notNull().$default(() => ""),
-    notes: text("notes").notNull().$default(() => ""),
+    sourceId: varchar("source_id", { length: 255 })
+      .notNull()
+      .$default(() => ""),
+    notes: text("notes")
+      .notNull()
+      .$default(() => ""),
     createdAt: stamp("created_at").notNull().$defaultFn(now),
     updatedAt: stamp("updated_at").notNull().$defaultFn(now).$onUpdateFn(now),
     accessProfileId: ref("access_profile_id"),
@@ -343,7 +402,9 @@ export const people = pgTable(
      * An approver cancelled the last onboarding: the schedule does not start
      * it again until the start date or the access profile changes.
      */
-    onboardingPaused: boolean("onboarding_paused").notNull().$default(() => false),
+    onboardingPaused: boolean("onboarding_paused")
+      .notNull()
+      .$default(() => false),
   },
   (t) => [
     unique("iam_person_work_email_key").on(t.workEmail),
@@ -384,20 +445,36 @@ export const accounts = pgTable(
   "iam_account",
   {
     id: id(),
-    externalId: varchar("external_id", { length: 255 }).notNull().$default(() => ""),
-    username: varchar("username", { length: 255 }).notNull().$default(() => ""),
-    email: varchar("email", { length: 255 }).notNull().$default(() => ""),
-    displayName: varchar("display_name", { length: 255 }).notNull().$default(() => ""),
-    status: varchar("status", { length: 20 }).$type<AccountStatus>().notNull().$default(() => "unknown"),
+    externalId: varchar("external_id", { length: 255 })
+      .notNull()
+      .$default(() => ""),
+    username: varchar("username", { length: 255 })
+      .notNull()
+      .$default(() => ""),
+    email: varchar("email", { length: 255 })
+      .notNull()
+      .$default(() => ""),
+    displayName: varchar("display_name", { length: 255 })
+      .notNull()
+      .$default(() => ""),
+    status: varchar("status", { length: 20 })
+      .$type<AccountStatus>()
+      .notNull()
+      .$default(() => "unknown"),
     /** Group external IDs seen at the last observation; null when not observed. */
     observedGroups: jsonb("observed_groups").$type<string[] | null>(),
     /**
      * Groups this app put the account in. They stay managed for this account
      * after a profile or team stops using them, so an update can remove them.
      */
-    appliedGroups: jsonb("applied_groups").$type<string[]>().notNull().$default(() => []),
+    appliedGroups: jsonb("applied_groups")
+      .$type<string[]>()
+      .notNull()
+      .$default(() => []),
     observedAt: stamp("observed_at"),
-    createdByApp: boolean("created_by_app").notNull().$default(() => false),
+    createdByApp: boolean("created_by_app")
+      .notNull()
+      .$default(() => false),
     updatedAt: stamp("updated_at").notNull().$defaultFn(now).$onUpdateFn(now),
     connectionId: ref("connection_id").notNull(),
     personId: ref("person_id"),
@@ -430,10 +507,20 @@ export const workflows = pgTable(
   {
     id: id(),
     kind: varchar("kind", { length: 20 }).$type<WorkflowKind>().notNull(),
-    status: varchar("status", { length: 20 }).$type<WorkflowStatus>().notNull().$default(() => "running"),
-    desired: jsonb("desired").$type<DesiredSnapshot>().notNull().$default(() => ({})),
-    automatic: boolean("automatic").notNull().$default(() => false),
-    reason: varchar("reason", { length: 300 }).notNull().$default(() => ""),
+    status: varchar("status", { length: 20 })
+      .$type<WorkflowStatus>()
+      .notNull()
+      .$default(() => "running"),
+    desired: jsonb("desired")
+      .$type<DesiredSnapshot>()
+      .notNull()
+      .$default(() => ({})),
+    automatic: boolean("automatic")
+      .notNull()
+      .$default(() => false),
+    reason: varchar("reason", { length: 300 })
+      .notNull()
+      .$default(() => ""),
     createdAt: stamp("created_at").notNull().$defaultFn(now),
     finishedAt: stamp("finished_at"),
     createdById: ref("created_by_id"),
@@ -468,14 +555,30 @@ export const jobs = pgTable(
   {
     id: id(),
     action: varchar("action", { length: 30 }).$type<JobAction>().notNull(),
-    groups: jsonb("groups").$type<string[]>().notNull().$default(() => []),
-    managedGroups: jsonb("managed_groups").$type<string[]>().notNull().$default(() => []),
-    status: varchar("status", { length: 20 }).$type<JobStatus>().notNull().$default(() => "queued"),
-    attempts: integer("attempts").notNull().$default(() => 0),
+    groups: jsonb("groups")
+      .$type<string[]>()
+      .notNull()
+      .$default(() => []),
+    managedGroups: jsonb("managed_groups")
+      .$type<string[]>()
+      .notNull()
+      .$default(() => []),
+    status: varchar("status", { length: 20 })
+      .$type<JobStatus>()
+      .notNull()
+      .$default(() => "queued"),
+    attempts: integer("attempts")
+      .notNull()
+      .$default(() => 0),
     nextAttemptAt: stamp("next_attempt_at").notNull().$defaultFn(now),
     lockedUntil: stamp("locked_until"),
-    lastError: text("last_error").notNull().$default(() => ""),
-    result: jsonb("result").$type<Record<string, unknown>>().notNull().$default(() => ({})),
+    lastError: text("last_error")
+      .notNull()
+      .$default(() => ""),
+    result: jsonb("result")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .$default(() => ({})),
     createdAt: stamp("created_at").notNull().$defaultFn(now),
     finishedAt: stamp("finished_at"),
     connectionId: ref("connection_id").notNull(),
@@ -514,12 +617,19 @@ export const tasks = pgTable(
   {
     id: id(),
     kind: varchar("kind", { length: 20 }).$type<TaskKind>().notNull(),
-    status: varchar("status", { length: 20 }).$type<TaskStatus>().notNull().$default(() => "open"),
+    status: varchar("status", { length: 20 })
+      .$type<TaskStatus>()
+      .notNull()
+      .$default(() => "open"),
     title: varchar("title", { length: 300 }).notNull(),
-    instructions: text("instructions").notNull().$default(() => ""),
+    instructions: text("instructions")
+      .notNull()
+      .$default(() => ""),
     createdAt: stamp("created_at").notNull().$defaultFn(now),
     completedAt: stamp("completed_at"),
-    note: text("note").notNull().$default(() => ""),
+    note: text("note")
+      .notNull()
+      .$default(() => ""),
     completedById: ref("completed_by_id"),
     connectionId: ref("connection_id"),
     jobId: ref("job_id"),
@@ -563,9 +673,17 @@ export const syncRuns = pgTable(
   {
     id: id(),
     kind: varchar("kind", { length: 20 }).$type<SyncKind>().notNull(),
-    status: varchar("status", { length: 20 }).$type<SyncStatus>().notNull().$default(() => "running"),
-    summary: jsonb("summary").$type<Record<string, unknown>>().notNull().$default(() => ({})),
-    error: text("error").notNull().$default(() => ""),
+    status: varchar("status", { length: 20 })
+      .$type<SyncStatus>()
+      .notNull()
+      .$default(() => "running"),
+    summary: jsonb("summary")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .$default(() => ({})),
+    error: text("error")
+      .notNull()
+      .$default(() => ""),
     startedAt: stamp("started_at").notNull().$defaultFn(now),
     finishedAt: stamp("finished_at"),
     connectionId: ref("connection_id").notNull(),
@@ -595,9 +713,16 @@ export const auditEvents = pgTable(
     actorLabel: varchar("actor_label", { length: 255 }).notNull(),
     action: varchar("action", { length: 100 }).notNull(),
     summary: varchar("summary", { length: 500 }).notNull(),
-    targetType: varchar("target_type", { length: 50 }).notNull().$default(() => ""),
-    targetId: varchar("target_id", { length: 50 }).notNull().$default(() => ""),
-    details: jsonb("details").$type<Record<string, unknown>>().notNull().$default(() => ({})),
+    targetType: varchar("target_type", { length: 50 })
+      .notNull()
+      .$default(() => ""),
+    targetId: varchar("target_id", { length: 50 })
+      .notNull()
+      .$default(() => ""),
+    details: jsonb("details")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .$default(() => ({})),
     createdAt: stamp("created_at").notNull().$defaultFn(now),
     actorId: ref("actor_id"),
     personId: ref("person_id"),

@@ -5,7 +5,7 @@ import type { Me, PersonDetail, PersonOptions } from "@iam/shared/api/iam";
 export function me(role: Me["role"]): Me {
   return {
     id: 1,
-    email: `${role}@example.org`,
+    email: `${role}@example.invalid`,
     name: role,
     role,
     isAdmin: role === "admin",
@@ -25,7 +25,7 @@ export function personDetail(overrides: Partial<PersonDetail> = {}): PersonDetai
     firstName: "Ada",
     lastName: "Lovelace",
     name: "Ada Lovelace",
-    workEmail: "ada@example.org",
+    workEmail: "ada@example.invalid",
     personalEmail: "",
     username: "",
     loginName: "ada",

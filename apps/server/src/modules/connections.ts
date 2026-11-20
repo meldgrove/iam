@@ -8,7 +8,11 @@ import {
   type ConnectionForm,
   type ConnectionRow,
 } from "@iam/shared/api/iam";
-import { ADAPTER_KIND_LABELS, SYNC_KIND_LABELS, type AdapterKind as AdapterKindName } from "@iam/shared/labels";
+import {
+  ADAPTER_KIND_LABELS,
+  SYNC_KIND_LABELS,
+  type AdapterKind as AdapterKindName,
+} from "@iam/shared/labels";
 import { AdapterError, AdapterKind, type AdapterClass, type Field } from "../adapters/base";
 import { adapterClasses, getAdapterClass } from "../adapters/registry";
 import { SecretUnreadable } from "../core/crypto";
@@ -67,6 +71,8 @@ export function adapterInfo(cls: AdapterClass): AdapterInfo {
       placeholder: spec.placeholder,
     })),
     hasMode: cls.supportsWrite && cls.kind === AdapterKind.PROVISIONING,
+    supportsWrite: cls.supportsWrite,
+    supportsGroups: cls.supportsGroups,
     groupLabel: cls.groupLabel,
     manualGroups: cls.manualGroups,
   };
@@ -81,6 +87,7 @@ function connectionRow(connection: Connection): ConnectionRow {
     status: connection.status,
     mode: connection.mode,
     kind: kindOf(connection),
+    checkedAt: iso(connection.checkedAt),
   };
 }
 
@@ -147,7 +154,8 @@ function summarize(summary: Record<string, unknown>): string {
   return parts.join(" · ");
 }
 
-const pythonish = (value: unknown) => (value === true ? "True" : value === false ? "False" : value === null ? "None" : String(value));
+const pythonish = (value: unknown) =>
+  value === true ? "True" : value === false ? "False" : value === null ? "None" : String(value);
 
 router.get("/connections/:id", async (c) => {
   requireRole(c, "admin");
@@ -166,7 +174,10 @@ router.get("/connections/:id", async (c) => {
     .where(eq(accounts.connectionId, connection.id))
     .orderBy(asc(accounts.username), asc(accounts.id))
     .limit(500);
-  const [accountCount] = await q().select({ value: count() }).from(accounts).where(eq(accounts.connectionId, connection.id));
+  const [accountCount] = await q()
+    .select({ value: count() })
+    .from(accounts)
+    .where(eq(accounts.connectionId, connection.id));
   const runs = await q()
     .select({ run: syncRuns, user: users })
     .from(syncRuns)
@@ -180,7 +191,11 @@ router.get("/connections/:id", async (c) => {
     .innerJoin(accessProfiles, eq(accessProfiles.id, profileGrants.profileId))
     .where(eq(profileGrants.connectionId, connection.id))
     .orderBy(asc(accessProfiles.name));
-  const [job] = await q().select({ id: jobs.id }).from(jobs).where(eq(jobs.connectionId, connection.id)).limit(1);
+  const [job] = await q()
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(eq(jobs.connectionId, connection.id))
+    .limit(1);
   const body: ConnectionDetail = {
     ...connectionRow(connection),
     adapter: cls ? adapterInfo(cls) : null,
@@ -270,7 +285,9 @@ function cleanSetting(spec: Field, raw: unknown): { value: unknown } | { error: 
         ? { value: text }
         : { error: `Select a valid choice. ${text} is not one of the available choices.` };
     case "email":
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) ? { value: text } : { error: "Enter a valid email address." };
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)
+        ? { value: text }
+        : { error: "Enter a valid email address." };
     case "url":
       return URL_PATTERN.test(text) && isUrl(text) ? { value: text } : { error: "Enter a valid URL." };
     case "textarea":
@@ -303,7 +320,12 @@ async function saveConnection(
   const taken = await q()
     .select({ id: connections.id })
     .from(connections)
-    .where(and(sql`lower(${connections.name}) = lower(${input.name})`, existing ? ne(connections.id, existing.id) : undefined))
+    .where(
+      and(
+        sql`lower(${connections.name}) = lower(${input.name})`,
+        existing ? ne(connections.id, existing.id) : undefined,
+      ),
+    )
     .limit(1);
   if (taken.length > 0) errors.name = "Another connection has this name.";
   const values: Record<string, unknown> = {};
@@ -319,7 +341,8 @@ async function saveConnection(
     if (spec.kind !== "secret") continue;
     const value = input.secrets[spec.name] ?? "";
     if (value) secrets[spec.name] = value;
-    else if (spec.required && !(spec.name in saved)) errors[`secrets.${spec.name}`] = "This field is required.";
+    else if (spec.required && !(spec.name in saved))
+      errors[`secrets.${spec.name}`] = "This field is required.";
   }
   // Security: a saved secret must not follow a changed URL or host, or an
   // admin session could send it to any server.
@@ -348,7 +371,11 @@ async function saveConnection(
   for (const spec of cls.fields) {
     if (spec.kind === "secret") {
       if (input.secrets[spec.name]) changed.push(spec.name);
-    } else if (existing === null ? !sameValue(values[spec.name], spec.default ?? "") : !sameValue(values[spec.name], existing.settings[spec.name] ?? "")) {
+    } else if (
+      existing === null
+        ? !sameValue(values[spec.name], spec.default ?? "")
+        : !sameValue(values[spec.name], existing.settings[spec.name] ?? "")
+    ) {
       changed.push(spec.name);
     }
   }
@@ -389,13 +416,19 @@ router.post("/connections", async (c) => {
     });
     return result;
   });
-  return c.json({ id: connection.id, message: `Added ${connection.name}. Test it before turning it on.` }, 201);
+  return c.json(
+    { id: connection.id, message: `Added ${connection.name}. Test it before turning it on.` },
+    201,
+  );
 });
 
 /** Names of changed settings for the audit log, never values: settings first, then name, enabled, mode. */
 function changedNames(names: string[]): string[] {
   const general = ["name", "enabled", "mode"];
-  return [...names.filter((name) => !general.includes(name)), ...general.filter((name) => names.includes(name))];
+  return [
+    ...names.filter((name) => !general.includes(name)),
+    ...general.filter((name) => names.includes(name)),
+  ];
 }
 
 router.put("/connections/:id", async (c) => {
@@ -475,7 +508,9 @@ router.post("/connections/:id/sync", async (c) => {
   const user = requireRole(c, "admin");
   const connection = await connectionOr404(idParam(c));
   const run =
-    kindOf(connection) === AdapterKind.HR_SOURCE ? await importPeople(connection, user) : await compareAccounts(connection, user);
+    kindOf(connection) === AdapterKind.HR_SOURCE
+      ? await importPeople(connection, user)
+      : await compareAccounts(connection, user);
   return c.json(runAnswer(run));
 });
 
@@ -509,11 +544,26 @@ router.delete("/connections/:id/groups/:groupId", async (c) => {
   const [group] = await q()
     .select()
     .from(providerGroups)
-    .where(and(eq(providerGroups.id, groupId), eq(providerGroups.connectionId, connectionId), eq(providerGroups.manual, true)));
+    .where(
+      and(
+        eq(providerGroups.id, groupId),
+        eq(providerGroups.connectionId, connectionId),
+        eq(providerGroups.manual, true),
+      ),
+    );
   if (!group) throw notFound();
-  const [inGrant] = await q().select({ id: profileGrantGroups.id }).from(profileGrantGroups).where(eq(profileGrantGroups.providerGroupId, group.id)).limit(1);
-  const [inTeam] = await q().select({ id: teamGroups.id }).from(teamGroups).where(eq(teamGroups.providerGroupId, group.id)).limit(1);
-  if (inGrant || inTeam) throw new AppError(409, "in_use", `${group.name} is still used by an access profile or team.`);
+  const [inGrant] = await q()
+    .select({ id: profileGrantGroups.id })
+    .from(profileGrantGroups)
+    .where(eq(profileGrantGroups.providerGroupId, group.id))
+    .limit(1);
+  const [inTeam] = await q()
+    .select({ id: teamGroups.id })
+    .from(teamGroups)
+    .where(eq(teamGroups.providerGroupId, group.id))
+    .limit(1);
+  if (inGrant || inTeam)
+    throw new AppError(409, "in_use", `${group.name} is still used by an access profile or team.`);
   await q().delete(providerGroups).where(eq(providerGroups.id, group.id));
   await record("group.removed", `Removed ${group.name}`, { actor: user });
   return c.json({ message: `Removed ${group.name}.` });
@@ -522,12 +572,32 @@ router.delete("/connections/:id/groups/:groupId", async (c) => {
 router.delete("/connections/:id", async (c) => {
   const user = requireRole(c, "admin");
   const connection = await connectionOr404(idParam(c));
-  const [job] = await q().select({ id: jobs.id }).from(jobs).where(eq(jobs.connectionId, connection.id)).limit(1);
-  const [grant] = await q().select({ id: profileGrants.id }).from(profileGrants).where(eq(profileGrants.connectionId, connection.id)).limit(1);
-  if (job || grant) {
-    throw new AppError(409, "in_use", "This connection has jobs or is used by access profiles. Turn it off instead.");
-  }
   await atomic(async () => {
+    // Locked through the delete: a workflow that plans a job here meanwhile
+    // either comes first (and the check sees its job) or waits and fails.
+    const [current] = await q()
+      .select({ id: connections.id })
+      .from(connections)
+      .where(eq(connections.id, connection.id))
+      .for("update");
+    if (!current) throw notFound();
+    const [job] = await q()
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(eq(jobs.connectionId, connection.id))
+      .limit(1);
+    const [grant] = await q()
+      .select({ id: profileGrants.id })
+      .from(profileGrants)
+      .where(eq(profileGrants.connectionId, connection.id))
+      .limit(1);
+    if (job || grant) {
+      throw new AppError(
+        409,
+        "in_use",
+        "This connection has jobs or is used by access profiles. Turn it off instead.",
+      );
+    }
     await q().delete(connections).where(eq(connections.id, connection.id));
     await record("connection.deleted", `Deleted connection ${connection.name}`, { actor: user });
   });

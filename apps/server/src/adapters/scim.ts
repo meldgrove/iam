@@ -16,6 +16,7 @@ import {
   type ExternalAccount,
   type ExternalGroup,
   type TestResult,
+  casefold,
 } from "./base";
 import type { HttpClient, HttpResponse, RequestOptions } from "./http";
 
@@ -58,11 +59,6 @@ function quote(value: string): string {
     /[!'()*]/g,
     (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
   );
-}
-
-/** Python's str.casefold, closely enough to compare user names and emails. */
-function casefold(value: string): string {
-  return value.toUpperCase().toLowerCase();
 }
 
 function flag(value: unknown): boolean {

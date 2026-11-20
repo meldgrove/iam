@@ -65,9 +65,16 @@ export class HttpResponse {
     return this.status >= 200 && this.status < 300;
   }
 
-  /** The body as JSON; throws for a body that is none. */
+  /**
+   * The body as JSON; a SyntaxError for a body that is none. Its message
+   * never quotes the body (JSON.parse's would), which can hold personal data.
+   */
   json<T = unknown>(): T {
-    return JSON.parse(this.text) as T;
+    try {
+      return JSON.parse(this.text) as T;
+    } catch {
+      throw new SyntaxError("The answer is not valid JSON.");
+    }
   }
 }
 
@@ -95,14 +102,13 @@ export type RequestOptions = {
   timeout?: number;
 };
 
-const CONNECT_CODES = new Set([
-  "ECONNREFUSED",
-  "ENOTFOUND",
-  "EAI_AGAIN",
-  "EHOSTUNREACH",
-  "ENETUNREACH",
+/** Failures before anything reached the server: a read may be tried again. */
+const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH"]);
+const TIMEOUT_CODES = new Set([
   "UND_ERR_CONNECT_TIMEOUT",
-  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "ETIMEDOUT",
 ]);
 
 function errorCode(error: unknown): string | undefined {
@@ -116,10 +122,39 @@ function errorCode(error: unknown): string | undefined {
 }
 
 function isTimeout(error: unknown): boolean {
+  const code = errorCode(error);
   return (
     error instanceof Error &&
-    (error.name === "TimeoutError" || error.name === "AbortError" || errorCode(error) === "UND_ERR_HEADERS_TIMEOUT")
+    (error.name === "TimeoutError" ||
+      error.name === "AbortError" ||
+      (code !== undefined && TIMEOUT_CODES.has(code)))
   );
+}
+
+/** The body as text; `onChunk` runs at every piece that arrives. Stops when `signal` aborts. */
+async function readText(response: Response, signal: AbortSignal, onChunk: () => void): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const stop = () => {
+      reject(new DOMException("The answer took too long", "TimeoutError"));
+      reader.cancel().catch(() => undefined);
+    };
+    if (signal.aborted) stop();
+    else signal.addEventListener("abort", stop, { once: true });
+  });
+  aborted.catch(() => undefined);
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { done, value } = await Promise.race([reader.read(), aborted]);
+    // A cancelled read ends as done: the body did not arrive in time.
+    if (signal.aborted) throw new DOMException("The answer took too long", "TimeoutError");
+    if (done) break;
+    onChunk();
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
 }
 
 export class HttpClient {
@@ -195,6 +230,11 @@ export class HttpClient {
     }
   }
 
+  /**
+   * One request. The timeout counts until the answer starts, then between
+   * the pieces of its body, as httpx's read timeout did: a big page that
+   * keeps arriving is never cut off.
+   */
   private async send(
     method: string,
     url: URL,
@@ -202,30 +242,50 @@ export class HttpClient {
     body: string | undefined,
     timeout?: number,
   ): Promise<HttpResponse> {
-    const request = new Request(url, {
-      method,
-      headers,
-      body,
-      redirect: "manual",
-      signal: AbortSignal.timeout((timeout ?? this.timeoutSeconds) * 1000),
-    });
-    let response: Response;
+    const limit = (timeout ?? this.timeoutSeconds) * 1000;
+    const controller = new AbortController();
+    let timedOut = false;
+    let timer: NodeJS.Timeout | undefined;
+    const restart = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, limit);
+    };
+    restart();
     try {
-      response = await this.fetcher(request);
-    } catch (error) {
-      if (error instanceof HttpTimeoutError || error instanceof HttpTransportError) throw error;
-      if (isTimeout(error)) throw new HttpTimeoutError();
-      const code = errorCode(error);
-      throw new HttpTransportError(`request failed${code ? ` (${code})` : ""}`, !code || CONNECT_CODES.has(code));
+      const request = new Request(url, {
+        method,
+        headers,
+        body,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      let response: Response;
+      try {
+        response = await this.fetcher(request);
+      } catch (error) {
+        if (error instanceof HttpTimeoutError || error instanceof HttpTransportError) throw error;
+        if (timedOut || isTimeout(error)) throw new HttpTimeoutError();
+        const code = errorCode(error);
+        throw new HttpTransportError(
+          `request failed${code ? ` (${code})` : ""}`,
+          code !== undefined && CONNECT_CODES.has(code),
+        );
+      }
+      restart();
+      let text: string;
+      try {
+        text = await readText(response, controller.signal, restart);
+      } catch (error) {
+        if (timedOut || isTimeout(error)) throw new HttpTimeoutError();
+        throw new HttpTransportError("the answer broke off", false);
+      }
+      return new HttpResponse(response.status, response.headers, text, url.toString());
+    } finally {
+      clearTimeout(timer);
     }
-    let text: string;
-    try {
-      text = await response.text();
-    } catch (error) {
-      if (isTimeout(error)) throw new HttpTimeoutError();
-      throw new HttpTransportError("the answer broke off", false);
-    }
-    return new HttpResponse(response.status, response.headers, text, url.toString());
   }
 }
 

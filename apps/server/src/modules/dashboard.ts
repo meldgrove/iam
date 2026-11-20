@@ -4,7 +4,15 @@ import { OPEN_WORKFLOW_STATUSES, PERSON_STATUS_LABELS } from "@iam/shared/labels
 import type { Dashboard, PersonDateRow } from "@iam/shared/api/iam";
 import { config } from "../config";
 import { addDays, today } from "../core/time";
-import { connections, jobs, people, tasks, workerHeartbeats, workflows, type PersonStatus } from "../db/schema";
+import {
+  connections,
+  jobs,
+  people,
+  tasks,
+  workerHeartbeats,
+  workflows,
+  type PersonStatus,
+} from "../db/schema";
 import { q } from "../db/tx";
 import type { AppEnv } from "../http/env";
 import { requireRole } from "../http/middleware";
@@ -16,16 +24,20 @@ const router = new Hono<AppEnv>();
 router.get("/dashboard", async (c) => {
   requireRole(c, "viewer");
   const day = today();
-  const peopleCounts = Object.fromEntries(Object.keys(PERSON_STATUS_LABELS).map((status) => [status, 0])) as Record<
-    PersonStatus,
-    number
-  >;
+  const peopleCounts = Object.fromEntries(
+    Object.keys(PERSON_STATUS_LABELS).map((status) => [status, 0]),
+  ) as Record<PersonStatus, number>;
   for (const person of await q().select({ status: people.status }).from(people)) {
     peopleCounts[person.status] = (peopleCounts[person.status] ?? 0) + 1;
   }
   const leftOut = notInArray(people.status, ["offboarded", "archived"]);
   const dateRows = (rows: (typeof people.$inferSelect)[], date: "startDate" | "endDate"): PersonDateRow[] =>
-    rows.map((person) => ({ id: person.id, name: fullName(person), date: person[date]!, status: person.status }));
+    rows.map((person) => ({
+      id: person.id,
+      name: fullName(person),
+      date: person[date]!,
+      status: person.status,
+    }));
   const starting = await q()
     .select()
     .from(people)

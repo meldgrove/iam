@@ -26,7 +26,11 @@ function Stat({ to, value, label, alert }: { to: string; value: number; label: s
         alert && value > 0 ? "border-destructive/50" : "",
       )}
     >
-      <div className={cn("text-2xl font-semibold tabular-nums", alert && value > 0 ? "text-destructive" : "")}>{value}</div>
+      <div
+        className={cn("text-2xl font-semibold tabular-nums", alert && value > 0 ? "text-destructive" : "")}
+      >
+        {value}
+      </div>
       <div className="text-muted-foreground text-sm">{label}</div>
     </Link>
   );
@@ -89,8 +93,8 @@ export function DashboardPage() {
         <Alert>
           <AlertDescription>
             <span>
-              No apps are connected yet. Start in <TextLink to="/admin/connections">Admin › Connections</TextLink>, then
-              create access profiles.
+              No apps are connected yet. Start in{" "}
+              <TextLink to="/admin/connections">Admin › Connections</TextLink>, then create access profiles.
             </span>
           </AlertDescription>
         </Alert>
@@ -99,8 +103,8 @@ export function DashboardPage() {
         <Alert variant="destructive">
           <AlertDescription>
             The worker has not reported in {data.worker.maxAgeSeconds} seconds
-            {data.worker.beatAt ? ` (last: ${format.dateTime(data.worker.beatAt)})` : ""}. Jobs and the schedule do not run
-            without it.
+            {data.worker.beatAt ? ` (last: ${format.dateTime(data.worker.beatAt)})` : ""}. Jobs and the
+            schedule do not run without it.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -109,8 +113,13 @@ export function DashboardPage() {
           <AlertDescription>
             <span>
               Connection{" "}
-              {me.isAdmin ? <TextLink to={`/admin/connections/${connection.id}`}>{connection.name}</TextLink> : connection.name}{" "}
-              has an error: {connection.message.length > 160 ? `${connection.message.slice(0, 159)}…` : connection.message}
+              {me.isAdmin ? (
+                <TextLink to={`/admin/connections/${connection.id}`}>{connection.name}</TextLink>
+              ) : (
+                connection.name
+              )}{" "}
+              has an error:{" "}
+              {connection.message.length > 160 ? `${connection.message.slice(0, 159)}…` : connection.message}
             </span>
           </AlertDescription>
         </Alert>

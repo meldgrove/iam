@@ -29,6 +29,7 @@ import {
   type JobState,
 } from "./jobs";
 import { startWorkflow } from "./lifecycle";
+import type * as EmailModule from "./email";
 
 /**
  * Port of tests/test_job_finish.py: how a claimed job ends. Every outcome of
@@ -52,7 +53,7 @@ const hooks = vi.hoisted(() => ({
   sendEmail: null as null | ((to: string[], subject: string, body: string) => Promise<boolean>),
 }));
 vi.mock("./email", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./email")>();
+  const actual = await importOriginal<typeof EmailModule>();
   return {
     ...actual,
     sendEmail: (to: string[], subject: string, body: string) =>

@@ -54,7 +54,17 @@ const PUBLIC_HOSTS = new Set([
   "eslint.org",
 ]);
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "web", "keycloak", "mailpit", "postgres", "updater"]);
-const PRIVATE_SUFFIXES = new Set([".db", ".sqlite3", ".dump", ".eml", ".pem", ".key", ".log", ".tar", ".zip"]);
+const PRIVATE_SUFFIXES = new Set([
+  ".db",
+  ".sqlite3",
+  ".dump",
+  ".eml",
+  ".pem",
+  ".key",
+  ".log",
+  ".tar",
+  ".zip",
+]);
 // Binary files that are part of the repository on purpose.
 const REVIEWED_BINARIES = ["docs/screenshots/"];
 const TOKEN =
@@ -75,7 +85,10 @@ function allowedHost(host) {
 
 function check(name) {
   const base = path.basename(name);
-  if (PRIVATE_SUFFIXES.has(path.extname(name).toLowerCase()) || (base.startsWith(".env") && !base.endsWith(".example"))) {
+  if (
+    PRIVATE_SUFFIXES.has(path.extname(name).toLowerCase()) ||
+    (base.startsWith(".env") && !base.endsWith(".example"))
+  ) {
     return [`${name}: private artifact type`];
   }
   const bytes = readFileSync(path.join(ROOT, name));
@@ -83,13 +96,16 @@ function check(name) {
   try {
     content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return REVIEWED_BINARIES.some((prefix) => name.startsWith(prefix)) ? [] : [`${name}: binary asset requires review`];
+    return REVIEWED_BINARIES.some((prefix) => name.startsWith(prefix))
+      ? []
+      : [`${name}: binary asset requires review`];
   }
   const errors = [];
   if (TOKEN.test(content)) errors.push(`${name}: credential-shaped value`);
   for (const match of content.matchAll(EMAIL)) {
     const host = match[1].toLowerCase();
-    if (host !== "example.invalid" && !host.endsWith(".example.invalid")) errors.push(`${name}: non-example email domain (${host})`);
+    if (host !== "example.invalid" && !host.endsWith(".example.invalid"))
+      errors.push(`${name}: non-example email domain (${host})`);
   }
   for (const match of content.matchAll(URL_PATTERN)) {
     let host;
@@ -98,8 +114,10 @@ function check(name) {
     } catch {
       continue;
     }
-    host = host.replace(/^\[|\]$/g, "");
-    if (host && host.replace(/\./g, "") && !allowedHost(host)) errors.push(`${name}: unexpected URL host (${host})`);
+    // A dot at the end of a sentence is no part of the host.
+    host = host.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+    if (host && host.replace(/\./g, "") && !allowedHost(host))
+      errors.push(`${name}: unexpected URL host (${host})`);
   }
   return errors;
 }

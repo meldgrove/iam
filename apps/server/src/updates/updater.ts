@@ -93,6 +93,15 @@ async function send(base: string, request: UpdaterRequest): Promise<Outcome> {
   if (!parsed.success) {
     logger.warn({ call: request.call, status: response.status }, "update service sent an unknown answer");
     if (response.status === 202) return { kind: "status", accepted: true, status: null };
+    // Something else answers at UPDATER_URL (a proxy page, another service):
+    // no updater there, as in the Django version.
+    if (typeof data !== "object" || data === null || Array.isArray(data) || !("mode" in data)) {
+      return {
+        kind: "unreachable",
+        timedOut: false,
+        error: "UPDATER_URL answers, but not as an update service.",
+      };
+    }
     return {
       kind: "refused",
       httpStatus: 409,

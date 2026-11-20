@@ -93,8 +93,12 @@ export async function adoptDjangoDatabase(client: pg.Client, migrationsFolder: s
     }
     // Indexes the baseline has; Django created them under the same names.
     for (const statement of indexes) {
-      await client.query(statement.replace(/^CREATE (UNIQUE )?INDEX /, "CREATE $1INDEX IF NOT EXISTS ").replace(/;$/, ""));
+      await client.query(
+        statement.replace(/^CREATE (UNIQUE )?INDEX /, "CREATE $1INDEX IF NOT EXISTS ").replace(/;$/, ""),
+      );
     }
+
+    await checkColumns(client, statements);
 
     // Only Django wrote passwords (never used: sign-in is through the provider).
     await client.query("alter table iam_user alter column password set default ''");
@@ -116,6 +120,51 @@ export async function adoptDjangoDatabase(client: pg.Client, migrationsFolder: s
   }
   logger.info("took over the database of the Django version");
   return true;
+}
+
+const TYPES: [RegExp, string][] = [
+  [/^bigint\b/, "bigint"],
+  [/^integer\b/, "integer"],
+  [/^varchar\(/, "character varying"],
+  [/^text\b/, "text"],
+  [/^jsonb\b/, "jsonb"],
+  [/^boolean\b/, "boolean"],
+  [/^date\b/, "date"],
+  [/^uuid\b/, "uuid"],
+  [/^timestamp with time zone\b/, "timestamp with time zone"],
+];
+
+/**
+ * Refuses a database whose IAM tables lack a column of the baseline, or have
+ * one of another type (a partial restore, a hand-made schema): recording the
+ * baseline would hide the problem until a page fails.
+ */
+async function checkColumns(client: pg.Client, statements: string[]): Promise<void> {
+  const { rows } = await client.query<{ table_name: string; column_name: string; data_type: string }>(`
+    select table_name, column_name, data_type from information_schema.columns
+    where table_schema = 'public' and table_name like 'iam\\_%'
+  `);
+  const found = new Map(rows.map((row) => [`${row.table_name}.${row.column_name}`, row.data_type]));
+  const problems: string[] = [];
+  for (const statement of statements) {
+    const table = /^CREATE TABLE "([a-z_]+)" \(/.exec(statement)?.[1];
+    if (!table) continue;
+    for (const line of statement.split("\n").slice(1)) {
+      const column = /^\s*"([a-z_]+)" (.+?)(?: PRIMARY KEY| NOT NULL|,|$)/.exec(line);
+      if (!column) continue;
+      const expected = TYPES.find(([pattern]) => pattern.test(column[2]!))?.[1];
+      const actual = found.get(`${table}.${column[1]}`);
+      if (actual === undefined) problems.push(`${table}.${column[1]} is missing`);
+      else if (expected && actual !== expected)
+        problems.push(`${table}.${column[1]} is ${actual}, not ${expected}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `The database does not have the tables of IAM 0.2 (${problems.slice(0, 5).join("; ")}). ` +
+        "Restore a complete backup, or migrate it with IAM 0.2 first.",
+    );
+  }
 }
 
 type Journal = { entries: { idx: number; when: number; tag: string }[] };

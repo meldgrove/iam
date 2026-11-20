@@ -51,7 +51,9 @@ export function ProfilesPage() {
                       <TableCell className="whitespace-normal">
                         <TextLink to={`/profiles/${profile.id}`}>{profile.name}</TextLink>
                         {profile.description ? (
-                          <div className="text-muted-foreground text-xs">{truncate(profile.description, 100)}</div>
+                          <div className="text-muted-foreground text-xs">
+                            {truncate(profile.description, 100)}
+                          </div>
                         ) : null}
                       </TableCell>
                       <TableCell className="tabular-nums">{profile.peopleCount}</TableCell>

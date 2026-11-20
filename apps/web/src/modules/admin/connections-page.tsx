@@ -7,11 +7,14 @@ import { Page, PageHeader } from "@meldgrove/ui/page";
 import { ErrorState, LoadingState } from "@meldgrove/ui/states";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@meldgrove/ui/table";
 import { TextLink } from "@/components/lists";
-import { ConnectionState, shortMode } from "./connection-parts";
+import { useFormatter } from "@/lib/format";
+import { shortMode } from "@/lib/text";
+import { ConnectionState } from "./connection-parts";
 import { connectionsQuery } from "./api";
 
 /** The connected apps by kind: accounts and groups, people import, email. */
 export function ConnectionsPage() {
+  const format = useFormatter();
   const query = useQuery(connectionsQuery);
   return (
     <Page>
@@ -33,8 +36,8 @@ export function ConnectionsPage() {
           {query.data.hasConnections ? null : (
             <Alert>
               <AlertDescription>
-                Nothing connected yet. Add your directory first (for example Keycloak or Google Workspace), then an email
-                connection for sign-in details and task notifications.
+                Nothing connected yet. Add your directory first (for example Keycloak or Google Workspace),
+                then an email connection for sign-in details and task notifications.
               </AlertDescription>
             </Alert>
           )}
@@ -55,6 +58,7 @@ export function ConnectionsPage() {
                         <TableHead>Type</TableHead>
                         <TableHead>Mode</TableHead>
                         <TableHead>State</TableHead>
+                        <TableHead>Last check</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -69,6 +73,9 @@ export function ConnectionsPage() {
                           </TableCell>
                           <TableCell>
                             <ConnectionState enabled={connection.enabled} status={connection.status} />
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+                            {connection.checkedAt ? format.dateTime(connection.checkedAt) : "never"}
                           </TableCell>
                         </TableRow>
                       ))}

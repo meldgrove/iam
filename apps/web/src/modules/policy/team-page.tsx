@@ -9,7 +9,7 @@ import { PERSON_STATUS_LABELS } from "@iam/shared/labels";
 import { useMe } from "@/hooks/use-me";
 import { useRecordTitle } from "@/app/record-name";
 import { Empty, TextLink } from "@/components/lists";
-import { StatusBadge } from "@/components/status";
+import { StatusBadge, ToneBadge } from "@/components/status";
 import { DeleteButton } from "@/components/delete-button";
 import { refreshPolicy, teamQuery } from "./api";
 
@@ -61,6 +61,12 @@ export function TeamPage({ id }: { id: number }) {
                 {team.groups.map((group) => (
                   <li key={group.id}>
                     {group.connection}: {group.label}
+                    {group.missing ? (
+                      <>
+                        {" "}
+                        <ToneBadge tone="danger">missing</ToneBadge>
+                      </>
+                    ) : null}
                   </li>
                 ))}
               </ul>

@@ -8,6 +8,7 @@ import {
   field,
   type HRRecord,
   type TestResult,
+  casefold,
 } from "./base";
 import type { HttpClient, HttpResponse, RequestOptions } from "./http";
 
@@ -127,11 +128,6 @@ function isSet(value: unknown): boolean {
 /** `str(value or "")`. */
 function str(value: unknown): string {
   return truthy(value) ? String(value) : "";
-}
-
-/** Close to Python's str.casefold() (ß and SS compare equal). */
-function casefold(value: string): string {
-  return value.toUpperCase().toLowerCase();
 }
 
 /** A whole number from a setting or an answer, as Python's int(); throws for anything else. */

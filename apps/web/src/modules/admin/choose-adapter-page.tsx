@@ -10,7 +10,10 @@ export function ChooseAdapterPage() {
   const query = useQuery(adaptersQuery);
   return (
     <Page>
-      <PageHeader title="Add connection" description="Choose what to connect. Every setting can be changed later." />
+      <PageHeader
+        title="Add connection"
+        description="Choose what to connect. Every setting can be changed later."
+      />
       {query.isPending ? (
         <LoadingState />
       ) : query.isError ? (
@@ -29,9 +32,14 @@ export function ChooseAdapterPage() {
                       className="bg-card hover:bg-accent/40 focus-visible:ring-ring/50 grid content-start gap-1.5 rounded-xl border p-4 transition-colors outline-none focus-visible:ring-[3px]"
                     >
                       <h3 className="font-medium">{adapter.name}</h3>
-                      <p className="text-muted-foreground text-sm">{truncateWords(adapter.description, 40)}</p>
+                      <p className="text-muted-foreground text-sm">
+                        {truncateWords(adapter.description, 40)}
+                      </p>
                       {adapter.kind === "provisioning" ? (
-                        <p className="text-sm">{adapter.hasMode ? "Creates and disables accounts" : "Changes become tasks"}</p>
+                        <p className="text-sm">
+                          {adapter.supportsWrite ? "Creates and disables accounts" : "Changes become tasks"}
+                          {adapter.supportsGroups ? ` · ${adapter.groupLabel}` : ""}
+                        </p>
                       ) : null}
                     </Link>
                   </li>

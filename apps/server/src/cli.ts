@@ -29,19 +29,31 @@ async function createAdmin(args: string[]) {
   const name = option(args, "--name") ?? "";
   if (!z.email().safeParse(email).success) throw new Error("Enter a valid email address.");
   await atomic(async () => {
-    const [user] = await q().select().from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
+    const [user] = await q()
+      .select()
+      .from(users)
+      .where(sql`lower(${users.email}) = ${email}`)
+      .limit(1);
     let verb: string;
     let id: number;
     if (!user) {
-      const [created] = await q().insert(users).values({ email, role: "admin", displayName: name }).returning();
+      const [created] = await q()
+        .insert(users)
+        .values({ email, role: "admin", displayName: name })
+        .returning();
       verb = "Created";
       id = created!.id;
     } else {
-      await q().update(users).set({ role: "admin", roleSource: "local", isActive: true }).where(eq(users.id, user.id));
+      await q()
+        .update(users)
+        .set({ role: "admin", roleSource: "local", isActive: true })
+        .where(eq(users.id, user.id));
       verb = "Updated";
       id = user.id;
     }
-    await record("user.saved", `${verb} admin ${email} from the command line`, { target: { type: "user", id } });
+    await record("user.saved", `${verb} admin ${email} from the command line`, {
+      target: { type: "user", id },
+    });
     process.stdout.write(`${verb} admin ${email}. Sign in with this address.\n`);
   });
 }
@@ -51,7 +63,10 @@ async function rotateSecrets() {
   await atomic(async () => {
     const rows = await q().select().from(connections).where(ne(connections.secretData, "")).for("update");
     for (const connection of rows) {
-      await q().update(connections).set({ secretData: rotate(connection.secretData) }).where(eq(connections.id, connection.id));
+      await q()
+        .update(connections)
+        .set({ secretData: rotate(connection.secretData) })
+        .where(eq(connections.id, connection.id));
       count += 1;
     }
   });
@@ -76,7 +91,9 @@ async function main(args: string[]) {
       process.stdout.write("Demo data ready.\n");
       return;
     default:
-      process.stderr.write("Commands: generate-key, create-admin --email <address> [--name <name>], rotate-secrets, migrate, seed-demo\n");
+      process.stderr.write(
+        "Commands: generate-key, create-admin --email <address> [--name <name>], rotate-secrets, migrate, seed-demo\n",
+      );
       process.exitCode = 2;
   }
 }
@@ -87,5 +104,3 @@ main(process.argv.slice(2))
     process.exitCode = 1;
   })
   .finally(() => closeDb());
-
-

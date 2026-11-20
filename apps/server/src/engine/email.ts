@@ -10,7 +10,11 @@ import { loadSettings, notificationRecipients } from "./settings";
 /** Email: notifications about new tasks and initial passwords, through the first enabled email connection. */
 
 export async function emailConnection(): Promise<Connection | null> {
-  const rows = await q().select().from(connections).where(eq(connections.enabled, true)).orderBy(asc(connections.id));
+  const rows = await q()
+    .select()
+    .from(connections)
+    .where(eq(connections.enabled, true))
+    .orderBy(asc(connections.id));
   return rows.find((connection) => kindOf(connection) === AdapterKind.EMAIL) ?? null;
 }
 
@@ -25,7 +29,10 @@ export async function sendEmail(to: string[], subject: string, body: string): Pr
   try {
     await buildAdapter(connection).sendMessage({ to, subject, body });
   } catch (error) {
-    logger.warn({ recipients: to.length, error: error instanceof Error ? error.name : "Error" }, "email failed");
+    logger.warn(
+      { recipients: to.length, error: error instanceof Error ? error.name : "Error" },
+      "email failed",
+    );
     return false;
   }
   return true;

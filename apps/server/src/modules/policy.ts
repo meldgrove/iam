@@ -42,12 +42,21 @@ async function groupConnections(): Promise<GroupConnection[]> {
       : await q()
           .select()
           .from(providerGroups)
-          .where(and(inArray(providerGroups.connectionId, rows.map((row) => row.id)), eq(providerGroups.missing, false)))
+          .where(
+            and(
+              inArray(
+                providerGroups.connectionId,
+                rows.map((row) => row.id),
+              ),
+              eq(providerGroups.missing, false),
+            ),
+          )
           .orderBy(asc(providerGroups.path), asc(providerGroups.name), asc(providerGroups.id));
   return rows.map((connection) => ({
     id: connection.id,
     name: connection.name,
     enabled: connection.enabled,
+    mode: connection.mode,
     groupLabel: adapterClassOf(connection)?.groupLabel ?? "Groups",
     supportsGroups: supportsGroups(connection),
     groups: groups
@@ -56,19 +65,26 @@ async function groupConnections(): Promise<GroupConnection[]> {
   }));
 }
 
+/** The choices of the team and profile forms, which only admins use (as in the Django version). */
 router.get("/group-connections", async (c) => {
-  requireRole(c, "viewer");
+  requireRole(c, "admin");
   return c.json(await groupConnections());
 });
 
 async function groupsById(ids: number[]): Promise<ProviderGroup[]> {
   if (ids.length === 0) return [];
-  return q().select().from(providerGroups).where(inArray(providerGroups.id, [...new Set(ids)]));
+  return q()
+    .select()
+    .from(providerGroups)
+    .where(inArray(providerGroups.id, [...new Set(ids)]));
 }
 
 const labelsOf = async (rows: { connectionId: number; group: ProviderGroup }[]) => {
   const names = new Map(
-    (await q().select({ id: connections.id, name: connections.name }).from(connections)).map((row) => [row.id, row.name]),
+    (await q().select({ id: connections.id, name: connections.name }).from(connections)).map((row) => [
+      row.id,
+      row.name,
+    ]),
   );
   return rows.map((row) => ({ label: groupLabel(row.group), connection: names.get(row.connectionId) ?? "" }));
 };
@@ -80,7 +96,7 @@ router.get("/teams", async (c) => {
   const rows = await q()
     .select({
       team: teams,
-      memberCount: sql<number>`(select count(*) from ${people} where ${people.teamId} = ${teams.id})`,
+      memberCount: sql<number>`(select count(*) from "iam_person" as member where member.team_id = "iam_team"."id")`,
     })
     .from(teams)
     .orderBy(asc(teams.name));
@@ -105,7 +121,10 @@ router.get("/teams", async (c) => {
 
 router.get("/teams/:id", async (c) => {
   requireRole(c, "viewer");
-  const [team] = await q().select().from(teams).where(eq(teams.id, idParam(c)));
+  const [team] = await q()
+    .select()
+    .from(teams)
+    .where(eq(teams.id, idParam(c)));
   if (!team) throw notFound();
   const members = await q()
     .select({ person: people, profile: accessProfiles.name })
@@ -130,13 +149,22 @@ router.get("/teams/:id", async (c) => {
       status: person.status,
       accessProfile: profile,
     })),
-    groups: groups.map(({ group, connection }) => ({ id: group.id, label: groupLabel(group), connection })),
+    groups: groups.map(({ group, connection }) => ({
+      id: group.id,
+      label: groupLabel(group),
+      connection,
+      missing: group.missing,
+    })),
     groupIds: groups.map(({ group }) => group.id),
   };
   return c.json(body);
 });
 
-async function saveTeam(id: number | null, input: ReturnType<typeof teamInputSchema.parse>, actor: { id: number; email: string }) {
+async function saveTeam(
+  id: number | null,
+  input: ReturnType<typeof teamInputSchema.parse>,
+  actor: { id: number; email: string },
+) {
   const taken = await q()
     .select({ id: teams.id })
     .from(teams)
@@ -146,10 +174,16 @@ async function saveTeam(id: number | null, input: ReturnType<typeof teamInputSch
   return atomic(async () => {
     let teamId = id;
     if (teamId === null) {
-      const [created] = await q().insert(teams).values({ name: input.name, description: input.description }).returning();
+      const [created] = await q()
+        .insert(teams)
+        .values({ name: input.name, description: input.description })
+        .returning();
       teamId = created!.id;
     } else {
-      await q().update(teams).set({ name: input.name, description: input.description }).where(eq(teams.id, teamId));
+      await q()
+        .update(teams)
+        .set({ name: input.name, description: input.description })
+        .where(eq(teams.id, teamId));
     }
     const groups = await groupsById(input.groupIds);
     await q().delete(teamGroups).where(eq(teamGroups.teamId, teamId));
@@ -187,7 +221,10 @@ router.put("/teams/:id", async (c) => {
 
 router.delete("/teams/:id", async (c) => {
   const user = requireRole(c, "admin");
-  const [team] = await q().select().from(teams).where(eq(teams.id, idParam(c)));
+  const [team] = await q()
+    .select()
+    .from(teams)
+    .where(eq(teams.id, idParam(c)));
   if (!team) throw notFound();
   await atomic(async () => {
     await q().delete(teams).where(eq(teams.id, team.id));
@@ -213,7 +250,12 @@ async function grantsOf(profileIds: number[]) {
           .select({ grantId: profileGrantGroups.profileGrantId, group: providerGroups })
           .from(profileGrantGroups)
           .innerJoin(providerGroups, eq(providerGroups.id, profileGrantGroups.providerGroupId))
-          .where(inArray(profileGrantGroups.profileGrantId, grants.map((row) => row.grant.id)))
+          .where(
+            inArray(
+              profileGrantGroups.profileGrantId,
+              grants.map((row) => row.grant.id),
+            ),
+          )
           .orderBy(asc(providerGroups.path), asc(providerGroups.name));
   return grants.map((row) => ({
     ...row,
@@ -226,7 +268,7 @@ router.get("/profiles", async (c) => {
   const rows = await q()
     .select({
       profile: accessProfiles,
-      peopleCount: sql<number>`(select count(*) from ${people} where ${people.accessProfileId} = ${accessProfiles.id})`,
+      peopleCount: sql<number>`(select count(*) from "iam_person" as holder where holder.access_profile_id = "iam_accessprofile"."id")`,
     })
     .from(accessProfiles)
     .orderBy(asc(accessProfiles.name));
@@ -246,7 +288,10 @@ router.get("/profiles", async (c) => {
 
 router.get("/profiles/:id", async (c) => {
   requireRole(c, "viewer");
-  const [profile] = await q().select().from(accessProfiles).where(eq(accessProfiles.id, idParam(c)));
+  const [profile] = await q()
+    .select()
+    .from(accessProfiles)
+    .where(eq(accessProfiles.id, idParam(c)));
   if (!profile) throw notFound();
   const members = await q()
     .select({ person: people, team: teams.name })
@@ -261,10 +306,15 @@ router.get("/profiles/:id", async (c) => {
     description: profile.description,
     defaultFor: profile.defaultFor as PersonType[],
     grants: (await grantsOf([profile.id])).map((row) => ({
-      connection: { id: row.connection.id, name: row.connection.name },
+      connection: { id: row.connection.id, name: row.connection.name, enabled: row.connection.enabled },
       groups: row.groups.map((group) => ({ id: group.id, label: groupLabel(group), missing: group.missing })),
     })),
-    people: members.map(({ person, team }) => ({ id: person.id, name: fullName(person), status: person.status, team })),
+    people: members.map(({ person, team }) => ({
+      id: person.id,
+      name: fullName(person),
+      status: person.status,
+      team,
+    })),
   };
   return c.json(body);
 });
@@ -301,10 +351,15 @@ async function saveProfile(
   const accountConnections = (await q().select().from(connections)).filter(isProvisioning);
   const allowed = new Set(accountConnections.map((connection) => connection.id));
   const granted = new Map<number, number[]>();
-  for (const grant of input.grants) if (allowed.has(grant.connectionId)) granted.set(grant.connectionId, grant.groupIds);
+  for (const grant of input.grants)
+    if (allowed.has(grant.connectionId)) granted.set(grant.connectionId, grant.groupIds);
   return atomic(async () => {
     let profileId = id;
-    const values = { name: input.name, description: input.description, defaultFor: [...new Set(input.defaultFor)] };
+    const values = {
+      name: input.name,
+      description: input.description,
+      defaultFor: [...new Set(input.defaultFor)],
+    };
     if (profileId === null) {
       const [created] = await q().insert(accessProfiles).values(values).returning();
       profileId = created!.id;
@@ -337,7 +392,9 @@ async function saveProfile(
     await record("profile.saved", `Saved access profile ${input.name}`, {
       actor,
       target: { type: "accessprofile", id: profileId },
-      details: { grants: Object.fromEntries(saved.map((row) => [row.connection.name, row.groups.map(groupLabel)])) },
+      details: {
+        grants: Object.fromEntries(saved.map((row) => [row.connection.name, row.groups.map(groupLabel)])),
+      },
     });
     return profileId;
   });
@@ -347,7 +404,10 @@ router.post("/profiles", async (c) => {
   const user = requireRole(c, "admin");
   const input = await jsonBody(c, profileInputSchema);
   const id = await saveProfile(null, input, user);
-  return c.json({ id, message: `Saved ${input.name}. Start access updates for its people to apply changes.` }, 201);
+  return c.json(
+    { id, message: `Saved ${input.name}. Start access updates for its people to apply changes.` },
+    201,
+  );
 });
 
 router.put("/profiles/:id", async (c) => {
@@ -357,15 +417,26 @@ router.put("/profiles/:id", async (c) => {
   if (!profile) throw notFound();
   const input = await jsonBody(c, profileInputSchema);
   await saveProfile(id, input, user);
-  return c.json({ id, message: `Saved ${input.name}. Start access updates for its people to apply changes.` });
+  return c.json({
+    id,
+    message: `Saved ${input.name}. Start access updates for its people to apply changes.`,
+  });
 });
 
 router.delete("/profiles/:id", async (c) => {
   const user = requireRole(c, "admin");
-  const [profile] = await q().select().from(accessProfiles).where(eq(accessProfiles.id, idParam(c)));
+  const [profile] = await q()
+    .select()
+    .from(accessProfiles)
+    .where(eq(accessProfiles.id, idParam(c)));
   if (!profile) throw notFound();
-  const assigned = await q().select({ id: people.id }).from(people).where(eq(people.accessProfileId, profile.id)).limit(1);
-  if (assigned.length > 0) throw new AppError(409, "protected", `${profile.name} is still assigned to people.`);
+  const assigned = await q()
+    .select({ id: people.id })
+    .from(people)
+    .where(eq(people.accessProfileId, profile.id))
+    .limit(1);
+  if (assigned.length > 0)
+    throw new AppError(409, "protected", `${profile.name} is still assigned to people.`);
   await atomic(async () => {
     await q().delete(accessProfiles).where(eq(accessProfiles.id, profile.id));
     await record("profile.deleted", `Deleted access profile ${profile.name}`, { actor: user });

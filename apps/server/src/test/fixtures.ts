@@ -49,7 +49,9 @@ export async function fakeStore(): Promise<FakeStore> {
   return resetFakeStore();
 }
 
-export async function makeConnection(values: Partial<typeof connections.$inferInsert> = {}): Promise<Connection> {
+export async function makeConnection(
+  values: Partial<typeof connections.$inferInsert> = {},
+): Promise<Connection> {
   const [connection] = await getDb()
     .insert(connections)
     .values({
@@ -96,7 +98,10 @@ export async function makeProfile(
 }
 
 export async function grant(profile: AccessProfile, connection: Connection, groups: ProviderGroup[] = []) {
-  const [row] = await getDb().insert(profileGrants).values({ profileId: profile.id, connectionId: connection.id }).returning();
+  const [row] = await getDb()
+    .insert(profileGrants)
+    .values({ profileId: profile.id, connectionId: connection.id })
+    .returning();
   for (const group of groups) {
     await getDb().insert(profileGrantGroups).values({ profileGrantId: row!.id, providerGroupId: group.id });
   }
@@ -106,7 +111,8 @@ export async function grant(profile: AccessProfile, connection: Connection, grou
 /** A team "Engineering" with the groups. */
 export async function makeTeam(groups: ProviderGroup[], name = "Engineering"): Promise<Team> {
   const [team] = await getDb().insert(teams).values({ name }).returning();
-  for (const group of groups) await getDb().insert(teamGroups).values({ teamId: team!.id, providerGroupId: group.id });
+  for (const group of groups)
+    await getDb().insert(teamGroups).values({ teamId: team!.id, providerGroupId: group.id });
   return team!;
 }
 

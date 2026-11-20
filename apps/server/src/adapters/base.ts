@@ -180,7 +180,9 @@ export type AccountSpec = {
   endDate: string | null;
 };
 
-export function accountSpec(values: Partial<AccountSpec> & Pick<AccountSpec, "firstName" | "lastName" | "username">): AccountSpec {
+export function accountSpec(
+  values: Partial<AccountSpec> & Pick<AccountSpec, "firstName" | "lastName" | "username">,
+): AccountSpec {
   return {
     email: "",
     personalEmail: "",
@@ -217,7 +219,10 @@ export type EnsureResult = {
   groupError: Error | null;
 };
 
-export function ensureResult(account: ExternalAccount, values: Partial<Omit<EnsureResult, "kind" | "account">> = {}): EnsureResult {
+export function ensureResult(
+  account: ExternalAccount,
+  values: Partial<Omit<EnsureResult, "kind" | "account">> = {},
+): EnsureResult {
   return {
     kind: "ensure",
     account,
@@ -247,14 +252,23 @@ export function disableResult(
   account: ExternalAccount | null,
   values: Partial<Omit<DisableResult, "kind" | "account">> = {},
 ): DisableResult {
-  return { kind: "disable", account, changed: false, groupsRemoved: [], notes: [], groupError: null, ...values };
+  return {
+    kind: "disable",
+    account,
+    changed: false,
+    groupsRemoved: [],
+    notes: [],
+    groupError: null,
+    ...values,
+  };
 }
 
 /**
  * ensure_account: create, reactivate or keep. disable_account: disable,
  * delete (the app deletes users it disables), already disabled, or no account.
  */
-export type PlanChange = "create" | "reactivate" | "keep" | "disable" | "delete" | "already disabled" | "no account";
+export type PlanChange =
+  "create" | "reactivate" | "keep" | "disable" | "delete" | "already disabled" | "no account";
 
 /**
  * What a job does at one account, decided from reads alone. The job carries
@@ -274,7 +288,10 @@ export type AccountPlan = {
   groupsToRemove: string[] | null;
 };
 
-export function accountPlan(change: PlanChange, values: Partial<Omit<AccountPlan, "change">> = {}): AccountPlan {
+export function accountPlan(
+  change: PlanChange,
+  values: Partial<Omit<AccountPlan, "change">> = {},
+): AccountPlan {
   return { change, also: [], refusal: "", groupsToAdd: null, groupsToRemove: null, ...values };
 }
 
@@ -304,8 +321,10 @@ const PASSWORD_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0
 export function generatePassword(length = 20): string {
   for (;;) {
     let value = "";
-    for (let index = 0; index < length; index += 1) value += PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)];
-    if (/[a-z]/.test(value) && /[A-Z]/.test(value) && /[0-9]/.test(value) && /[-_.!?]/.test(value)) return value;
+    for (let index = 0; index < length; index += 1)
+      value += PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)];
+    if (/[a-z]/.test(value) && /[A-Z]/.test(value) && /[0-9]/.test(value) && /[-_.!?]/.test(value))
+      return value;
   }
 }
 
@@ -346,7 +365,8 @@ export interface AdapterInfo {
   importsGroups(): boolean;
 }
 
-export type AdapterClass = AdapterInfo & (new (config: Record<string, unknown>, options?: AdapterOptions) => Adapter);
+export type AdapterClass = AdapterInfo &
+  (new (config: Record<string, unknown>, options?: AdapterOptions) => Adapter);
 
 export function isBlank(value: unknown): boolean {
   return value === null || value === undefined || value === "";
@@ -431,11 +451,16 @@ export abstract class Adapter {
 
   require(...names: string[]): void {
     const labels = new Map(this.info.fields.map((spec) => [spec.name, spec.label]));
-    const missing = names.filter((name) => isBlank(this.setting(name))).map((name) => labels.get(name) ?? name);
+    const missing = names
+      .filter((name) => isBlank(this.setting(name)))
+      .map((name) => labels.get(name) ?? name);
     if (missing.length > 0) throw new ConfigurationError(`Missing settings: ${missing.join(", ")}.`);
   }
 
-  http(baseUrl = "", options: { headers?: Record<string, string>; timeoutSeconds?: number } = {}): HttpClient {
+  http(
+    baseUrl = "",
+    options: { headers?: Record<string, string>; timeoutSeconds?: number } = {},
+  ): HttpClient {
     return new HttpClient({
       baseUrl,
       headers: options.headers,
@@ -471,7 +496,9 @@ export abstract class Adapter {
   checkSameEmail(username: string, emails: Iterable<unknown>, spec: AccountSpec): void {
     const known = new Set<string>();
     for (const email of emails) {
-      const value = String(email ?? "").trim().toLowerCase();
+      const value = String(email ?? "")
+        .trim()
+        .toLowerCase();
       if (value) known.add(value);
     }
     if (known.size > 0 && spec.email && !known.has(spec.email.trim().toLowerCase())) {
@@ -483,14 +510,26 @@ export abstract class Adapter {
   }
 
   /** A request whose failures become adapter errors; an error status too. */
-  async call(client: HttpClient, method: string, url: string, what: string, options: RequestOptions = {}): Promise<HttpResponse> {
+  async call(
+    client: HttpClient,
+    method: string,
+    url: string,
+    what: string,
+    options: RequestOptions = {},
+  ): Promise<HttpResponse> {
     const response = await this.send(client, method, url, what, options);
     this.raiseForStatus(response, what);
     return response;
   }
 
   /** A request whose transport failures become adapter errors; the caller checks the status. */
-  async send(client: HttpClient, method: string, url: string, what: string, options: RequestOptions = {}): Promise<HttpResponse> {
+  async send(
+    client: HttpClient,
+    method: string,
+    url: string,
+    what: string,
+    options: RequestOptions = {},
+  ): Promise<HttpResponse> {
     try {
       return await client.request(method, url, options);
     } catch (error) {
@@ -727,9 +766,26 @@ export abstract class Adapter {
   }
 
   /** Email: sends one message (Python's `send`). */
-  async sendMessage(_message: { to: string[]; subject: string; body: string; replyTo?: string }): Promise<void> {
+  async sendMessage(_message: {
+    to: string[];
+    subject: string;
+    body: string;
+    replyTo?: string;
+  }): Promise<void> {
     throw new Error("sendMessage is not implemented");
   }
+}
+
+/**
+ * Python's str.casefold, closely enough to compare user names and emails:
+ * upper then lower case, so ß and SS or ligatures compare equal, but the
+ * dotless ı stays apart from i, as casefold keeps it.
+ */
+export function casefold(value: string): string {
+  let folded = "";
+  for (const character of value)
+    folded += character === "ı" ? character : character.toUpperCase().toLowerCase();
+  return folded;
 }
 
 export function asError(error: unknown): Error {
@@ -744,7 +800,7 @@ export function asError(error: unknown): Error {
  * the connected app. An operation added later stays blocked until it is
  * listed here as a read.
  */
-export const READS = new Set<string>([
+const READS: ReadonlySet<string> = new Set<string>([
   // What the adapter is.
   "info",
   "slug",
@@ -754,8 +810,6 @@ export const READS = new Set<string>([
   "supportsGroups",
   "supportsAccountListing",
   "removeGroupsOnDisable",
-  "config",
-  "options",
   // Reads. Some sign in first (an access token); none changes anything.
   "testConnection",
   "listGroups",
@@ -771,19 +825,39 @@ export const READS = new Set<string>([
   "changesGroups",
 ]);
 
+/** Whether read-only mode lets this member through. */
+export function isRead(member: string): boolean {
+  return READS.has(member);
+}
+
 export function readOnly<T extends Adapter>(adapter: T): T {
-  return new Proxy(adapter, {
-    get(target, property, receiver) {
+  const blocked = (property: string) =>
+    new ReadOnlyError(
+      `Read-only mode: ${adapter.label} was not changed (${property.replace(/([A-Z])/g, " $1").toLowerCase()}).`,
+    );
+  // The wrapper's own target is an empty object: nothing of the adapter
+  // (its clients, its configuration) is reachable except through `get`.
+  return new Proxy(Object.create(null) as T, {
+    get(_target, property) {
       // Promise resolution looks for `then`; an adapter is no promise.
-      if (property === "then" || typeof property === "symbol") return Reflect.get(target, property, receiver);
-      if (READS.has(property)) {
-        const value = Reflect.get(target, property, target) as unknown;
-        return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
-      }
-      throw new ReadOnlyError(`Read-only mode: ${target.label} was not changed (${property.replace(/([A-Z])/g, " $1").toLowerCase()}).`);
+      if (typeof property === "symbol" || property === "then") return undefined;
+      if (!READS.has(property)) throw blocked(property);
+      const value = Reflect.get(adapter, property, adapter) as unknown;
+      return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(adapter) : value;
     },
-    set() {
-      throw new ReadOnlyError(`Read-only mode: ${adapter.label} was not changed.`);
+    has: (_target, property) => typeof property === "string" && READS.has(property),
+    set: (_target, property) => {
+      throw blocked(String(property));
     },
+    defineProperty: (_target, property) => {
+      throw blocked(String(property));
+    },
+    deleteProperty: (_target, property) => {
+      throw blocked(String(property));
+    },
+    getOwnPropertyDescriptor: () => undefined,
+    ownKeys: () => [],
+    getPrototypeOf: () => null,
+    setPrototypeOf: () => false,
   });
 }

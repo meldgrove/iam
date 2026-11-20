@@ -1,6 +1,14 @@
 import { and, asc, eq, ne, notInArray, or, sql } from "drizzle-orm";
 import type { DisableResult, EnsureResult, ExternalAccount } from "../adapters/base";
-import { accounts, people, providerGroups, type Account, type Connection, type Job, type Person } from "../db/schema";
+import {
+  accounts,
+  people,
+  providerGroups,
+  type Account,
+  type Connection,
+  type Job,
+  type Person,
+} from "../db/schema";
 import { atomic, q } from "../db/tx";
 import { fullName } from "./people";
 
@@ -32,12 +40,22 @@ export class AccountConflict extends Error {
 const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
 
 /** The person other than this one that the app's account is linked to. */
-export async function otherOwner(connectionId: number, externalId: string, personId: number): Promise<Person | null> {
+export async function otherOwner(
+  connectionId: number,
+  externalId: string,
+  personId: number,
+): Promise<Person | null> {
   const [row] = await q()
     .select({ person: people })
     .from(accounts)
     .innerJoin(people, eq(people.id, accounts.personId))
-    .where(and(eq(accounts.connectionId, connectionId), eq(accounts.externalId, externalId), ne(accounts.personId, personId)))
+    .where(
+      and(
+        eq(accounts.connectionId, connectionId),
+        eq(accounts.externalId, externalId),
+        ne(accounts.personId, personId),
+      ),
+    )
     .orderBy(asc(accounts.id))
     .limit(1);
   return row?.person ?? null;
@@ -50,7 +68,11 @@ export async function otherOwner(connectionId: number, externalId: string, perso
  * that was still running at planning time applied. Groups marked missing
  * are left alone: an import that read nothing marks every group missing.
  */
-export async function removableGroups(connectionId: number, personId: number, managed: Iterable<string>): Promise<Set<string>> {
+export async function removableGroups(
+  connectionId: number,
+  personId: number,
+  managed: Iterable<string>,
+): Promise<Set<string>> {
   const [account] = await q()
     .select({ appliedGroups: accounts.appliedGroups })
     .from(accounts)
@@ -107,7 +129,8 @@ export async function recordJobResult(job: JobContext, result: EnsureResult | Di
   let pendingDelete: Account | null = null;
   let carried: Pick<Account, "appliedGroups" | "createdByApp"> | null = null;
   if (external.externalId) {
-    const other = locked.find((account) => account.externalId === external.externalId && account !== existing) ?? null;
+    const other =
+      locked.find((account) => account.externalId === external.externalId && account !== existing) ?? null;
     if (other !== null) {
       if (other.personId !== null && other.personId !== job.personId) {
         const owner = await personById(other.personId);
@@ -123,7 +146,9 @@ export async function recordJobResult(job: JobContext, result: EnsureResult | Di
       existing = other;
     }
   }
-  const account: Partial<Account> = existing ? { ...existing } : { connectionId: job.connectionId, appliedGroups: [], createdByApp: false };
+  const account: Partial<Account> = existing
+    ? { ...existing }
+    : { connectionId: job.connectionId, appliedGroups: [], createdByApp: false };
   if (carried) {
     account.appliedGroups = sorted([...(account.appliedGroups ?? []), ...carried.appliedGroups]);
     account.createdByApp = Boolean(account.createdByApp || carried.createdByApp);
@@ -140,7 +165,9 @@ export async function recordJobResult(job: JobContext, result: EnsureResult | Di
     } else {
       // Unfinished: keep every group the app may have to remove later.
       const removed = new Set(result.groupsRemoved);
-      account.appliedGroups = sorted([...(account.appliedGroups ?? []), ...job.groups].filter((group) => !removed.has(group)));
+      account.appliedGroups = sorted(
+        [...(account.appliedGroups ?? []), ...job.groups].filter((group) => !removed.has(group)),
+      );
     }
   } else {
     const removed = new Set(result.groupsRemoved);
@@ -153,7 +180,9 @@ export async function recordJobResult(job: JobContext, result: EnsureResult | Di
     });
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw new AccountConflict(`The ${job.connection.name} account could not be linked to ${fullName(job.person)}.`);
+      throw new AccountConflict(
+        `The ${job.connection.name} account could not be linked to ${fullName(job.person)}.`,
+      );
     }
     throw error;
   }
@@ -163,13 +192,20 @@ export async function recordJobResult(job: JobContext, result: EnsureResult | Di
  * Records a change a person made by hand. Without the app's ID, the row
  * stands for the account until a comparison finds it.
  */
-export async function recordManualChange(job: Pick<Job, "connectionId" | "personId" | "action" | "groups">): Promise<void> {
+export async function recordManualChange(
+  job: Pick<Job, "connectionId" | "personId" | "action" | "groups">,
+): Promise<void> {
   const ensuring = job.action === "ensure_account";
+  // Locked: a comparison may be replacing this row with the account it
+  // listed. Then the row is gone once the lock is free, the insert below
+  // collides with the listed account, and the completion fails instead of
+  // losing the change (as Django's save() did).
   const [existing] = await q()
     .select()
     .from(accounts)
     .where(and(eq(accounts.connectionId, job.connectionId), eq(accounts.personId, job.personId)))
-    .limit(1);
+    .limit(1)
+    .for("update", { of: accounts });
   const values: Partial<Account> = {
     status: ensuring ? "active" : "disabled",
     appliedGroups: ensuring ? sorted(job.groups) : [],
@@ -181,7 +217,11 @@ export async function recordManualChange(job: Pick<Job, "connectionId" | "person
   } else {
     await q()
       .insert(accounts)
-      .values({ ...values, connectionId: job.connectionId, personId: job.personId } as typeof accounts.$inferInsert);
+      .values({
+        ...values,
+        connectionId: job.connectionId,
+        personId: job.personId,
+      } as typeof accounts.$inferInsert);
   }
 }
 
@@ -192,7 +232,10 @@ export type ListingSummary = { accounts: number; new_links: number; missing: num
  * an unlinked one to a person on a unique match, and marks the accounts it
  * no longer lists as missing.
  */
-export async function recordListing(connection: Pick<Connection, "id">, listed: ExternalAccount[]): Promise<ListingSummary> {
+export async function recordListing(
+  connection: Pick<Connection, "id">,
+  listed: ExternalAccount[],
+): Promise<ListingSummary> {
   const now = new Date();
   const seen = new Set<string>();
   let newLinks = 0;
@@ -207,27 +250,43 @@ export async function recordListing(connection: Pick<Connection, "id">, listed: 
       .where(eq(accounts.connectionId, connection.id))
       .orderBy(asc(accounts.id))
       .for("update", { of: accounts });
-    const byId = new Map(locked.filter((account) => account.externalId).map((account) => [account.externalId, account]));
-    const deleted = new Set<number>();
+    const byId = new Map(
+      locked.filter((account) => account.externalId).map((account) => [account.externalId, account]),
+    );
     for (const external of listed) {
       // A listing paged by offset can list an account twice.
       if (!external.externalId || seen.has(external.externalId)) continue;
       seen.add(external.externalId);
       const account: Partial<Account> = byId.get(external.externalId)
         ? { ...byId.get(external.externalId)! }
-        : { connectionId: connection.id, externalId: external.externalId, appliedGroups: [], createdByApp: false };
+        : {
+            connectionId: connection.id,
+            externalId: external.externalId,
+            appliedGroups: [],
+            createdByApp: false,
+          };
       observe(account, external, now);
       if (account.personId === null || account.personId === undefined) {
         const person = await accountSeams.matchPerson(connection.id, external);
         if (person !== null) {
-          const placeholder = locked.find(
-            (row) => row.personId === person.id && row.externalId === "" && !deleted.has(row.id),
-          );
+          // Read again: a completed manual task may have added the person's
+          // placeholder since the rows were locked.
+          const [placeholder] = await q()
+            .select()
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.connectionId, connection.id),
+                eq(accounts.personId, person.id),
+                eq(accounts.externalId, ""),
+              ),
+            )
+            .limit(1)
+            .for("update", { of: accounts });
           if (placeholder) {
             account.appliedGroups = sorted([...(account.appliedGroups ?? []), ...placeholder.appliedGroups]);
             account.createdByApp = Boolean(account.createdByApp || placeholder.createdByApp);
             await q().delete(accounts).where(eq(accounts.id, placeholder.id));
-            deleted.add(placeholder.id);
           }
           account.personId = person.id;
           newLinks += 1;
@@ -326,11 +385,16 @@ async function matchPerson(connectionId: number, external: ExternalAccount): Pro
   const linked = await q()
     .select({ id: accounts.id })
     .from(accounts)
-    .where(and(eq(accounts.connectionId, connectionId), eq(accounts.personId, person.id), ne(accounts.externalId, "")))
+    .where(
+      and(
+        eq(accounts.connectionId, connectionId),
+        eq(accounts.personId, person.id),
+        ne(accounts.externalId, ""),
+      ),
+    )
     .limit(1);
   return linked.length > 0 ? null : person;
 }
 
 /** Tests only: recordListing matches people through this object, so a test can hold a comparison midway. */
 export const accountSeams = { matchPerson };
-

@@ -14,9 +14,12 @@ const claims = (extra: Record<string, unknown> = {}) => ({
 describe("claims", () => {
   afterEach(() => resetConfigForTests());
 
-  it.each([[1], [["true"]], [{ verified: true }]])("refuses an email_verified claim of another type (%j)", (value) => {
-    expect(emailVerified(claims({ email_verified: value }))).toBe(false);
-  });
+  it.each([[1], [["true"]], [{ verified: true }]])(
+    "refuses an email_verified claim of another type (%j)",
+    (value) => {
+      expect(emailVerified(claims({ email_verified: value }))).toBe(false);
+    },
+  );
 
   it("never matches a group of that name further down", () => {
     // Otherwise everyone in any "/team/admins" would become an admin of this app.

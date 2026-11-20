@@ -7,7 +7,6 @@ import { atomic, q } from "../db/tx";
 import type { AppEnv } from "../http/env";
 import { idParam, jsonBody, requireRole } from "../http/middleware";
 import { AppError, notFound, validationError } from "../http/errors";
-import { endSessionsOf } from "../auth/session";
 import { record } from "../engine/audit";
 import { fullName } from "../engine/people";
 import { iso } from "./rows";
@@ -42,7 +41,10 @@ router.get("/users", async (c) => {
 
 router.get("/users/options", async (c) => {
   requireRole(c, "admin");
-  const list = await q().select().from(people).orderBy(asc(people.lastName), asc(people.firstName), asc(people.id));
+  const list = await q()
+    .select()
+    .from(people)
+    .orderBy(asc(people.lastName), asc(people.firstName), asc(people.id));
   return c.json({ people: list.map((person) => ({ id: person.id, name: fullName(person) })) });
 });
 
@@ -82,7 +84,13 @@ async function saveUser(actor: User, existing: User | null, input: ReturnType<ty
   if (existing?.id === actor.id && (!input.isActive || input.role !== "admin")) {
     throw new AppError(409, "own_access", "You cannot remove your own admin access.");
   }
-  const values = { email, displayName: input.displayName, role: input.role, isActive: input.isActive, personId: input.personId };
+  const values = {
+    email,
+    displayName: input.displayName,
+    role: input.role,
+    isActive: input.isActive,
+    personId: input.personId,
+  };
   const changed = Object.keys(FIELD_NAMES).filter((key) =>
     existing === null
       ? key !== "isActive" || !input.isActive
@@ -91,7 +99,10 @@ async function saveUser(actor: User, existing: User | null, input: ReturnType<ty
   return atomic(async () => {
     let saved: User;
     if (existing === null) {
-      [saved] = (await q().insert(users).values({ ...values, roleSource: "local" }).returning()) as [User];
+      [saved] = (await q()
+        .insert(users)
+        .values({ ...values, roleSource: "local" })
+        .returning()) as [User];
     } else {
       const update: Partial<User> = {};
       for (const key of changed) Object.assign(update, { [key]: values[key as keyof typeof values] });
@@ -102,7 +113,6 @@ async function saveUser(actor: User, existing: User | null, input: ReturnType<ty
           ? await q().update(users).set(update).where(eq(users.id, existing.id)).returning()
           : [existing]
       ) as [User];
-      if (!saved.isActive || changed.includes("role")) await endSessionsOf(saved.id);
     }
     await record("user.saved", `Saved app user ${saved.email} (${ROLE_LABELS[saved.role]})`, {
       actor,
@@ -121,7 +131,10 @@ router.post("/users", async (c) => {
 
 router.put("/users/:id", async (c) => {
   const actor = requireRole(c, "admin");
-  const [existing] = await q().select().from(users).where(eq(users.id, idParam(c)));
+  const [existing] = await q()
+    .select()
+    .from(users)
+    .where(eq(users.id, idParam(c)));
   if (!existing) throw notFound();
   const saved = await saveUser(actor, existing, await jsonBody(c, userInputSchema));
   return c.json({ id: saved.id, message: `Saved ${saved.email}.` });

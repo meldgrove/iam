@@ -29,19 +29,26 @@ describe("the real answers of Updater 0.2", () => {
     resetConfigForTests();
   });
 
-  it("has samples", () => {
-    expect(samples.length).toBeGreaterThanOrEqual(7);
+  it("has every sample", () => {
+    expect(samples.map((sample) => sample.name)).toHaveLength(7);
   });
 
-  it.each(samples)("passes $name on with every field", async ({ name, body }) => {
-    const install = name.startsWith("install-");
-    updater.respond(() => ({ status: install ? 202 : 200, body }));
-
-    const answer = await askUpdater(install ? { call: "install", version: "0.1.3" } : { call: "status" });
+  it.each(samples)("passes $name on as the status, with every field", async ({ body }) => {
+    updater.respond(() => ({ body }));
 
     // toEqual: a field the schema does not know would be missing here.
-    expect(answer).toEqual({
-      status: install ? 202 : 200,
+    expect(await askUpdater({ call: "status" })).toEqual({
+      status: 200,
+      body: { app: { version: "0.1.1" }, reachable: true, updater: body, error: null },
+    });
+  });
+
+  it("keeps the 202 of an installation", async () => {
+    const { body } = samples.find((sample) => sample.name === "install-202.json")!;
+    updater.respond((call) => ({ status: call.path === "/v1/install" ? 202 : 200, body }));
+
+    expect(await askUpdater({ call: "install", version: "0.1.3" })).toEqual({
+      status: 202,
       body: { app: { version: "0.1.1" }, reachable: true, updater: body, error: null },
     });
   });

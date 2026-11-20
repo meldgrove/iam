@@ -1,6 +1,12 @@
 import { config } from "../config";
 import { decrypt, encrypt } from "../core/crypto";
-import { AdapterKind, readOnly, type Adapter, type AdapterClass, type AdapterOptions } from "../adapters/base";
+import {
+  AdapterKind,
+  readOnly,
+  type Adapter,
+  type AdapterClass,
+  type AdapterOptions,
+} from "../adapters/base";
 import { getAdapterClass } from "../adapters/registry";
 import type { Connection } from "../db/schema";
 
@@ -31,7 +37,10 @@ export function configOf(connection: Pick<Connection, "settings" | "secretData">
 }
 
 /** The adapter for this connection. In read-only mode it can only read. */
-export function buildAdapter(connection: Connection, options: Omit<AdapterOptions, "connectionId"> = {}): Adapter {
+export function buildAdapter(
+  connection: Connection,
+  options: Omit<AdapterOptions, "connectionId"> = {},
+): Adapter {
   const cls = adapterClassOf(connection);
   if (cls === null) throw new Error(`Unknown adapter ${JSON.stringify(connection.adapter)}`);
   const adapter = new cls(configOf(connection), { ...options, connectionId: connection.id });

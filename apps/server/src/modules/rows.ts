@@ -90,7 +90,8 @@ export async function jobRows(
         : [desc(jobs.createdAt), asc(connections.name), desc(jobs.id)]),
     )
     .$dynamic();
-  if (options.limit !== undefined) query = query.limit(options.limit).offset(options.offset ?? 0) as typeof query;
+  if (options.limit !== undefined)
+    query = query.limit(options.limit).offset(options.offset ?? 0) as typeof query;
   const rows = await query;
   return rows.map(({ job, person, connection, workflow }) => ({
     id: job.id,
@@ -98,6 +99,7 @@ export async function jobRows(
     status: job.status,
     attempts: job.attempts,
     lastError: job.lastError,
+    result: job.result,
     createdAt: job.createdAt.toISOString(),
     nextAttemptAt: job.nextAttemptAt.toISOString(),
     person: { id: person.id, name: fullName(person) },
@@ -106,7 +108,11 @@ export async function jobRows(
   }));
 }
 
-export async function workflowRows(where: SQL | undefined, limit?: number, offset = 0): Promise<WorkflowRow[]> {
+export async function workflowRows(
+  where: SQL | undefined,
+  limit?: number,
+  offset = 0,
+): Promise<WorkflowRow[]> {
   let query = q()
     .select({ workflow: workflows, person: people, creator: users })
     .from(workflows)
@@ -129,4 +135,3 @@ export async function workflowRows(where: SQL | undefined, limit?: number, offse
     createdBy: creator ? creator.displayName || creator.email : null,
   }));
 }
-

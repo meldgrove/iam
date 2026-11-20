@@ -38,4 +38,10 @@ export default tseslint.config(
     files: ["apps/server/**/*.{ts,tsx,mjs}", "packages/**/*.ts", "**/*.config.{ts,mjs}", "scripts/**/*.mjs"],
     languageOptions: { globals: globals.node },
   },
+  {
+    // The end-to-end check reports its progress on the console.
+    files: ["tests/browser/**/*.mjs"],
+    languageOptions: { globals: globals.node },
+    rules: { "no-console": "off" },
+  },
 );

@@ -16,12 +16,7 @@ import type {
   WorkflowKind,
   WorkflowStatus,
 } from "../labels";
-import {
-  CONNECTION_MODE_LABELS,
-  PERSON_TYPE_LABELS,
-  ROLE_LABELS,
-  WORKFLOW_KIND_LABELS,
-} from "../labels";
+import { CONNECTION_MODE_LABELS, PERSON_TYPE_LABELS, ROLE_LABELS, WORKFLOW_KIND_LABELS } from "../labels";
 
 /*
  * The API of the web app (/api/v1). Dates are YYYY-MM-DD, times ISO 8601.
@@ -63,6 +58,8 @@ export type JobRow = {
   status: JobStatus;
   attempts: number;
   lastError: string;
+  /** What the job did, or in read-only mode would do (`would`, `groups_to_add`, `groups_to_remove`). */
+  result: Record<string, unknown>;
   createdAt: string;
   nextAttemptAt: string;
   person: Ref;
@@ -230,7 +227,11 @@ export const personInputSchema = z
   })
   .superRefine((value, ctx) => {
     if (value.startDate && value.endDate && value.endDate < value.startDate) {
-      ctx.addIssue({ code: "custom", path: ["endDate"], message: "The last day cannot be before the start date." });
+      ctx.addIssue({
+        code: "custom",
+        path: ["endDate"],
+        message: "The last day cannot be before the start date.",
+      });
     }
   });
 export type PersonInput = z.input<typeof personInputSchema>;
@@ -246,6 +247,7 @@ export type GroupConnection = {
   id: number;
   name: string;
   enabled: boolean;
+  mode: ConnectionMode;
   groupLabel: string;
   supportsGroups: boolean;
   groups: { id: number; label: string }[];
@@ -264,7 +266,7 @@ export type TeamDetail = {
   name: string;
   description: string;
   members: { id: number; name: string; status: PersonStatus; accessProfile: string | null }[];
-  groups: { id: number; label: string; connection: string }[];
+  groups: { id: number; label: string; connection: string; missing: boolean }[];
   groupIds: number[];
 };
 
@@ -289,17 +291,27 @@ export type ProfileDetail = {
   name: string;
   description: string;
   defaultFor: PersonType[];
-  grants: { connection: Ref; groups: { id: number; label: string; missing: boolean }[] }[];
+  grants: {
+    connection: Ref & { enabled: boolean };
+    groups: { id: number; label: string; missing: boolean }[];
+  }[];
   people: { id: number; name: string; status: PersonStatus; team: string | null }[];
 };
 
 export const profileInputSchema = z.object({
   name: required(200),
   description: z.string().max(100_000),
-  defaultFor: z.array(z.enum(PERSON_TYPES as [PersonType, ...PersonType[]], "Select a valid choice.")).max(10),
+  defaultFor: z
+    .array(z.enum(PERSON_TYPES as [PersonType, ...PersonType[]], "Select a valid choice."))
+    .max(10),
   /** The connections that grant an account, with their groups. */
   grants: z
-    .array(z.object({ connectionId: z.number().int().positive(), groupIds: z.array(z.number().int().positive()).max(5000) }))
+    .array(
+      z.object({
+        connectionId: z.number().int().positive(),
+        groupIds: z.array(z.number().int().positive()).max(5000),
+      }),
+    )
     .max(500),
 });
 export type ProfileInput = z.input<typeof profileInputSchema>;
@@ -356,6 +368,8 @@ export type AdapterInfo = {
   fields: AdapterField[];
   /** Whether the form has a mode (accounts and groups that the app may change). */
   hasMode: boolean;
+  supportsWrite: boolean;
+  supportsGroups: boolean;
   groupLabel: string;
   manualGroups: boolean;
 };
@@ -368,6 +382,7 @@ export type ConnectionRow = {
   status: ConnectionStatus;
   mode: ConnectionMode;
   kind: AdapterKind | "";
+  checkedAt: string | null;
 };
 
 export type ConnectionDetail = ConnectionRow & {
@@ -382,7 +397,13 @@ export type ConnectionDetail = ConnectionRow & {
   syncIntervalMinutes: number;
   groupsSyncedAt: string | null;
   groups: { id: number; label: string; externalId: string; missing: boolean; manual: boolean }[];
-  accounts: { id: number; label: string; person: Ref | null; status: AccountStatus; observedAt: string | null }[];
+  accounts: {
+    id: number;
+    label: string;
+    person: Ref | null;
+    status: AccountStatus;
+    observedAt: string | null;
+  }[];
   accountCount: number;
   syncRuns: {
     id: number;
@@ -410,9 +431,15 @@ export type ConnectionForm = {
 export const CONNECTION_MODES = Object.keys(CONNECTION_MODE_LABELS) as ConnectionMode[];
 
 export const connectionInputSchema = z.object({
-  name: z.string().trim().min(1, "This field is required.").max(100, "Ensure this value has at most 100 characters."),
+  name: z
+    .string()
+    .trim()
+    .min(1, "This field is required.")
+    .max(100, "Ensure this value has at most 100 characters."),
   enabled: z.boolean(),
-  mode: z.enum(CONNECTION_MODES as [ConnectionMode, ...ConnectionMode[]], "Select a valid choice.").optional(),
+  mode: z
+    .enum(CONNECTION_MODES as [ConnectionMode, ...ConnectionMode[]], "Select a valid choice.")
+    .optional(),
   /** Every non-secret field by name; the server validates them by the adapter's fields. */
   settings: z.record(z.string(), z.unknown()),
   /** New secret values; a missing or empty one keeps the saved value. */
@@ -420,7 +447,8 @@ export const connectionInputSchema = z.object({
 });
 export type ConnectionInput = z.input<typeof connectionInputSchema>;
 
-export const manualGroupSchema = z.object({ name: z.string().trim().min(1, "Enter a name.").max(255) });
+/** A longer name is cut to 255 characters (the server does), as in the Django version. */
+export const manualGroupSchema = z.object({ name: z.string().trim().min(1, "Enter a name.").max(10_000) });
 
 // -- users and settings ----------------------------------------------------------------
 

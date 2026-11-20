@@ -111,11 +111,25 @@ export const ADAPTER_KIND_LABELS = {
 export type AdapterKind = keyof typeof ADAPTER_KIND_LABELS;
 
 /** Statuses in which a workflow still needs something. */
-export const OPEN_WORKFLOW_STATUSES = ["running", "waiting", "failed"] as const satisfies readonly WorkflowStatus[];
+export const OPEN_WORKFLOW_STATUSES = [
+  "running",
+  "waiting",
+  "failed",
+] as const satisfies readonly WorkflowStatus[];
 /** Statuses in which a job still needs something. */
-export const OPEN_JOB_STATUSES = ["queued", "running", "held", "manual", "failed"] as const satisfies readonly JobStatus[];
+export const OPEN_JOB_STATUSES = [
+  "queued",
+  "running",
+  "held",
+  "manual",
+  "failed",
+] as const satisfies readonly JobStatus[];
 /** Nothing more happens to a job in one of these. */
-export const FINISHED_JOB_STATUSES = ["succeeded", "rehearsed", "cancelled"] as const satisfies readonly JobStatus[];
+export const FINISHED_JOB_STATUSES = [
+  "succeeded",
+  "rehearsed",
+  "cancelled",
+] as const satisfies readonly JobStatus[];
 
 /** The tone of a status badge. */
 export type Tone = "ok" | "info" | "warn" | "danger" | "neutral";

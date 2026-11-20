@@ -12,19 +12,31 @@
     "fromDisplayName": "Keycloak (development)"
   },
   "groups": [
-    {"name": "iam", "path": "/iam", "subGroups": [
-      {"name": "admins", "path": "/iam/admins"},
-      {"name": "approvers", "path": "/iam/approvers"}
-    ]},
-    {"name": "apps", "path": "/apps", "subGroups": [
-      {"name": "wiki", "path": "/apps/wiki"},
-      {"name": "chat", "path": "/apps/chat"},
-      {"name": "finance", "path": "/apps/finance"}
-    ]},
-    {"name": "teams", "path": "/teams", "subGroups": [
-      {"name": "product", "path": "/teams/product"},
-      {"name": "operations", "path": "/teams/operations"}
-    ]}
+    {
+      "name": "iam",
+      "path": "/iam",
+      "subGroups": [
+        { "name": "admins", "path": "/iam/admins" },
+        { "name": "approvers", "path": "/iam/approvers" }
+      ]
+    },
+    {
+      "name": "apps",
+      "path": "/apps",
+      "subGroups": [
+        { "name": "wiki", "path": "/apps/wiki" },
+        { "name": "chat", "path": "/apps/chat" },
+        { "name": "finance", "path": "/apps/finance" }
+      ]
+    },
+    {
+      "name": "teams",
+      "path": "/teams",
+      "subGroups": [
+        { "name": "product", "path": "/teams/product" },
+        { "name": "operations", "path": "/teams/operations" }
+      ]
+    }
   ],
   "clients": [
     {
@@ -78,7 +90,7 @@
       "lastName": "Admin",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{"type": "password", "value": "admin", "temporary": false}],
+      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
       "groups": ["/iam/admins"]
     },
     {

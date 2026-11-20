@@ -44,11 +44,20 @@ function SearchBox({ search, onSearch }: { search: AuditSearch; onSearch: (searc
 }
 
 /** /audit: every change by a person or the worker, newest first. */
-export function AuditPage({ search, onSearch }: { search: AuditSearch; onSearch: (search: AuditSearch) => void }) {
+export function AuditPage({
+  search,
+  onSearch,
+}: {
+  search: AuditSearch;
+  onSearch: (search: AuditSearch) => void;
+}) {
   const query = useQuery(auditQuery(search));
   return (
     <Page>
-      <PageHeader title="Audit log" description="Every change by a person or the worker. Secret values are never recorded." />
+      <PageHeader
+        title="Audit log"
+        description="Every change by a person or the worker. Secret values are never recorded."
+      />
       <SearchBox key={search.q ?? ""} search={search} onSearch={onSearch} />
       {query.isPending ? (
         <LoadingState />

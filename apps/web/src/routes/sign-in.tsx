@@ -23,7 +23,11 @@ const searchSchema = z.object({
 
 /** Only paths of this app, never another origin. */
 export function safeNext(target: string | undefined): string {
-  return target && target.startsWith("/") && !target.startsWith("//") && !target.startsWith("/\\") && !target.startsWith("/login")
+  return target &&
+    target.startsWith("/") &&
+    !target.startsWith("//") &&
+    !target.startsWith("/\\") &&
+    !target.startsWith("/login")
     ? target
     : "/";
 }
@@ -44,13 +48,17 @@ function SignInPage() {
   const [pending, setPending] = useState(false);
   const target = `/oidc/authenticate/?next=${encodeURIComponent(safeNext(search.next))}`;
   return (
-    <SignInLayout app={{ name: DEFAULT_APP_NAME, icon: <ShieldCheck /> }} tagline={TAGLINE} repositoryUrl={REPOSITORY_URL}>
+    <SignInLayout
+      app={{ name: DEFAULT_APP_NAME, icon: <ShieldCheck /> }}
+      tagline={TAGLINE}
+      repositoryUrl={REPOSITORY_URL}
+    >
       {search.error === "denied" ? (
         <Alert variant="destructive">
           <AlertTitle>No access</AlertTitle>
           <AlertDescription>
-            You signed in, but this app has no active user for you. Ask an admin to add your email address in Admin ›
-            Users and roles, then sign in again.
+            You signed in, but this app has no active user for you. Ask an admin to add your email address in
+            Admin › Users and roles, then sign in again.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -58,8 +66,8 @@ function SignInPage() {
         <Alert variant="destructive">
           <AlertTitle>Sign-in unavailable</AlertTitle>
           <AlertDescription>
-            The sign-in provider cannot be reached right now. Try again in a minute. If this persists, check the
-            provider and OIDC_ISSUER.
+            The sign-in provider cannot be reached right now. Try again in a minute. If this persists, check
+            the provider and OIDC_ISSUER.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -116,7 +124,11 @@ function DevSignInPage() {
     }
   };
   return (
-    <SignInLayout app={{ name: DEFAULT_APP_NAME, icon: <ShieldCheck /> }} tagline={TAGLINE} repositoryUrl={REPOSITORY_URL}>
+    <SignInLayout
+      app={{ name: DEFAULT_APP_NAME, icon: <ShieldCheck /> }}
+      tagline={TAGLINE}
+      repositoryUrl={REPOSITORY_URL}
+    >
       <Alert>
         <AlertDescription>Development only. Never enable DEV_LOGIN on a server.</AlertDescription>
       </Alert>

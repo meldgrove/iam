@@ -43,6 +43,18 @@ router.post("/admin/updates/channel", async (c) => {
   const user = requireRole(c, "admin");
   const { channel } = await jsonBody(c, updateChannelInputSchema);
   const result = await askUpdater({ call: "channel", channel });
+  // Saved only when the updater's status names the chosen channel (as in the Django version).
+  if (
+    result.status < 300 &&
+    result.body.reachable &&
+    !result.body.error &&
+    result.body.updater?.channel !== channel
+  ) {
+    return answer(c, {
+      status: 409,
+      body: { ...result.body, error: "The update service did not switch the channel." },
+    });
+  }
   if (result.status < 300 && result.body.updater?.channel === channel && !result.body.error) {
     await record("updates.channel", `Switched the update channel to ${CHANNEL_LABELS[channel]}`, {
       actor: user,

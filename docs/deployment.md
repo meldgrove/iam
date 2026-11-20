@@ -3,12 +3,12 @@
 One Docker image, `ghcr.io/meldgrove/iam`, runs three processes
 from `compose.yaml`:
 
-| Service | Command | Notes |
-| --- | --- | --- |
-| `migrate` | `migrate` | Applies the database migrations once per deploy; web and worker wait for it. Takes over a database of the Django version ([below](#upgrade-from-the-django-version)). |
-| `web` | `web`: the server (Node.js) on port 8000 | The API and the web app, behind a reverse proxy that terminates HTTPS. |
-| `worker` | `worker` | Runs jobs, the schedule and reads from connections. One is enough; with a second, one runs jobs while the other reads a big directory. |
-| `updater` | Meldgrove Updater | Checks for and installs updates; the admins' update button talks to it ([updates.md](updates.md)). |
+| Service   | Command                                  | Notes                                                                                                                                                                 |
+| --------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `migrate` | `migrate`                                | Applies the database migrations once per deploy; web and worker wait for it. Takes over a database of the Django version ([below](#upgrade-from-the-django-version)). |
+| `web`     | `web`: the server (Node.js) on port 8000 | The API and the web app, behind a reverse proxy that terminates HTTPS.                                                                                                |
+| `worker`  | `worker`                                 | Runs jobs, the schedule and reads from connections. One is enough; with a second, one runs jobs while the other reads a big directory.                                |
+| `updater` | Meldgrove Updater                        | Checks for and installs updates; the admins' update button talks to it ([updates.md](updates.md)).                                                                    |
 
 PostgreSQL 16 or newer runs separately (a managed database or a PostgreSQL
 server of your own), or next to the app with `compose.postgres.yaml`.
@@ -38,17 +38,17 @@ server first.
    readable for root only: `chmod 600 .env`. `.env.example` holds development
    settings; do not copy it.
 
-   | Variable | Value |
-   | --- | --- |
-   | `IAM_VERSION` | `0.3` (a release series; with [automatic updates](updates.md), the server writes the exact version it installs here) |
-   | `APP_URL` | `https://iam.example.invalid` |
-   | `AUTH_SECRET` | random, 32+ characters: `openssl rand -base64 48` |
-   | `ENCRYPTION_KEY` | `docker run --rm ghcr.io/meldgrove/iam:0.3 cli generate-key`; keep a copy with the backups |
-   | `DATABASE_URL` | your PostgreSQL, or the container below |
-   | `HEALTHCHECK_TOKEN` | random |
-   | `KEYCLOAK_URL`, `KEYCLOAK_REALM` or `OIDC_ISSUER` | the sign-in provider ([authentication.md](authentication.md)) |
-   | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | the sign-in client |
-   | `BOOTSTRAP_ADMIN_EMAILS` or `OIDC_ADMIN_GROUPS` | the first admin |
+   | Variable                                          | Value                                                                                                                |
+   | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+   | `IAM_VERSION`                                     | `0.3` (a release series; with [automatic updates](updates.md), the server writes the exact version it installs here) |
+   | `APP_URL`                                         | `https://iam.example.invalid`                                                                                        |
+   | `AUTH_SECRET`                                     | random, 32+ characters: `openssl rand -base64 48`                                                                    |
+   | `ENCRYPTION_KEY`                                  | `docker run --rm ghcr.io/meldgrove/iam:0.3 cli generate-key`; keep a copy with the backups                           |
+   | `DATABASE_URL`                                    | your PostgreSQL, or the container below                                                                              |
+   | `HEALTHCHECK_TOKEN`                               | random                                                                                                               |
+   | `KEYCLOAK_URL`, `KEYCLOAK_REALM` or `OIDC_ISSUER` | the sign-in provider ([authentication.md](authentication.md))                                                        |
+   | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`            | the sign-in client                                                                                                   |
+   | `BOOTSTRAP_ADMIN_EMAILS` or `OIDC_ADMIN_GROUPS`   | the first admin                                                                                                      |
 
 4. **Database:** set `DATABASE_URL` to a PostgreSQL 16 or newer of your own
    that the containers can reach (`localhost` would be the container

@@ -14,7 +14,6 @@ import { Section } from "@/components/detail";
 import { StatusBadge } from "@/components/status";
 import { Empty, JobsTable, TasksTable, TextLink } from "@/components/lists";
 import { workflowQuery } from "./api";
-import { JobActions } from "./job-actions";
 
 /** Approvers cancel an open onboarding or access update; offboarding cannot be cancelled. */
 function CancelWorkflow({ workflow }: { workflow: WorkflowDetail }) {
@@ -30,7 +29,8 @@ function CancelWorkflow({ workflow }: { workflow: WorkflowDetail }) {
       </Button>
       {workflow.kind === "onboarding" ? (
         <p className="text-muted-foreground max-w-xs text-right text-xs">
-          The schedule does not start a cancelled onboarding again until the start date or the access profile changes.
+          The schedule does not start a cancelled onboarding again until the start date or the access profile
+          changes.
         </p>
       ) : null}
     </div>
@@ -48,7 +48,8 @@ export function WorkflowPage({ id }: { id: number }) {
     workflow ? `${WORKFLOW_KIND_LABELS[workflow.kind]} of ${workflow.person.name}` : undefined,
   );
   if (query.isPending) return <LoadingState />;
-  if (query.isError || !workflow) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  if (query.isError || !workflow)
+    return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   const cancellable = me.isApprover && workflow.isOpen && workflow.kind !== "offboarding";
   return (
     <Page>
@@ -77,11 +78,7 @@ export function WorkflowPage({ id }: { id: number }) {
         </Alert>
       ) : null}
       <Section title="Jobs">
-        {workflow.jobs.length === 0 ? (
-          <Empty>No jobs.</Empty>
-        ) : (
-          <JobsTable jobs={workflow.jobs} showPerson={false} actions={(job) => <JobActions job={job} compact />} />
-        )}
+        <JobsTable jobs={workflow.jobs} showPerson={false} />
       </Section>
       <div className="grid gap-4 lg:grid-cols-2">
         <Section title="Desired access when started">

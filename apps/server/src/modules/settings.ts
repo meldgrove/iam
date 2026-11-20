@@ -41,7 +41,9 @@ router.put("/settings", async (c) => {
   const input = await jsonBody(c, settingsInputSchema);
   await atomic(async () => {
     const current = view(await loadSettings());
-    const changed = (Object.keys(FIELD_NAMES) as (keyof Settings)[]).filter((key) => current[key] !== input[key]);
+    const changed = (Object.keys(FIELD_NAMES) as (keyof Settings)[]).filter(
+      (key) => current[key] !== input[key],
+    );
     await q().update(appSettings).set(input).where(eq(appSettings.id, 1));
     await record("settings.saved", "Changed settings", {
       actor: user,

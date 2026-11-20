@@ -5,11 +5,11 @@ they may do: a person signs in only when an active app user exists for them.
 
 ## Roles
 
-| Role | May |
-| --- | --- |
-| Viewer | Read everything outside the admin section. |
-| Approver | Also add and edit people, start onboarding, access updates and offboarding, retry jobs, complete and cancel tasks. |
-| Admin | Also manage access profiles and teams, approve held removals, and use the admin section: connections, users and roles, settings. |
+| Role     | May                                                                                                                              |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Viewer   | Read everything outside the admin section.                                                                                       |
+| Approver | Also add and edit people, start onboarding, access updates and offboarding, retry jobs, complete and cancel tasks.               |
+| Admin    | Also manage access profiles and teams, approve held removals, and use the admin section: connections, users and roles, settings. |
 
 An app user can be linked to a person. Starting that person's offboarding
 turns the app user off at once. Because of that, only someone with the same
@@ -52,7 +52,7 @@ Set `KEYCLOAK_URL` (without `/realms/...`) and `KEYCLOAK_REALM` instead of
 The top bar then links to Keycloak's account console ("My account").
 
 Signing in and managing Keycloak accounts are separate: the Keycloak
-*connection* in the admin section uses its own service-account client
+_connection_ in the admin section uses its own service-account client
 ([connections.md](connections.md)).
 
 ## The first admin

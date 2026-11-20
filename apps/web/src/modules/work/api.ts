@@ -49,7 +49,8 @@ export type TasksSearch = { status?: TaskFilter; page?: number };
 
 export const workflowsQuery = (search: WorkflowsSearch) => ({
   queryKey: ["workflows", search],
-  queryFn: () => api.get<Paged<WorkflowRow>>("/workflows", { status: search.status ?? "open", page: search.page }),
+  queryFn: () =>
+    api.get<Paged<WorkflowRow>>("/workflows", { status: search.status ?? "open", page: search.page }),
   placeholderData: keepPreviousData,
 });
 

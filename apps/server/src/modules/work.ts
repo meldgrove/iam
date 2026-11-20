@@ -8,12 +8,29 @@ import {
   TASK_STATUS_LABELS,
   WORKFLOW_STATUS_LABELS,
 } from "@iam/shared/labels";
-import { auditEvents, jobs, tasks, users, workflows, type JobStatus, type TaskStatus, type WorkflowStatus } from "../db/schema";
+import {
+  auditEvents,
+  jobs,
+  tasks,
+  users,
+  workflows,
+  type JobStatus,
+  type TaskStatus,
+  type WorkflowStatus,
+} from "../db/schema";
 import { q } from "../db/tx";
 import type { AppEnv } from "../http/env";
 import { idParam, jsonBody, requireRole } from "../http/middleware";
 import { AppError, notFound } from "../http/errors";
-import { ActionError, approveJob, cancelTask, completeTask, loadJob, rejectJob, retryJob } from "../engine/jobs";
+import {
+  ActionError,
+  approveJob,
+  cancelTask,
+  completeTask,
+  loadJob,
+  rejectJob,
+  retryJob,
+} from "../engine/jobs";
 import { cancelWorkflow, LifecycleError, tooLateFor } from "../engine/lifecycle";
 import { countOf, eventRows, iso, jobRows, pageNumber, paginate, taskRows, workflowRows } from "./rows";
 
@@ -25,7 +42,8 @@ async function actionOr409<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (error instanceof ActionError || error instanceof LifecycleError) throw new AppError(409, "action", error.message);
+    if (error instanceof ActionError || error instanceof LifecycleError)
+      throw new AppError(409, "action", error.message);
     throw error;
   }
 }
@@ -39,7 +57,11 @@ router.get("/workflows", async (c) => {
   if (status === "open") where = inArray(workflows.status, [...OPEN_WORKFLOW_STATUSES]);
   else if (status in WORKFLOW_STATUS_LABELS) where = eq(workflows.status, status as WorkflowStatus);
   const total = await countOf(workflows, where);
-  return c.json(await paginate(total, pageNumber(c.req.query("page")), PER_PAGE, (limit, offset) => workflowRows(where, limit, offset)));
+  return c.json(
+    await paginate(total, pageNumber(c.req.query("page")), PER_PAGE, (limit, offset) =>
+      workflowRows(where, limit, offset),
+    ),
+  );
 });
 
 router.get("/workflows/:id", async (c) => {
@@ -59,10 +81,7 @@ router.get("/workflows/:id", async (c) => {
     })),
     jobs: jobList,
     tasks: await taskRows(
-      inArray(
-        tasks.jobId,
-        q().select({ id: jobs.id }).from(jobs).where(eq(jobs.workflowId, id)),
-      ),
+      inArray(tasks.jobId, q().select({ id: jobs.id }).from(jobs).where(eq(jobs.workflowId, id))),
     ),
     tooLate: running.length > 0 ? tooLateFor(running) : "",
   };
@@ -93,7 +112,9 @@ router.get("/jobs", async (c) => {
   const where = and(...filters);
   const total = await countOf(jobs, where);
   return c.json(
-    await paginate(total, pageNumber(c.req.query("page")), PER_PAGE, (limit, offset) => jobRows(where, { limit, offset })),
+    await paginate(total, pageNumber(c.req.query("page")), PER_PAGE, (limit, offset) =>
+      jobRows(where, { limit, offset }),
+    ),
   );
 });
 
@@ -109,7 +130,10 @@ router.get("/jobs/:id", async (c) => {
     finishedAt: iso(job.finishedAt),
     result: job.result,
     tasks: await taskRows(eq(tasks.jobId, id)),
-    events: await eventRows(and(eq(auditEvents.targetType, "job"), eq(auditEvents.targetId, String(id))), 1000),
+    events: await eventRows(
+      and(eq(auditEvents.targetType, "job"), eq(auditEvents.targetId, String(id))),
+      1000,
+    ),
   };
   return c.json(body);
 });
@@ -136,7 +160,11 @@ router.get("/tasks", async (c) => {
   const status = c.req.query("status") ?? "open";
   const where = status in TASK_STATUS_LABELS ? eq(tasks.status, status as TaskStatus) : undefined;
   const total = await countOf(tasks, where);
-  return c.json(await paginate(total, pageNumber(c.req.query("page")), PER_PAGE, (limit, offset) => taskRows(where, limit, offset)));
+  return c.json(
+    await paginate(total, pageNumber(c.req.query("page")), PER_PAGE, (limit, offset) =>
+      taskRows(where, limit, offset),
+    ),
+  );
 });
 
 router.get("/tasks/:id", async (c) => {
@@ -144,7 +172,11 @@ router.get("/tasks/:id", async (c) => {
   const id = idParam(c);
   const [row] = await taskRows(eq(tasks.id, id));
   if (!row) throw notFound();
-  const [task] = await q().select({ task: tasks, completedBy: users }).from(tasks).leftJoin(users, eq(users.id, tasks.completedById)).where(eq(tasks.id, id));
+  const [task] = await q()
+    .select({ task: tasks, completedBy: users })
+    .from(tasks)
+    .leftJoin(users, eq(users.id, tasks.completedById))
+    .where(eq(tasks.id, id));
   const body: TaskDetail = {
     ...row,
     instructions: task!.task.instructions,
@@ -178,7 +210,11 @@ router.get("/audit", async (c) => {
   const pattern = `%${search.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
   const where = search ? sql`${auditEvents.summary} ilike ${pattern}` : undefined;
   const total = await countOf(auditEvents, where);
-  return c.json(await paginate(total, pageNumber(c.req.query("page")), 100, (limit, offset) => eventRows(where, limit, offset)));
+  return c.json(
+    await paginate(total, pageNumber(c.req.query("page")), 100, (limit, offset) =>
+      eventRows(where, limit, offset),
+    ),
+  );
 });
 
 export default router;

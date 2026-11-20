@@ -4,8 +4,7 @@ import { useIsAdmin } from "@/hooks/use-me";
 import { apiUrl, sessionEnded } from "@/lib/api";
 
 /** The deployment guide of the released version, for admins without an update service. */
-const DEPLOYMENT_GUIDE =
-  "https://github.com/meldgrove/iam/blob/stable/docs/deployment.md#automatic-updates";
+const DEPLOYMENT_GUIDE = "https://github.com/meldgrove/iam/blob/stable/docs/deployment.md#automatic-updates";
 
 /**
  * Admins: the update status that the header button and the Updates page

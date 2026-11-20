@@ -429,7 +429,8 @@ describe("Google Workspace", () => {
     expect(claims).toMatchObject({
       iss: "iam@project.example.invalid",
       sub: "admin@example.invalid",
-      aud: "https://oauth2.example.invalid/token",
+      // google-auth signs for Google's token endpoint; the POST goes to the key's token_uri.
+      aud: "https://oauth2.googleapis.com/token",
       scope: SCOPES.join(" "),
     });
     expect(claims.exp).toBe((claims.iat as number) + 3600);

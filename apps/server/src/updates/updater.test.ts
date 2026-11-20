@@ -123,6 +123,23 @@ describe("askUpdater", () => {
     });
   });
 
+  it("counts something else at UPDATER_URL as no updater", async () => {
+    for (const body of ["<html>a proxy page</html>", { status: "ok" }, [1, 2]]) {
+      updater.respond(() => ({ body }));
+      for (const request of [{ call: "status" }, { call: "check" }] as const) {
+        expect(await askUpdater(request), JSON.stringify(body)).toEqual({
+          status: 200,
+          body: {
+            app: { version: "0.2.0" },
+            reachable: false,
+            updater: null,
+            error: "UPDATER_URL answers, but not as an update service.",
+          },
+        });
+      }
+    }
+  });
+
   it("reports an updater that does not answer as not reachable", async () => {
     process.env.UPDATER_URL = "http://127.0.0.1:9";
     resetConfigForTests();

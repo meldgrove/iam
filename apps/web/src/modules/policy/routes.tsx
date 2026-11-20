@@ -38,7 +38,11 @@ const teamEditRoute = createRoute({
   },
 });
 
-const profilesRoute = createRoute({ getParentRoute: () => appRoute, path: "/profiles", component: ProfilesPage });
+const profilesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/profiles",
+  component: ProfilesPage,
+});
 const profileNewRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/profiles/new",

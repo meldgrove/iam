@@ -7,7 +7,13 @@ import { useAction } from "@/hooks/use-action";
  * What may happen to a job now: approvers retry a failed one, admins approve
  * or reject a held removal. `compact`: the small buttons of a table row.
  */
-export function JobActions({ job, compact = false }: { job: Pick<JobRow, "id" | "status">; compact?: boolean }) {
+export function JobActions({
+  job,
+  compact = false,
+}: {
+  job: Pick<JobRow, "id" | "status">;
+  compact?: boolean;
+}) {
   const me = useMe();
   const action = useAction();
   const run = (path: "retry" | "approve" | "reject") => action.mutate({ path: `/jobs/${job.id}/${path}` });
@@ -15,7 +21,12 @@ export function JobActions({ job, compact = false }: { job: Pick<JobRow, "id" | 
   return (
     <>
       {me.isApprover && job.status === "failed" ? (
-        <Button size={size} variant={compact ? "outline" : "default"} disabled={action.isPending} onClick={() => run("retry")}>
+        <Button
+          size={size}
+          variant={compact ? "outline" : "default"}
+          disabled={action.isPending}
+          onClick={() => run("retry")}
+        >
           Retry
         </Button>
       ) : null}

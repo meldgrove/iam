@@ -169,6 +169,18 @@ function base64url(value: string): string {
   return Buffer.from(value, "utf8").toString("base64url");
 }
 
+/** OAuth errors google-auth retries: the token endpoint was busy, not the key wrong. */
+const TEMPORARY_OAUTH_ERRORS = new Set(["temporarily_unavailable", "server_error", "internal_failure"]);
+
+function oauthErrorIsTemporary(response: HttpResponse): boolean {
+  try {
+    const error = asRecord(response.json()).error;
+    return typeof error === "string" && TEMPORARY_OAUTH_ERRORS.has(error);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The OAuth 2.0 assertion (RFC 7523) that google-auth signs for a service
  * account: an RS256 JWT for the scopes, valid for an hour, on behalf of
@@ -183,8 +195,9 @@ function signAssertion(key: ServiceAccountKey, subject: string): string {
     exp: issuedAt + ASSERTION_LIFETIME_SECONDS,
     // The issuer must be the service account email.
     iss: key.clientEmail,
-    // The audience must be the token endpoint.
-    aud: key.tokenUri,
+    // google-auth signs for Google's token endpoint, wherever the key's
+    // token_uri sends the assertion.
+    aud: TOKEN_URI,
     scope: SCOPES.join(" "),
   };
   // The subject can be a user email for domain-wide delegation.
@@ -327,7 +340,12 @@ export class GoogleWorkspaceAdapter extends Adapter {
     }
     // google-auth tries these answers three times before it gives up; the
     // job's own retry takes that part here.
-    if (response.status === 408 || response.status === 429 || response.status >= 500) {
+    if (
+      response.status === 408 ||
+      response.status === 429 ||
+      response.status >= 500 ||
+      oauthErrorIsTemporary(response)
+    ) {
       throw new TransientError("Could not reach Google to sign in the service account.");
     }
     let token: unknown;

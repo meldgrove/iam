@@ -20,7 +20,8 @@ import { taskQuery } from "./api";
 function CloseTask({ task }: { task: TaskDetail }) {
   const [note, setNote] = useState("");
   const close = useAction();
-  const run = (path: "complete" | "cancel") => close.mutate({ path: `/tasks/${task.id}/${path}`, body: { note } });
+  const run = (path: "complete" | "cancel") =>
+    close.mutate({ path: `/tasks/${task.id}/${path}`, body: { note } });
   return (
     <Section title="Close the task">
       <TextareaField
@@ -41,7 +42,8 @@ function CloseTask({ task }: { task: TaskDetail }) {
         </Button>
       </div>
       <p className="text-muted-foreground text-sm">
-        Done records the change as made. Cancel drops the change; the person&apos;s access then differs from the policy.
+        Done records the change as made. Cancel drops the change; the person&apos;s access then differs from
+        the policy.
       </p>
     </Section>
   );
@@ -85,7 +87,9 @@ export function TaskPage({ id }: { id: number }) {
         }
       />
       <Section title="What to do">
-        <pre className="bg-muted overflow-x-auto rounded-md p-4 font-mono text-sm whitespace-pre-wrap">{task.instructions}</pre>
+        <pre className="bg-muted overflow-x-auto rounded-md p-4 font-mono text-sm whitespace-pre-wrap">
+          {task.instructions}
+        </pre>
       </Section>
       {task.status === "open" ? (
         me.isApprover ? (

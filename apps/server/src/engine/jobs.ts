@@ -120,7 +120,10 @@ export async function accountSpecOf(person: Person): Promise<AccountSpec> {
   }
   let managerEmail = "";
   if (person.managerId !== null) {
-    const [row] = await q().select({ workEmail: people.workEmail }).from(people).where(eq(people.id, person.managerId));
+    const [row] = await q()
+      .select({ workEmail: people.workEmail })
+      .from(people)
+      .where(eq(people.id, person.managerId));
     managerEmail = row?.workEmail ?? "";
   }
   return {
@@ -142,7 +145,9 @@ export async function accountSpecOf(person: Person): Promise<AccountSpec> {
  * The groups the job may remove: the policy's managed groups when it was
  * planned, plus the groups the app has put the account in since.
  */
-export function managedGroups(job: Pick<Job, "connectionId" | "personId" | "managedGroups">): Promise<Set<string>> {
+export function managedGroups(
+  job: Pick<Job, "connectionId" | "personId" | "managedGroups">,
+): Promise<Set<string>> {
   return accountsLedger.removableGroups(job.connectionId, job.personId, job.managedGroups);
 }
 
@@ -169,7 +174,11 @@ export async function groupLabels(job: Pick<Job, "connectionId" | "groups">): Pr
  * Returns the cancelled group tasks. The caller refreshes the workflow once
  * it has recorded the start.
  */
-export async function startJobs(personId: number, planned: JobState[], options: { actor?: Actor } = {}): Promise<number[]> {
+export async function startJobs(
+  personId: number,
+  planned: JobState[],
+  options: { actor?: Actor } = {},
+): Promise<number[]> {
   const cancelled = await cancelReplacedGroupTasks(personId, planned, options.actor ?? null);
   // In read-only mode the worker rehearses these jobs like all others.
   const newTasks: (Task | null)[] = [];
@@ -187,7 +196,11 @@ export async function startJobs(personId: number, planned: JobState[], options: 
  * plans again. Elsewhere the task stays open: nothing else will finish those
  * groups.
  */
-async function cancelReplacedGroupTasks(personId: number, planned: JobState[], actor: Actor): Promise<number[]> {
+async function cancelReplacedGroupTasks(
+  personId: number,
+  planned: JobState[],
+  actor: Actor,
+): Promise<number[]> {
   const connectionIds = planned.map((job) => job.connectionId);
   if (connectionIds.length === 0) return [];
   const rows = await q()
@@ -216,22 +229,33 @@ async function cancelReplacedGroupTasks(personId: number, planned: JobState[], a
  * keeps the worker from claiming a job meanwhile. The caller holds the
  * person's lock, so no running job finishes meanwhile.
  */
-export async function stopWorkflow(workflow: Pick<Workflow, "id">, options: { actor?: Actor; note: string }): Promise<JobState[]> {
+export async function stopWorkflow(
+  workflow: Pick<Workflow, "id">,
+  options: { actor?: Actor; note: string },
+): Promise<JobState[]> {
   const unfinished = await q()
     .select()
     .from(jobs)
-    .where(and(eq(jobs.workflowId, workflow.id), notInArray(jobs.status, [...FINISHED_JOB_STATUSES, "running"])))
+    .where(
+      and(eq(jobs.workflowId, workflow.id), notInArray(jobs.status, [...FINISHED_JOB_STATUSES, "running"])),
+    )
     .orderBy(asc(jobs.id))
     .for("update", { of: jobs });
-  for (const job of unfinished) await cancelJob(await loadState(job), { actor: options.actor ?? null, note: options.note });
-  await q().update(workflows).set({ status: "cancelled", finishedAt: new Date() }).where(eq(workflows.id, workflow.id));
+  for (const job of unfinished)
+    await cancelJob(await loadState(job), { actor: options.actor ?? null, note: options.note });
+  await q()
+    .update(workflows)
+    .set({ status: "cancelled", finishedAt: new Date() })
+    .where(eq(workflows.id, workflow.id));
   const running = await q()
     .select({ job: jobs })
     .from(jobs)
     .innerJoin(connections, eq(connections.id, jobs.connectionId))
     .where(and(eq(jobs.workflowId, workflow.id), eq(jobs.status, "running")))
     .orderBy(asc(connections.name), asc(jobs.id));
-  return Promise.all(running.map((row) => loadState(row.job)));
+  const states: JobState[] = [];
+  for (const row of running) states.push(await loadState(row.job));
+  return states;
 }
 
 /**
@@ -239,14 +263,23 @@ export async function stopWorkflow(workflow: Pick<Workflow, "id">, options: { ac
  * its groups were left, ends as done instead: a change that was made is
  * never shown as cancelled, and the cancel stops only the groups.
  */
-export async function cancelJob(job: JobState, options: { actor?: Actor; note?: string } = {}): Promise<void> {
+export async function cancelJob(
+  job: JobState,
+  options: { actor?: Actor; note?: string } = {},
+): Promise<void> {
   const actor = options.actor ?? null;
   const note = options.note ?? "";
   const step = await accountStep(job);
   if (step !== null) {
     await q()
       .update(jobs)
-      .set({ status: "succeeded", finishedAt: new Date(), lockedUntil: null, lastError: "", result: step.details })
+      .set({
+        status: "succeeded",
+        finishedAt: new Date(),
+        lockedUntil: null,
+        lastError: "",
+        result: step.details,
+      })
       .where(eq(jobs.id, job.id));
     Object.assign(job, { status: "succeeded", result: step.details });
     await closeTasks(await workTaskIds(job), "cancelled", { actor, note });
@@ -255,7 +288,12 @@ export async function cancelJob(job: JobState, options: { actor?: Actor; note?: 
       `${actionLabel(job)} at ${job.connection.name} for ${fullName(job.person)}: ` +
         "an earlier run already did the account step, so the cancel stopped only the " +
         "groups. They are left as they are.",
-      { actor, personId: job.personId, target: target(job), details: note ? { note: note.slice(0, 500) } : {} },
+      {
+        actor,
+        personId: job.personId,
+        target: target(job),
+        details: note ? { note: note.slice(0, 500) } : {},
+      },
     );
     return;
   }
@@ -309,15 +347,22 @@ async function workTaskIds(job: Pick<Job, "id">): Promise<number[]> {
  * first, as when a workflow starts or is cancelled.
  */
 export async function refreshWorkflow(workflowId: number): Promise<Workflow> {
-  const [current] = await q().select({ personId: workflows.personId }).from(workflows).where(eq(workflows.id, workflowId));
+  const [current] = await q()
+    .select({ personId: workflows.personId })
+    .from(workflows)
+    .where(eq(workflows.id, workflowId));
   await lockPerson(current!.personId);
   const [locked] = await q().select().from(workflows).where(eq(workflows.id, workflowId)).for("update");
   const workflow = locked!;
   if (workflow.status === "cancelled") return workflow;
-  const rows = await q().selectDistinct({ status: jobs.status }).from(jobs).where(eq(jobs.workflowId, workflowId));
+  const rows = await q()
+    .selectDistinct({ status: jobs.status })
+    .from(jobs)
+    .where(eq(jobs.workflowId, workflowId));
   const statuses = new Set<JobStatus>(rows.map((row) => row.status));
   let status: Workflow["status"];
-  if ([...statuses].every((value) => (FINISHED_JOB_STATUSES as readonly string[]).includes(value))) status = "completed";
+  if ([...statuses].every((value) => (FINISHED_JOB_STATUSES as readonly string[]).includes(value)))
+    status = "completed";
   else if (statuses.has("failed")) status = "failed";
   else if (statuses.has("queued") || statuses.has("running")) status = "running";
   else status = "waiting";
@@ -387,7 +432,10 @@ export const seams = { refreshWorkflow };
 
 /** Whether a newer workflow replaced the job's (or it was cancelled). */
 async function replaced(job: Pick<Job, "workflowId">): Promise<boolean> {
-  const [row] = await q().select({ status: workflows.status }).from(workflows).where(eq(workflows.id, job.workflowId));
+  const [row] = await q()
+    .select({ status: workflows.status })
+    .from(workflows)
+    .where(eq(workflows.id, job.workflowId));
   return row?.status === "cancelled";
 }
 
@@ -423,7 +471,11 @@ export async function locked(job: Pick<Job, "id" | "personId">): Promise<JobStat
   return loadState(row);
 }
 
-async function closeTasks(ids: number[], status: TaskStatus, options: { actor?: Actor; note?: string } = {}): Promise<void> {
+async function closeTasks(
+  ids: number[],
+  status: TaskStatus,
+  options: { actor?: Actor; note?: string } = {},
+): Promise<void> {
   if (ids.length === 0) return;
   await q()
     .update(tasks)
@@ -485,7 +537,10 @@ export async function recoverStaleJobs(): Promise<number> {
   for (const candidate of stale) {
     await atomic(async () => {
       const job = await locked(candidate);
-      if (job.status !== "running") return;
+      // Another worker may have recovered and claimed it again meanwhile: only
+      // the claim that was seen expired, and is still expired, goes back.
+      if (job.status !== "running" || job.claim !== candidate.claim) return;
+      if (!job.lockedUntil || job.lockedUntil >= new Date()) return;
       if (await replaced(job)) {
         await cancelJob(job, { note: "The worker stopped; the workflow was replaced meanwhile." });
         await settle(job);
@@ -545,7 +600,10 @@ export async function attempt(job: Job): Promise<Outcome> {
   const state: JobState = { ...job, connection: connection!, person: person! };
   if (!writesAutomatically(state.connection) || !canWrite(state.connection)) {
     if (config().READ_ONLY) {
-      return { type: "rehearsed", plan: { would: "ask a person to make the change", steps: await manualSteps(state) } };
+      return {
+        type: "rehearsed",
+        plan: { would: "ask a person to make the change", steps: await manualSteps(state) },
+      };
     }
     return { type: "for a person" };
   }
@@ -796,12 +854,16 @@ async function recordChange(
 async function cancelTooLate(job: JobState, claim: JobState): Promise<string> {
   if (claimedElsewhere(job, claim)) return "";
   if (job.status === "cancelled") return "It was cancelled while it ran, too late to stop the change.";
-  if (await replaced(job)) return "Its workflow was cancelled or replaced while it ran, too late to stop the change.";
+  if (await replaced(job))
+    return "Its workflow was cancelled or replaced while it ran, too late to stop the change.";
   return "";
 }
 
 export function resultSummary(result: EnsureResult | DisableResult): Record<string, unknown> {
-  const summary: Record<string, unknown> = { groups_removed: [...result.groupsRemoved], notes: [...result.notes] };
+  const summary: Record<string, unknown> = {
+    groups_removed: [...result.groupsRemoved],
+    notes: [...result.notes],
+  };
   if (result.groupError !== null) summary.group_error = groupErrorMessage(result.groupError).slice(0, 500);
   if (result.kind === "ensure") {
     Object.assign(summary, {
@@ -876,11 +938,15 @@ async function fail(job: JobState, message: string, retryable: boolean): Promise
       await manualSteps(job),
     ].join("\n\n"),
   );
-  await record("job.failed", `${actionLabel(job)} at ${job.connection.name} for ${fullName(job.person)} failed`, {
-    personId: job.personId,
-    target: target(job),
-    details: { error: message.slice(0, 500), attempts: job.attempts },
-  });
+  await record(
+    "job.failed",
+    `${actionLabel(job)} at ${job.connection.name} for ${fullName(job.person)} failed`,
+    {
+      personId: job.personId,
+      target: target(job),
+      details: { error: message.slice(0, 500), attempts: job.attempts },
+    },
+  );
   await settle(job, task);
 }
 
@@ -910,7 +976,10 @@ async function openGroupTask(job: JobState, error: Error): Promise<Task | null> 
     steps.push(`Make sure they are in: ${(await groupLabels(job)).sort().join(", ")}.`);
   }
   const wanted = new Set(job.groups);
-  const remove = await groupNames(job, [...(await managedGroups(job))].filter((group) => !wanted.has(group)));
+  const remove = await groupNames(
+    job,
+    [...(await managedGroups(job))].filter((group) => !wanted.has(group)),
+  );
   if (remove) steps.push(`Remove them from these, if a member: ${remove}.`);
   return openTask(
     job,
@@ -950,7 +1019,12 @@ async function manualSteps(job: JobState): Promise<string> {
   return steps;
 }
 
-async function openTask(job: JobState, kind: TaskKind, title: string, instructions: string): Promise<Task | null> {
+async function openTask(
+  job: JobState,
+  kind: TaskKind,
+  title: string,
+  instructions: string,
+): Promise<Task | null> {
   const [existing] = await q()
     .select({ id: tasks.id })
     .from(tasks)
@@ -1045,7 +1119,8 @@ async function handToPerson(job: JobState): Promise<Task | null> {
   const title = `${disabling ? "Remove" : "Give"} ${fullName(job.person)} ${disabling ? "from" : "access to"} ${job.connection.name}`;
   let reason = "";
   if (!job.connection.enabled) reason = "The connection is turned off, so the app makes no changes there.";
-  else if (job.connection.mode === "read_only") reason = "The connection is read only, so the app makes no changes there.";
+  else if (job.connection.mode === "read_only")
+    reason = "The connection is read only, so the app makes no changes there.";
   const instructions = [reason, await manualSteps(job)].filter(Boolean).join("\n\n");
   return openTask(job, "change", title, instructions);
 }
@@ -1066,10 +1141,21 @@ export async function retryJob(jobId: number, options: { actor: User }): Promise
     if (job.status !== "failed" && job.status !== "manual") {
       throw new ActionError("Only failed jobs and jobs with a manual task can run again.");
     }
-    if (await replaced(job)) throw new ActionError("The workflow was replaced or cancelled; start a new one instead.");
-    await q().update(jobs).set({ status: "queued", attempts: 0, nextAttemptAt: new Date() }).where(eq(jobs.id, job.id));
-    await closeTasks(await workTaskIds(job), "cancelled", { actor: options.actor, note: "The job runs again." });
-    await record("job.retry", `Retried: ${jobLabel(job)}`, { actor: options.actor, personId: job.personId, target: target(job) });
+    if (await replaced(job))
+      throw new ActionError("The workflow was replaced or cancelled; start a new one instead.");
+    await q()
+      .update(jobs)
+      .set({ status: "queued", attempts: 0, nextAttemptAt: new Date() })
+      .where(eq(jobs.id, job.id));
+    await closeTasks(await workTaskIds(job), "cancelled", {
+      actor: options.actor,
+      note: "The job runs again.",
+    });
+    await record("job.retry", `Retried: ${jobLabel(job)}`, {
+      actor: options.actor,
+      personId: job.personId,
+      target: target(job),
+    });
     await settle(job);
   });
 }
@@ -1078,7 +1164,10 @@ export async function approveJob(jobId: number, options: { actor: User }): Promi
   await atomic(async () => {
     const job = await locked(await jobRef(jobId));
     if (job.status !== "held") throw new ActionError("This job is not waiting for approval.");
-    await q().update(jobs).set({ status: "queued", nextAttemptAt: new Date(), lastError: "" }).where(eq(jobs.id, job.id));
+    await q()
+      .update(jobs)
+      .set({ status: "queued", nextAttemptAt: new Date(), lastError: "" })
+      .where(eq(jobs.id, job.id));
     await record("job.approved", `Approved: ${jobLabel(job)}`, {
       actor: options.actor,
       personId: job.personId,
@@ -1103,7 +1192,10 @@ export async function rejectJob(jobId: number, options: { actor: User }): Promis
 }
 
 async function jobRef(jobId: number): Promise<Pick<Job, "id" | "personId">> {
-  const [row] = await q().select({ id: jobs.id, personId: jobs.personId }).from(jobs).where(eq(jobs.id, jobId));
+  const [row] = await q()
+    .select({ id: jobs.id, personId: jobs.personId })
+    .from(jobs)
+    .where(eq(jobs.id, jobId));
   if (!row) throw new ActionError("This job does not exist.");
   return row;
 }
@@ -1131,7 +1223,10 @@ export async function completeTask(taskId: number, options: { actor: User; note?
     const job = task.kind === "change" || task.kind === "failure" ? await openJobOfTask(task) : null;
     if (job !== null) {
       const result = { ...job.result, manual: true, completed_by: options.actor.email };
-      await q().update(jobs).set({ status: "succeeded", finishedAt: new Date(), result }).where(eq(jobs.id, job.id));
+      await q()
+        .update(jobs)
+        .set({ status: "succeeded", finishedAt: new Date(), result })
+        .where(eq(jobs.id, job.id));
       await accountsLedger.recordManualChange(job);
       await settle(job);
     }

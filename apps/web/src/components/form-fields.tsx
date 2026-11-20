@@ -192,7 +192,15 @@ export function CheckboxField(props: {
 }
 
 /** The buttons under a form: Save (busy while `pending`) and Cancel, a link back to `cancelTo`. */
-export function FormActions({ pending, cancelTo, saveLabel = "Save" }: { pending: boolean; cancelTo: string; saveLabel?: string }) {
+export function FormActions({
+  pending,
+  cancelTo,
+  saveLabel = "Save",
+}: {
+  pending: boolean;
+  cancelTo: string;
+  saveLabel?: string;
+}) {
   return (
     <div className="flex flex-wrap gap-2">
       <Button type="submit" disabled={pending}>

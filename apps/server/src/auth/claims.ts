@@ -110,7 +110,11 @@ async function createUser(claims: Claims): Promise<User | null> {
     source = "local";
   }
   if (role === null) return null;
-  const taken = await q().select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
+  const taken = await q()
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`lower(${users.email}) = ${email}`)
+    .limit(1);
   if (taken.length > 0) return null;
   const [user] = await q()
     .insert(users)
@@ -159,7 +163,11 @@ async function updateUser(found: User, claims: Claims): Promise<User> {
     else if ("role" in changes) {
       summary = `Changed the role of app user ${user.email} to ${ROLE_LABELS[updated!.role].toLowerCase()} from a group claim`;
     } else summary = `Updated app user ${user.email} at sign-in`;
-    await record("user.signed_in", summary, { actor: updated!, target: { type: "user", id: user.id }, details });
+    await record("user.signed_in", summary, {
+      actor: updated!,
+      target: { type: "user", id: user.id },
+      details,
+    });
     return updated!;
   });
 }

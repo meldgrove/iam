@@ -64,7 +64,11 @@ async function run(
     status = "succeeded";
   } catch (exception) {
     status = "failed";
-    if (exception instanceof AdapterError || exception instanceof SecretUnreadable || exception instanceof SyncError) {
+    if (
+      exception instanceof AdapterError ||
+      exception instanceof SecretUnreadable ||
+      exception instanceof SyncError
+    ) {
       error = exception.message.slice(0, 2000);
     } else {
       // A failed read is reported, not thrown.
@@ -106,12 +110,22 @@ export async function recoverStoppedReads(): Promise<number> {
   for (const { run: stoppedRun, connectionName } of stopped) {
     await atomic(async () => {
       const error = "The worker stopped during this read.";
-      await q().update(syncRuns).set({ status: "failed", error, finishedAt: now }).where(eq(syncRuns.id, stoppedRun.id));
-      await q().update(connections).set({ lastSyncAt: now }).where(eq(connections.id, stoppedRun.connectionId));
-      await record(`sync.${stoppedRun.kind}`, `${SYNC_KIND_LABELS[stoppedRun.kind]} from ${connectionName}: failed`, {
-        target: { type: "syncrun", id: stoppedRun.id },
-        details: { error },
-      });
+      await q()
+        .update(syncRuns)
+        .set({ status: "failed", error, finishedAt: now })
+        .where(eq(syncRuns.id, stoppedRun.id));
+      await q()
+        .update(connections)
+        .set({ lastSyncAt: now })
+        .where(eq(connections.id, stoppedRun.connectionId));
+      await record(
+        `sync.${stoppedRun.kind}`,
+        `${SYNC_KIND_LABELS[stoppedRun.kind]} from ${connectionName}: failed`,
+        {
+          target: { type: "syncrun", id: stoppedRun.id },
+          details: { error },
+        },
+      );
     });
     count += 1;
   }
@@ -140,20 +154,17 @@ export async function importGroups(connection: Connection, actor: Actor = null):
           manual: false,
           seenAt: now,
         };
-        const [existing] = await q()
-          .select({ id: providerGroups.id })
-          .from(providerGroups)
-          .where(and(eq(providerGroups.connectionId, connection.id), eq(providerGroups.externalId, group.externalId)))
-          .for("update");
-        if (existing) {
-          await q().update(providerGroups).set(values).where(eq(providerGroups.id, existing.id));
-          updated += 1;
-        } else {
-          await q()
-            .insert(providerGroups)
-            .values({ ...values, connectionId: connection.id, externalId: group.externalId });
-          created += 1;
-        }
+        // One statement, so an import running at the same time cannot make it collide.
+        const [row] = await q()
+          .insert(providerGroups)
+          .values({ ...values, connectionId: connection.id, externalId: group.externalId })
+          .onConflictDoUpdate({
+            target: [providerGroups.connectionId, providerGroups.externalId],
+            set: values,
+          })
+          .returning({ inserted: sql<boolean>`(xmax = 0)` });
+        if (row!.inserted) created += 1;
+        else updated += 1;
       }
       const missing = await q()
         .update(providerGroups)
@@ -217,7 +228,13 @@ async function checkListing(connection: Connection, listed: { externalId: string
   const rows = await q()
     .select({ externalId: accounts.externalId })
     .from(accounts)
-    .where(and(eq(accounts.connectionId, connection.id), ne(accounts.externalId, ""), ne(accounts.status, "missing")));
+    .where(
+      and(
+        eq(accounts.connectionId, connection.id),
+        ne(accounts.externalId, ""),
+        ne(accounts.status, "missing"),
+      ),
+    );
   const known = new Set(rows.map((row) => row.externalId));
   const vanished = [...known].filter((id) => !seen.has(id)).length;
   if (vanished >= VANISHED_LIMIT && vanished * 2 > known.size) {
@@ -259,7 +276,9 @@ export async function drift(connection: Connection): Promise<Record<string, unkn
   const [unlinked] = await q()
     .select({ count: sql<number>`count(*)` })
     .from(accounts)
-    .where(and(eq(accounts.connectionId, connection.id), isNull(accounts.personId), eq(accounts.status, "active")));
+    .where(
+      and(eq(accounts.connectionId, connection.id), isNull(accounts.personId), eq(accounts.status, "active")),
+    );
   return {
     missing_access: missingAccess,
     unexpected_access: unexpectedAccess,
@@ -281,7 +300,8 @@ type PeopleSummary = {
 
 export async function importPeople(connection: Connection, actor: Actor = null): Promise<SyncRun> {
   return run(connection, "people", actor, async (adapter) => {
-    if (kindOf(connection) !== AdapterKind.HR_SOURCE) throw new SyncError(`${connection.name} does not import people.`);
+    if (kindOf(connection) !== AdapterKind.HR_SOURCE)
+      throw new SyncError(`${connection.name} does not import people.`);
     const records = await adapter.listPeople();
     const summary: PeopleSummary = {
       records: records.length,
@@ -309,7 +329,9 @@ export async function importPeople(connection: Connection, actor: Actor = null):
       .orderBy(asc(people.lastName), asc(people.firstName), asc(people.id))
       .limit(100);
     summary.not_listed = notListed.map((person) => ({ id: person.id, name: fullName(person) }));
-    summary.skipped = (adapter.skipped ?? []).slice(0, 100).map(([sourceId, reason]) => ({ source_id: sourceId, reason }));
+    summary.skipped = (adapter.skipped ?? [])
+      .slice(0, 100)
+      .map(([sourceId, reason]) => ({ source_id: sourceId, reason }));
     return summary;
   });
 }
@@ -337,7 +359,12 @@ const iexact = (column: typeof people.workEmail | typeof teams.name, value: stri
   sql`lower(${column}) = lower(${value})`;
 
 /** Imports one HR record; importPeople runs each in its own transaction (exported for tests). */
-export async function importRecord(connection: Connection, item: HRRecord, summary: PeopleSummary, actor: Actor): Promise<void> {
+export async function importRecord(
+  connection: Connection,
+  item: HRRecord,
+  summary: PeopleSummary,
+  actor: Actor,
+): Promise<void> {
   // Locked: the import saves the whole row, which must not write back a status
   // a workflow changed meanwhile.
   let [person] = await q()
@@ -362,7 +389,9 @@ export async function importRecord(connection: Connection, item: HRRecord, summa
     lastName: item.lastName.trim().slice(0, 150),
     personalEmail: (item.personalEmail || "").trim().slice(0, 254),
     jobTitle: (item.jobTitle || "").slice(0, 200),
-    personType: (item.personType in PERSON_TYPE_LABELS ? item.personType : "employee") as Person["personType"],
+    personType: (item.personType in PERSON_TYPE_LABELS
+      ? item.personType
+      : "employee") as Person["personType"],
     startDate: item.startDate,
     endDate: item.endDate,
   };
@@ -380,7 +409,11 @@ export async function importRecord(connection: Connection, item: HRRecord, summa
   if (person === undefined) {
     if (!item.active || (item.endDate && item.endDate < today())) return;
     if (email) {
-      const taken = await q().select({ id: people.id }).from(people).where(iexact(people.workEmail, email)).limit(1);
+      const taken = await q()
+        .select({ id: people.id })
+        .from(people)
+        .where(iexact(people.workEmail, email))
+        .limit(1);
       if (taken.length > 0) {
         summary.work_email_differs.push({ source_id: item.externalId, email });
         return;
@@ -470,4 +503,3 @@ async function personName(id: number | null): Promise<string> {
   const [row] = await q().select().from(people).where(eq(people.id, id));
   return row ? fullName(row) : "";
 }
-

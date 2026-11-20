@@ -66,12 +66,12 @@ scheduled backups.
 On Coolify the image tag set there decides what installs, instead of the channel in
 the app:
 
-| `IAM_VERSION` | Installs |
-| --- | --- |
-| `0.1` | every 0.1.x release, never 0.2.0 |
-| `latest` | every release, also one whose notes list upgrade steps, before anyone took them |
-| `preview` | every preview and release: the unstable channel |
-| `0.1.0` | nothing |
+| `IAM_VERSION` | Installs                                                                        |
+| ------------- | ------------------------------------------------------------------------------- |
+| `0.1`         | every 0.1.x release, never 0.2.0                                                |
+| `latest`      | every release, also one whose notes list upgrade steps, before anyone took them |
+| `preview`     | every preview and release: the unstable channel                                 |
+| `0.1.0`       | nothing                                                                         |
 
 When the tag points to a new image, the updater calls the deploy link (after the
 cooldown, or at once from the update button), and Coolify pulls and deploys it. To

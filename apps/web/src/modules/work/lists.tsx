@@ -21,7 +21,6 @@ import {
   type WorkflowFilter,
   type WorkflowsSearch,
 } from "./api";
-import { JobActions } from "./job-actions";
 
 /** A filter of a list: a native select that applies at once. */
 function Filter<T extends string>(props: {
@@ -31,7 +30,11 @@ function Filter<T extends string>(props: {
   onChange: (value: T) => void;
 }) {
   return (
-    <NativeSelect aria-label={props.label} value={props.value} onChange={(event) => props.onChange(event.target.value as T)}>
+    <NativeSelect
+      aria-label={props.label}
+      value={props.value}
+      onChange={(event) => props.onChange(event.target.value as T)}
+    >
       {props.options.map(([value, label]) => (
         <NativeSelectOption key={value} value={value}>
           {label}
@@ -75,7 +78,13 @@ function ListPage<T>(props: {
 const pageOf = (page: number) => (page > 1 ? page : undefined);
 
 /** /workflows: open ones first; or those of one status, or all. */
-export function WorkflowsPage({ search, onSearch }: { search: WorkflowsSearch; onSearch: (search: WorkflowsSearch) => void }) {
+export function WorkflowsPage({
+  search,
+  onSearch,
+}: {
+  search: WorkflowsSearch;
+  onSearch: (search: WorkflowsSearch) => void;
+}) {
   const query = useQuery(workflowsQuery(search));
   return (
     <ListPage
@@ -99,7 +108,13 @@ export function WorkflowsPage({ search, onSearch }: { search: WorkflowsSearch; o
 }
 
 /** /jobs: failed and held ones first; or open ones, one status, or all; at one connection or all. */
-export function JobsPage({ search, onSearch }: { search: JobsSearch; onSearch: (search: JobsSearch) => void }) {
+export function JobsPage({
+  search,
+  onSearch,
+}: {
+  search: JobsSearch;
+  onSearch: (search: JobsSearch) => void;
+}) {
   const query = useQuery(jobsQuery(search));
   const connections = useQuery(accountConnectionsQuery).data ?? [];
   return (
@@ -112,7 +127,9 @@ export function JobsPage({ search, onSearch }: { search: JobsSearch; onSearch: (
             label="Status"
             value={search.status ?? "attention"}
             options={JOB_FILTERS}
-            onChange={(status) => onSearch({ ...search, status: status === "attention" ? undefined : status, page: undefined })}
+            onChange={(status) =>
+              onSearch({ ...search, status: status === "attention" ? undefined : status, page: undefined })
+            }
           />
           <Filter<string>
             label="Connection"
@@ -126,7 +143,11 @@ export function JobsPage({ search, onSearch }: { search: JobsSearch; onSearch: (
                 : []),
             ]}
             onChange={(connection) =>
-              onSearch({ ...search, connection: connection ? Number(connection) : undefined, page: undefined })
+              onSearch({
+                ...search,
+                connection: connection ? Number(connection) : undefined,
+                page: undefined,
+              })
             }
           />
         </>
@@ -135,13 +156,19 @@ export function JobsPage({ search, onSearch }: { search: JobsSearch; onSearch: (
       empty="No jobs."
       onPage={(page) => onSearch({ ...search, page: pageOf(page) })}
     >
-      {(items) => <JobsTable jobs={items} actions={(job) => <JobActions job={job} compact />} />}
+      {(items) => <JobsTable jobs={items} />}
     </ListPage>
   );
 }
 
 /** /tasks: open ones first; or those of one status, or all. */
-export function TasksPage({ search, onSearch }: { search: TasksSearch; onSearch: (search: TasksSearch) => void }) {
+export function TasksPage({
+  search,
+  onSearch,
+}: {
+  search: TasksSearch;
+  onSearch: (search: TasksSearch) => void;
+}) {
   const query = useQuery(tasksQuery(search));
   return (
     <ListPage

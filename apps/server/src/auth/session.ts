@@ -58,13 +58,11 @@ export async function endSession(c: Context): Promise<string> {
   const token = getCookie(c, SESSION_COOKIE);
   deleteCookie(c, SESSION_COOKIE, { path: "/", secure: secureCookies() });
   if (!token || token.length > 200) return "";
-  const [row] = await getDb().delete(sessions).where(eq(sessions.id, hash(token))).returning({ idToken: sessions.idToken });
+  const [row] = await getDb()
+    .delete(sessions)
+    .where(eq(sessions.id, hash(token)))
+    .returning({ idToken: sessions.idToken });
   return row?.idToken ?? "";
-}
-
-/** Ends every session of a user (turned off, role removed). */
-export async function endSessionsOf(userId: number): Promise<void> {
-  await getDb().delete(sessions).where(eq(sessions.userId, userId));
 }
 
 // -- signed values (the sign-in's state cookie) ------------------------------------

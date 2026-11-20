@@ -8,7 +8,12 @@ import { ConfirmDialog } from "@meldgrove/ui/confirm-dialog";
 import { Page, PageHeader } from "@meldgrove/ui/page";
 import { ErrorState, LoadingState } from "@meldgrove/ui/states";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@meldgrove/ui/table";
-import { ACCOUNT_STATUS_LABELS, PERSON_STATUS_LABELS, PERSON_TYPE_LABELS, type WorkflowKind } from "@iam/shared/labels";
+import {
+  ACCOUNT_STATUS_LABELS,
+  PERSON_STATUS_LABELS,
+  PERSON_TYPE_LABELS,
+  type WorkflowKind,
+} from "@iam/shared/labels";
 import type { AccessRow, PersonDetail } from "@iam/shared/api/iam";
 import { useMe } from "@/hooks/use-me";
 import { useAction } from "@/hooks/use-action";
@@ -17,7 +22,6 @@ import { useRecordTitle } from "@/app/record-name";
 import { Detail, Details, Section } from "@/components/detail";
 import { StatusBadge, ToneBadge } from "@/components/status";
 import { Empty, EventsTable, JobsTable, TasksTable, TextLink, WorkflowsTable } from "@/components/lists";
-import { JobActions } from "@/modules/work/job-actions";
 import { personQuery } from "./api";
 
 /** Edit, start a workflow, archive: what an approver may do now. */
@@ -34,7 +38,10 @@ function Actions({ person }: { person: PersonDetail }) {
         <Link to={`/people/${person.id}/edit`}>Edit</Link>
       </Button>
       {person.can.onboard ? (
-        <Button disabled={start.isPending} onClick={() => void startKind("onboarding").catch(() => undefined)}>
+        <Button
+          disabled={start.isPending}
+          onClick={() => void startKind("onboarding").catch(() => undefined)}
+        >
           Start onboarding
         </Button>
       ) : null}
@@ -82,36 +89,42 @@ function ProfileCard({ person }: { person: PersonDetail }) {
   const format = useFormatter();
   return (
     <Section title="Profile">
-        <Details className="lg:grid-cols-2">
-          <Detail label="Work email">{person.workEmail ?? "—"}</Detail>
-          <Detail label="Login name">
-            {person.loginName ? <span className="font-mono">{person.loginName}</span> : "—"}
-          </Detail>
-          <Detail label="Personal email">{person.personalEmail || "—"}</Detail>
-          <Detail label="Manager">
-            {person.manager ? <TextLink to={`/people/${person.manager.id}`}>{person.manager.name}</TextLink> : "—"}
-          </Detail>
-          <Detail label="Access profile">
-            {person.accessProfile ? (
-              <TextLink to={`/profiles/${person.accessProfile.id}`}>{person.accessProfile.name}</TextLink>
-            ) : (
-              <ToneBadge tone="warn">none</ToneBadge>
-            )}
-          </Detail>
-          <Detail label="Start date">{person.startDate ? format.date(person.startDate) : "—"}</Detail>
-          <Detail label="Last day">{person.endDate ? format.date(person.endDate) : "—"}</Detail>
-          <Detail label="Source">
-            {person.source ? (
-              <>
-                {person.source.connection}{" "}
-                <span className="text-muted-foreground font-mono text-xs">{person.source.id}</span>
-              </>
-            ) : (
-              "Added in this app"
-            )}
-          </Detail>
-        </Details>
-        {person.notes ? <p className="text-muted-foreground text-sm whitespace-pre-line">{person.notes}</p> : null}
+      <Details className="lg:grid-cols-2">
+        <Detail label="Work email">{person.workEmail ?? "—"}</Detail>
+        <Detail label="Login name">
+          {person.loginName ? <span className="font-mono">{person.loginName}</span> : "—"}
+        </Detail>
+        <Detail label="Personal email">{person.personalEmail || "—"}</Detail>
+        <Detail label="Manager">
+          {person.manager ? (
+            <TextLink to={`/people/${person.manager.id}`}>{person.manager.name}</TextLink>
+          ) : (
+            "—"
+          )}
+        </Detail>
+        <Detail label="Access profile">
+          {person.accessProfile ? (
+            <TextLink to={`/profiles/${person.accessProfile.id}`}>{person.accessProfile.name}</TextLink>
+          ) : (
+            <ToneBadge tone="warn">none</ToneBadge>
+          )}
+        </Detail>
+        <Detail label="Start date">{person.startDate ? format.date(person.startDate) : "—"}</Detail>
+        <Detail label="Last day">{person.endDate ? format.date(person.endDate) : "—"}</Detail>
+        <Detail label="Source">
+          {person.source ? (
+            <>
+              {person.source.connection}{" "}
+              <span className="text-muted-foreground font-mono text-xs">{person.source.id}</span>
+            </>
+          ) : (
+            "Added in this app"
+          )}
+        </Detail>
+      </Details>
+      {person.notes ? (
+        <p className="text-muted-foreground text-sm whitespace-pre-line">{person.notes}</p>
+      ) : null}
     </Section>
   );
 }
@@ -142,42 +155,42 @@ function AccessCard({ rows }: { rows: AccessRow[] }) {
       title="Access"
       description="What the access profile and team grant, next to the accounts the app last saw."
     >
-        {rows.length === 0 ? (
-          <Empty>No access granted and no accounts known.</Empty>
-        ) : (
-          <Table scrollLabel="Access">
-            <TableHeader>
-              <TableRow>
-                <TableHead>App</TableHead>
-                <TableHead>Should have</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Last seen</TableHead>
+      {rows.length === 0 ? (
+        <Empty>No access granted and no accounts known.</Empty>
+      ) : (
+        <Table scrollLabel="Access">
+          <TableHeader>
+            <TableRow>
+              <TableHead>App</TableHead>
+              <TableHead>Should have</TableHead>
+              <TableHead>Account</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Last seen</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.connection.id}>
+                <TableCell>{row.connection.name}</TableCell>
+                <TableCell className="whitespace-normal">
+                  <ShouldHave grant={row.grant} />
+                </TableCell>
+                <TableCell className="font-mono text-xs">{row.account?.label || "—"}</TableCell>
+                <TableCell>
+                  {row.account ? (
+                    <StatusBadge value={row.account.status} labels={ACCOUNT_STATUS_LABELS} />
+                  ) : (
+                    <span className="text-muted-foreground text-xs">none known</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-muted-foreground whitespace-nowrap">
+                  {row.account?.observedAt ? format.dateTime(row.account.observedAt) : "—"}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.connection.id}>
-                  <TableCell>{row.connection.name}</TableCell>
-                  <TableCell className="whitespace-normal">
-                    <ShouldHave grant={row.grant} />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{row.account?.label || "—"}</TableCell>
-                  <TableCell>
-                    {row.account ? (
-                      <StatusBadge value={row.account.status} labels={ACCOUNT_STATUS_LABELS} />
-                    ) : (
-                      <span className="text-muted-foreground text-xs">none known</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground whitespace-nowrap">
-                    {row.account?.observedAt ? format.dateTime(row.account.observedAt) : "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </Section>
   );
 }
@@ -217,23 +230,23 @@ export function PersonPage({ id }: { id: number }) {
         <Alert>
           <Info />
           <AlertDescription>
-            The last onboarding was cancelled, so the schedule does not start it again. Change the start date or the
-            access profile, or start the onboarding by hand.
+            The last onboarding was cancelled, so the schedule does not start it again. Change the start date
+            or the access profile, or start the onboarding by hand.
           </AlertDescription>
         </Alert>
       ) : null}
       {lastDayPassed ? (
         <Alert variant="destructive">
           <AlertDescription>
-            The last day has passed. Clear or change it before onboarding, or the schedule offboards {person.firstName}{" "}
-            right after.
+            The last day has passed. Clear or change it before onboarding, or the schedule offboards{" "}
+            {person.firstName} right after.
           </AlertDescription>
         </Alert>
       ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <ProfileCard person={person} />
         <Section title="Open work">
-          <JobsTable jobs={person.openJobs} showPerson={false} actions={(job) => <JobActions job={job} compact />} />
+          <JobsTable jobs={person.openJobs} showPerson={false} />
         </Section>
       </div>
       <AccessCard rows={person.accessRows} />

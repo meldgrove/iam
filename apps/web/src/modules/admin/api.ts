@@ -34,7 +34,10 @@ export const connectionFormQuery = (id: number) => ({
   gcTime: 0,
 });
 
-export const adaptersQuery = { queryKey: ["adapters"], queryFn: () => api.get<AdapterSection[]>("/adapters") };
+export const adaptersQuery = {
+  queryKey: ["adapters"],
+  queryFn: () => api.get<AdapterSection[]>("/adapters"),
+};
 
 export const adapterQuery = (slug: string) => ({
   queryKey: ["adapters", slug],
@@ -99,10 +102,11 @@ export function useActions(keys: QueryKey[]) {
     },
   });
   return {
-    run: (name: string, run: () => Promise<Answer>) => mutation.mutateAsync({ name, run }).then(
-      () => true,
-      () => false,
-    ),
+    run: (name: string, run: () => Promise<Answer>) =>
+      mutation.mutateAsync({ name, run }).then(
+        () => true,
+        () => false,
+      ),
     busy: mutation.isPending,
     pending: (name: string) => mutation.isPending && mutation.variables?.name === name,
   };

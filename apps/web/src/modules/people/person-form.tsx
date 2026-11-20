@@ -83,7 +83,8 @@ function Required({ children }: { children: ReactNode }) {
   );
 }
 
-const toOptions = (refs: { id: number; name: string }[]) => refs.map((ref) => ({ value: String(ref.id), label: ref.name }));
+const toOptions = (refs: { id: number; name: string }[]) =>
+  refs.map((ref) => ({ value: String(ref.id), label: ref.name }));
 
 /** Adds a person, or changes one (`person`). After saving, the person's page shows. */
 export function PersonForm({ person, options }: { person?: PersonDetail; options: PersonOptions }) {
@@ -93,7 +94,9 @@ export function PersonForm({ person, options }: { person?: PersonDetail; options
   const [checked, setChecked] = useState<FieldErrors>({});
   const save = useMutation({
     mutationFn: (input: PersonInput) =>
-      person ? api.put<ActionResult>(`/people/${person.id}`, input) : api.post<ActionResult>("/people", input),
+      person
+        ? api.put<ActionResult>(`/people/${person.id}`, input)
+        : api.post<ActionResult>("/people", input),
     onSuccess: async (result) => {
       toast.success(result.message);
       await Promise.all(
@@ -109,9 +112,11 @@ export function PersonForm({ person, options }: { person?: PersonDetail; options
     ...(save.error && !(save.error instanceof ApiError && save.error.fields) ? [save.error.message] : []),
     ...otherErrors(errors, SHOWN),
   ];
-  const change = <K extends keyof Values>(key: K) => (value: Values[K]) => {
-    setValues((current) => ({ ...current, [key]: value }));
-  };
+  const change =
+    <K extends keyof Values>(key: K) =>
+    (value: Values[K]) => {
+      setValues((current) => ({ ...current, [key]: value }));
+    };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -134,9 +139,20 @@ export function PersonForm({ person, options }: { person?: PersonDetail; options
     <form noValidate onSubmit={submit} className="grid gap-6">
       <Card>
         <CardContent className="grid gap-6 md:grid-cols-2">
-          <TextField {...text("firstName")} label={<Required>First name</Required>} required maxLength={150} />
+          <TextField
+            {...text("firstName")}
+            label={<Required>First name</Required>}
+            required
+            maxLength={150}
+          />
           <TextField {...text("lastName")} label={<Required>Last name</Required>} required maxLength={150} />
-          <TextField {...text("workEmail")} label="Work email" type="email" autoComplete="off" maxLength={254} />
+          <TextField
+            {...text("workEmail")}
+            label="Work email"
+            type="email"
+            autoComplete="off"
+            maxLength={254}
+          />
           <TextField
             {...text("personalEmail")}
             label="Personal email"
@@ -162,12 +178,7 @@ export function PersonForm({ person, options }: { person?: PersonDetail; options
             error={errors.personType}
             required
           />
-          <SelectField
-            {...text("teamId")}
-            label="Team"
-            options={toOptions(options.teams)}
-            empty="None"
-          />
+          <SelectField {...text("teamId")} label="Team" options={toOptions(options.teams)} empty="None" />
           <SelectField
             {...text("managerId")}
             label="Manager"

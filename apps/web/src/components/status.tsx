@@ -10,9 +10,27 @@ const TONE_CLASSES: Record<Exclude<Tone, "danger" | "neutral">, string> = {
 };
 
 /** A small colored label for a status value: green, blue, amber, red or neutral. */
-export function ToneBadge({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {
-  if (tone === "danger") return <Badge variant="destructive" className={className}>{children}</Badge>;
-  if (tone === "neutral") return <Badge variant="secondary" className={className}>{children}</Badge>;
+export function ToneBadge({
+  tone,
+  children,
+  className,
+}: {
+  tone: Tone;
+  children: ReactNode;
+  className?: string;
+}) {
+  if (tone === "danger")
+    return (
+      <Badge variant="destructive" className={className}>
+        {children}
+      </Badge>
+    );
+  if (tone === "neutral")
+    return (
+      <Badge variant="secondary" className={className}>
+        {children}
+      </Badge>
+    );
   return <Badge className={cn(TONE_CLASSES[tone], className)}>{children}</Badge>;
 }
 

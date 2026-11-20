@@ -1,4 +1,11 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import { config } from "../config";
 
 /**
@@ -23,7 +30,8 @@ type Key = { signing: Buffer; encryption: Buffer };
 
 function parseKey(value: string): Key {
   const bytes = Buffer.from(value, "base64url");
-  if (bytes.length !== 32) throw new Error("ENCRYPTION_KEY must be Fernet keys: 32 url-safe base64-encoded bytes each.");
+  if (bytes.length !== 32)
+    throw new Error("ENCRYPTION_KEY must be Fernet keys: 32 url-safe base64-encoded bytes each.");
   return { signing: bytes.subarray(0, 16), encryption: bytes.subarray(16) };
 }
 
