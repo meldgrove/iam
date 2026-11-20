@@ -1,9 +1,12 @@
 """Google Workspace accounts and Google Groups through the Admin SDK
-Directory API, as a service account with domain-wide delegation."""
+Directory API, as a service account. The service account either holds Google
+Workspace admin roles itself or acts as an admin user (domain-wide
+delegation)."""
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Iterator
 from urllib.parse import quote
 
@@ -85,8 +88,9 @@ class GoogleWorkspaceAdapter(Adapter):
             kind="secret_text",
             required=True,
             help=(
-                "The JSON key of a service account with domain-wide delegation for the "
-                "scopes admin.directory.user, admin.directory.group and "
+                "The JSON key of a service account that holds the admin roles User "
+                "Management Admin and Groups Admin, or that has domain-wide delegation "
+                "for the scopes admin.directory.user, admin.directory.group and "
                 "admin.directory.group.member."
             ),
         ),
@@ -94,22 +98,33 @@ class GoogleWorkspaceAdapter(Adapter):
             "admin_email",
             "Admin user",
             kind="email",
-            required=True,
-            help="The Google Workspace admin the service account acts as.",
+            help=(
+                "Only for domain-wide delegation: the Google Workspace admin the service "
+                "account acts as. Leave empty when the service account holds admin roles "
+                "itself."
+            ),
             placeholder="admin@example.invalid",
         ),
         Field(
             "domain",
-            "Primary domain",
+            "Domains",
             required=True,
-            help="Work emails must be in this domain.",
-            placeholder="example.invalid",
+            help=(
+                "Work emails of new users must be in one of these domains, separated by "
+                "commas. The first one is the primary domain. Accounts in all domains "
+                "are read."
+            ),
+            placeholder="example.invalid, extern.example.invalid",
         ),
         Field(
             "customer_id",
             "Customer ID",
             default="my_customer",
-            help="Leave as my_customer unless the admin user manages several accounts.",
+            help=(
+                "Leave as my_customer: without an admin user, the app looks up the ID in "
+                "the primary domain. Change only if the admin user manages several "
+                "accounts."
+            ),
         ),
         Field(
             "org_unit_path",
@@ -134,15 +149,53 @@ class GoogleWorkspaceAdapter(Adapter):
     # -- connection ------------------------------------------------------------
 
     @property
+    def domains(self) -> tuple[str, ...]:
+        """The configured domains, the primary one first."""
+        found: list[str] = []
+        for part in re.split(r"[\s,;]+", str(self.setting("domain", ""))):
+            domain = part.strip().lstrip("@").lower()
+            if domain and domain not in found:
+                found.append(domain)
+        return tuple(found)
+
+    @property
     def domain(self) -> str:
-        return str(self.setting("domain", "")).strip().lstrip("@").lower()
+        """The primary domain."""
+        return self.domains[0] if self.domains else ""
 
     @property
     def customer(self) -> str:
-        return self.setting("customer_id", "my_customer")
+        configured = str(self.setting("customer_id", "")).strip()
+        if configured and configured != "my_customer":
+            return configured
+        if self.setting("admin_email"):
+            return "my_customer"
+        return self._customer_of_domain()
+
+    def _customer_of_domain(self) -> str:
+        """The customer ID, read from a user of the primary domain. A service
+        account that acts as itself is no Workspace user, so Google cannot
+        resolve my_customer for it."""
+        if getattr(self, "_resolved_customer", None) is None:
+            data = self._request(
+                "GET",
+                "/users",
+                "look up the customer ID",
+                params={"domain": self.domain, "maxResults": 1, "fields": "users(customerId)"},
+            ).json()
+            users = data.get("users") if isinstance(data, dict) else None
+            customer = users[0].get("customerId") if users and isinstance(users[0], dict) else None
+            if not isinstance(customer, str) or not customer.strip():
+                raise ConfigurationError(
+                    f"Google Workspace returned no user in {self.domain}, so the customer ID "
+                    "is unknown. Check the domains, or enter the customer ID from the Google "
+                    "Admin console (Account > Account settings)."
+                )
+            self._resolved_customer = customer.strip()
+        return self._resolved_customer
 
     def _access_token(self) -> str:
-        self.require("service_account_json", "admin_email", "domain")
+        self.require("service_account_json", "domain")
         from google.auth.exceptions import GoogleAuthError, RefreshError, TransportError
         from google.auth.transport.requests import Request
         from google.oauth2 import service_account
@@ -151,7 +204,7 @@ class GoogleWorkspaceAdapter(Adapter):
         try:
             info = json.loads(raw) if isinstance(raw, str) else dict(raw)
             credentials = service_account.Credentials.from_service_account_info(
-                info, scopes=list(SCOPES), subject=self.setting("admin_email")
+                info, scopes=list(SCOPES), subject=self.setting("admin_email") or None
             )
         except (ValueError, TypeError, KeyError) as exc:
             raise ConfigurationError(
@@ -160,10 +213,15 @@ class GoogleWorkspaceAdapter(Adapter):
         try:
             credentials.refresh(Request())
         except RefreshError as exc:
+            if self.setting("admin_email"):
+                raise ConfigurationError(
+                    "Google refused the service account. Check domain-wide delegation for "
+                    "its client ID, the scopes admin.directory.user, admin.directory.group "
+                    "and admin.directory.group.member, and that the admin user is an "
+                    "administrator."
+                ) from exc
             raise ConfigurationError(
-                "Google refused the service account. Check domain-wide delegation for its "
-                "client ID, the scopes admin.directory.user, admin.directory.group and "
-                "admin.directory.group.member, and that the admin user is an administrator."
+                "Google refused the service account. Check that its key is valid and not deleted."
             ) from exc
         except TransportError as exc:
             raise TransientError("Could not reach Google to sign in the service account.") from exc
@@ -182,6 +240,12 @@ class GoogleWorkspaceAdapter(Adapter):
             raise TransientError(
                 f"Google Workspace limited the request rate while trying to {what}; "
                 "it runs again later."
+            )
+        if response.status_code in (401, 403) and not self.setting("admin_email"):
+            raise ConfigurationError(
+                f"Google Workspace refused access ({response.status_code}) while trying to "
+                f"{what}. Check that the service account holds the admin roles User "
+                "Management Admin and Groups Admin in the Google Admin console."
             )
         super().raise_for_status(response, what)
 
@@ -218,7 +282,7 @@ class GoogleWorkspaceAdapter(Adapter):
         self._request(
             "GET", "/users", "list users", params={"customer": self.customer, "maxResults": 1}
         )
-        return TestResult(True, f"Connected to Google Workspace for {self.domain}.")
+        return TestResult(True, f"Connected to Google Workspace for {', '.join(self.domains)}.")
 
     # -- groups --------------------------------------------------------------------
 
@@ -287,8 +351,12 @@ class GoogleWorkspaceAdapter(Adapter):
         email = (spec.email or "").strip().lower()
         if not email:
             raise AdapterError("Google Workspace accounts need a work email.")
-        if email.rsplit("@", 1)[-1] != self.domain:
-            raise AdapterError(f"The work email must be in the domain {self.domain}.")
+        if email.rsplit("@", 1)[-1] not in self.domains:
+            if len(self.domains) == 1:
+                raise AdapterError(f"The work email must be in the domain {self.domain}.")
+            raise AdapterError(
+                f"The work email must be in one of the domains {', '.join(self.domains)}."
+            )
         return email
 
     def _get_user_by_email(self, email: str) -> dict | None:

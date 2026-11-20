@@ -162,19 +162,27 @@ memberships, through the Admin SDK Directory API.
 
 **Set up in Google first**
 
-1. Create a service account in a Google Cloud project and download its JSON
-   key.
-2. In the Google Admin console, give the service account's client ID
-   domain-wide delegation for the scopes `admin.directory.user`,
-   `admin.directory.group` and `admin.directory.group.member`.
-3. Choose an administrator account for the service account to act as.
+1. In a Google Cloud project, enable the Admin SDK API, create a service
+   account and download its JSON key.
+2. Give the service account access in one of two ways:
+   - **Admin roles (recommended):** in the Google Admin console, under
+     Account > Admin roles, assign the roles **User Management Admin** and
+     **Groups Admin** to the service account's email (Assign admin > Assign
+     service accounts). The service account acts as itself, with only these
+     roles; leave **Admin user** empty. Role changes can take a while to
+     apply.
+   - **Domain-wide delegation:** in the Google Admin console, give the
+     service account's client ID domain-wide delegation for the scopes
+     `admin.directory.user`, `admin.directory.group` and
+     `admin.directory.group.member`, and choose an administrator for it to
+     act as (**Admin user**).
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | Service account key (JSON) | yes | The JSON key from step 1. |
-| Admin user | yes | The administrator the service account acts as. |
-| Primary domain | yes | Work emails must be in this domain; others stop the job. |
-| Customer ID | no (`my_customer`) | Change only if the admin user manages several accounts. |
+| Admin user | no | Only for domain-wide delegation: the administrator the service account acts as. Empty: the service account acts as itself with its admin roles. |
+| Domains | yes | The Workspace domains, separated by commas, the primary domain first. Work emails of new users must be in one of them; others stop the job. Comparisons read the accounts of all domains either way. |
+| Customer ID | no (`my_customer`) | Without an admin user, the app looks up the ID from a user of the first domain. Change only if the admin user manages several accounts, or to skip the lookup (Admin console > Account > Account settings). |
 | Organizational unit for new users | no (`/`) | Where new users go, e.g. `/Staff`. |
 | Email a first password | no (on) | New users get a generated password that must be changed at first sign-in, emailed to the personal address (see Initial passwords). Off: Google still requires a password, so the app sets a random one nobody knows; set a password in the Admin console or use single sign-on. |
 | Compare accounts every (minutes) | no (360) | 0 turns it off. |
