@@ -96,6 +96,8 @@ const schema = z
     SESSION_HOURS: withDefault(z.coerce.number().int().min(1).max(720), 12),
     /** Development only: sign in as any app user without a provider. */
     DEV_LOGIN: flag(false),
+    /** Send HSTS for subdomains too (with an https APP_URL). */
+    SECURE_HSTS_INCLUDE_SUBDOMAINS: flag(true),
     /** Shows details on /-/readyz for requests with X-Health-Token. */
     HEALTHCHECK_TOKEN: withDefault(z.string(), ""),
     WORKER_POLL_SECONDS: withDefault(z.coerce.number().min(0.1).max(3600), 5),

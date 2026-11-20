@@ -28,7 +28,7 @@ if (dsn && !Sentry.isInitialized()) {
   Sentry.init({
     dsn,
     environment: env("SENTRY_ENVIRONMENT") ?? env("NODE_ENV") ?? "development",
-    release: env("SENTRY_RELEASE") ?? (version ? `backups@${version}` : undefined),
+    release: env("SENTRY_RELEASE") ?? (version ? `iam@${version}` : undefined),
     defaultIntegrations: false,
     integrations: [
       // Errors logged at error or fatal become issues; warnings and up become logs.
@@ -43,8 +43,9 @@ if (dsn && !Sentry.isInitialized()) {
       Sentry.contextLinesIntegration(),
       ...(tracesSampleRate > 0
         ? [
-            Sentry.httpIntegration({ breadcrumbs: false }),
-            Sentry.nativeNodeFetchIntegration({ breadcrumbs: false }),
+            // Incoming requests only: calls to connected apps carry email
+            // addresses in their paths and filters.
+            Sentry.httpIntegration({ breadcrumbs: false, ignoreOutgoingRequests: () => true }),
             Sentry.honoIntegration(),
             Sentry.postgresIntegration(),
           ]

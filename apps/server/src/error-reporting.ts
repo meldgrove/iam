@@ -9,9 +9,9 @@ import type { AppEnv } from "./http/env";
  * requests, and check-ins of the scheduled jobs.
  */
 
-/** The release in reports: SENTRY_RELEASE, else `backups@<APP_VERSION>` for release images. */
+/** The release in reports: SENTRY_RELEASE, else `iam@<APP_VERSION>` for release images. */
 export function errorReportRelease(settings: Pick<Config, "SENTRY_RELEASE" | "APP_VERSION">) {
-  return settings.SENTRY_RELEASE ?? (settings.APP_VERSION ? `backups@${settings.APP_VERSION}` : undefined);
+  return settings.SENTRY_RELEASE ?? (settings.APP_VERSION ? `iam@${settings.APP_VERSION}` : undefined);
 }
 
 /** Sends pending reports; call it before the process exits. */
@@ -60,4 +60,9 @@ export function withErrorReportingSettings(indexHtml: string): string {
     "</head>",
     `<meta name="backups-error-reporting" content="${content}" />\n</head>`,
   );
+}
+
+/** Reports an unexpected error to Sentry, when it is on. */
+export function reportError(error: unknown): void {
+  if (Sentry.isInitialized()) Sentry.captureException(error);
 }

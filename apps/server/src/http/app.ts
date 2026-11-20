@@ -8,25 +8,12 @@ import { AppError, zodFieldErrors } from "./errors";
 import { authenticate, requestId, requestLog, sameOrigin } from "./middleware";
 import { compression } from "./compression";
 import { webApp } from "./static";
-import { auth } from "../auth/auth";
-import { CLIENT_IP_HEADER, clientIp } from "./client-ip";
+import { config } from "../config";
 import { API_MODULES } from "../modules";
-import { agentRoutes } from "../modules/agent";
 import health from "../modules/health";
+import { signInRoutes } from "./sign-in";
 import { logger } from "../logger";
 import { errorReportingSources, tracingMiddleware } from "../error-reporting";
-
-/**
- * The routes of the authentication library that the web app and the
- * provider's redirect use; its other routes (profile changes, tokens,
- * account links, …) are not served.
- */
-const AUTH_ROUTES = new Set([
-  "POST /api/auth/sign-in/social",
-  "GET /api/auth/callback/oidc",
-  "POST /api/auth/sign-out",
-  "GET /api/auth/error",
-]);
 
 /**
  * PostgreSQL errors of a request that ran into another one at the same time:
@@ -62,6 +49,15 @@ export function concurrentChangeResponse(error: Error, c: Context<AppEnv>) {
   );
 }
 
+/** The sign-in provider's origin: sign-out may send the browser there. */
+function providerOrigin(): string[] {
+  try {
+    return config().oidcIssuer ? [new URL(config().oidcIssuer).origin] : [];
+  } catch {
+    return [];
+  }
+}
+
 export function createApp() {
   const app = new Hono<AppEnv>();
   const tracing = tracingMiddleware(app);
@@ -74,18 +70,29 @@ export function createApp() {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        imgSrc: ["'self'", "data:", "blob:"],
         fontSrc: ["'self'", "data:"],
         connectSrc: ["'self'", ...errorReportingSources()],
-        formAction: ["'self'"],
+        formAction: ["'self'", ...providerOrigin()],
         frameAncestors: ["'none'"],
         baseUri: ["'self'"],
         objectSrc: ["'none'"],
       },
-      referrerPolicy: "strict-origin-when-cross-origin",
+      referrerPolicy: "same-origin",
       crossOriginEmbedderPolicy: false,
+      strictTransportSecurity: config().APP_URL.startsWith("https://")
+        ? `max-age=31536000${config().SECURE_HSTS_INCLUDE_SUBDOMAINS ? "; includeSubDomains" : ""}`
+        : false,
+      permissionsPolicy: { camera: [], microphone: [], geolocation: [] },
     }),
   );
+  // Pages and answers can carry personal data: no caching for signed-in users and health checks.
+  app.use("*", async (c, next) => {
+    await next();
+    if (c.req.path.startsWith("/-/") || c.req.raw.headers.get("cookie")?.includes("iam_session=")) {
+      if (!c.res.headers.get("cache-control")?.includes("immutable")) c.header("cache-control", "no-store");
+    }
+  });
 
   app.onError((error, c) => {
     if (error instanceof AppError) {
@@ -125,29 +132,7 @@ export function createApp() {
 
   app.route("/", health);
 
-  // Sign-in and sign-out send only small browser forms or JSON bodies.
-  app.post("/api/auth/*", bodyLimit({ maxSize: 64 * 1024 }));
-  app.on(["GET", "POST"], "/api/auth/*", (c) => {
-    if (!AUTH_ROUTES.has(`${c.req.method} ${c.req.path}`)) {
-      return c.json({ error: { code: "not_found", message: "Not found" } }, 404);
-    }
-    // Replace any client-supplied value with the address the app trusts.
-    const headers = new Headers(c.req.raw.headers);
-    headers.set(CLIENT_IP_HEADER, clientIp(c) ?? "unknown");
-    const body = c.req.method === "GET" ? undefined : c.req.raw.body;
-    return auth().handler(
-      new Request(c.req.raw.url, {
-        method: c.req.method,
-        headers,
-        body,
-        duplex: "half",
-        signal: c.req.raw.signal,
-      } as RequestInit),
-    );
-  });
-
-  // The agents of app sources: their own token, no session, no CSRF check.
-  app.route("/api/agent/v1", agentRoutes());
+  app.route("/", signInRoutes());
 
   const api = new Hono<AppEnv>();
   // API responses can carry private content.

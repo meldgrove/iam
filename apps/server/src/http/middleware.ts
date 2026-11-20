@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { Context, Env, MiddlewareHandler } from "hono";
 import type { z } from "zod";
+import { ROLE_RANK } from "@iam/shared/labels";
 import { config } from "../config";
-import { getDb } from "../db/client";
-import { resolvePrincipal } from "../auth/resolve";
-import type { UserPrincipal } from "../auth/principal";
+import type { Role, User } from "../db/schema";
+import { currentSession } from "../auth/session";
 import { logger } from "../logger";
 import type { AppEnv } from "./env";
 import { AppError, badRequest, parseWith, unauthorized } from "./errors";
@@ -17,6 +17,7 @@ export const requestId: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+/** Logs each request by its route pattern: paths and queries can carry names and email addresses. */
 export const requestLog: MiddlewareHandler<AppEnv> = async (c, next) => {
   const started = performance.now();
   await next();
@@ -34,8 +35,13 @@ export const requestLog: MiddlewareHandler<AppEnv> = async (c, next) => {
   );
 };
 
+/** Tests only: replaces how a request finds its signed-in user. */
+export const authentication: { resolve: (c: Context<AppEnv>) => Promise<User | null> } = {
+  resolve: async (c) => (await currentSession(c))?.user ?? null,
+};
+
 export const authenticate: MiddlewareHandler<AppEnv> = async (c, next) => {
-  c.set("principal", await resolvePrincipal(getDb(), c.req.raw.headers));
+  c.set("user", await authentication.resolve(c));
   await next();
 };
 
@@ -43,8 +49,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /**
  * Cross-site request protection for the browser: changes need an Origin of
- * the application itself. Agents use their own routes (/api/agent) with
- * tokens and never reach this.
+ * the application itself.
  */
 export const sameOrigin: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (SAFE_METHODS.has(c.req.method)) return next();
@@ -56,18 +61,25 @@ export const sameOrigin: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
-/** An admin signed in through the web app (the only people who sign in); 401 otherwise. */
-export function requireAdmin(c: Context<AppEnv>): UserPrincipal {
-  const principal = c.get("principal");
-  if (!principal || !principal.isAdmin) throw unauthorized();
-  return principal;
+/** Whether the user's role is at least `role`. */
+export function hasRole(user: Pick<User, "role" | "isActive"> | null, role: Role): boolean {
+  return Boolean(user && user.isActive && (ROLE_RANK[user.role] ?? 0) >= ROLE_RANK[role]);
 }
 
-/** The JSON body validated with a shared schema. */
-export async function jsonBody<T extends z.ZodType, E extends Env>(
-  c: Context<E>,
-  schema: T,
-): Promise<z.infer<T>> {
+/**
+ * The signed-in user with at least `role`: 401 without a session, 403 with
+ * a lower role. Viewers read; approvers manage people, workflows and tasks;
+ * admins also manage policy, connections, users and settings.
+ */
+export function requireRole(c: Context<AppEnv>, role: Role): User {
+  const user = c.get("user");
+  if (!user) throw unauthorized();
+  if (!hasRole(user, role)) throw new AppError(403, "forbidden", "Your role does not allow this.");
+  return user;
+}
+
+/** The JSON body validated with a schema. */
+export async function jsonBody<T extends z.ZodType, E extends Env>(c: Context<E>, schema: T): Promise<z.infer<T>> {
   let body: unknown;
   try {
     body = await c.req.json();
@@ -81,11 +93,9 @@ export function queryOf<T extends z.ZodType, E extends Env>(c: Context<E>, schem
   return parseWith(schema, c.req.query());
 }
 
-/** A route parameter that must be a UUID (404 otherwise, like an unknown id). */
-export function idParam<E extends Env>(c: Context<E>, name = "id"): string {
+/** A route parameter that must be a positive integer ID (404 otherwise, like an unknown one). */
+export function idParam<E extends Env>(c: Context<E>, name = "id"): number {
   const value = c.req.param(name) ?? "";
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
-    throw new AppError(404, "not_found", "Not found");
-  }
-  return value.toLowerCase();
+  if (!/^[1-9][0-9]{0,15}$/.test(value)) throw new AppError(404, "not_found", "Not found");
+  return Number(value);
 }
