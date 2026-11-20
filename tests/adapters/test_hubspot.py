@@ -6,6 +6,8 @@ import pytest
 from iam.adapters.base import AccountSpec, AdapterError, TransientError
 from iam.adapters.hubspot import USERS_PATH, HubSpotAdapter
 
+from .rehearse import rehearse
+
 TOKEN = "hubspot-test-token-value"
 
 
@@ -248,3 +250,43 @@ def test_a_listing_with_entries_that_are_no_objects_is_an_error(mock_transport):
         list(adapter(mock_transport(handler)).list_accounts())
     with pytest.raises(AdapterError, match="unexpected"):
         adapter(mock_transport(handler)).list_groups()
+
+
+# -- rehearsals predict the job ------------------------------------------------
+
+
+def test_a_rehearsal_of_offboarding_says_the_user_is_deleted(mock_transport):
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=hs_user(primary="t1"))
+        return httpx.Response(204)
+
+    transport = mock_transport(handler)
+    hubspot = adapter(transport)
+    plan = rehearse(hubspot, "disable_account", spec(), external_id="11")
+    assert plan.change == "delete"
+    assert {r.method for r in transport.requests} == {"GET"}
+    assert hubspot.disable_account(spec(), external_id="11", managed_groups=set()).changed
+    assert transport.requests[-1].method == "DELETE"
+
+
+def test_a_rehearsal_refuses_to_reactivate_a_deactivated_user(mock_transport):
+    transport = mock_transport(lambda request: httpx.Response(200, json=hs_user(deactivated=True)))
+    hubspot = adapter(transport)
+    plan = rehearse(hubspot, "ensure_account", spec(), external_id="11")
+    assert plan.change == "reactivate"
+    assert plan.refusal.startswith("HubSpot cannot reactivate a user through its API.")
+    with pytest.raises(AdapterError) as exc:
+        hubspot.ensure_account(spec(), external_id="11", groups=set(), managed_groups=set())
+    assert str(exc.value) == plan.refusal
+    assert {r.method for r in transport.requests} == {"GET"}
+
+
+def test_a_rehearsal_refuses_a_create_without_a_work_email(mock_transport):
+    transport = mock_transport(lambda request: httpx.Response(200, json={"results": []}))
+    hubspot = adapter(transport)
+    plan = rehearse(hubspot, "ensure_account", spec(email=""))
+    assert (plan.change, plan.refusal) == ("create", "HubSpot accounts need a work email.")
+    with pytest.raises(AdapterError) as exc:
+        hubspot.ensure_account(spec(email=""), groups=set(), managed_groups=set())
+    assert str(exc.value) == plan.refusal

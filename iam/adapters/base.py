@@ -8,7 +8,11 @@ Three kinds exist:
 
 - provisioning: accounts and groups in an app (Keycloak, Google Workspace, ...).
   Implement the primitives below; `ensure_account` and `disable_account` combine
-  them and rarely need overriding.
+  them and rarely need overriding. What they do to an account is decided once,
+  from reads alone, in `plan_ensure`, `plan_disable` and `plan_groups`: a job
+  follows that plan, and read-only mode rehearses the job by describing it
+  (`plan`). An adapter whose app does more or refuses something refines the
+  plan there, so the rehearsal says what the job will do.
 - hr_source: imports people (Personio). Implement `list_people`.
 - email: sends notifications and sign-in details (SMTP). Implement `send`.
 
@@ -166,6 +170,27 @@ class DisableResult:
     # Why the groups were left unfinished. The account is disabled anyway: a
     # group never holds up offboarding.
     group_error: Exception | None = None
+
+
+@dataclass
+class AccountPlan:
+    """What a job does at one account, decided from reads alone. The job
+    carries it out; a rehearsal in read-only mode describes it."""
+
+    # ensure_account: create, reactivate or keep. disable_account: disable,
+    # delete (the app deletes users it disables), already disabled, or no
+    # account.
+    change: str
+    # More the job changes at the account, in words ("update the name").
+    also: list[str] = field(default_factory=list)
+    # Why the job stops at the account step, as the message it fails with.
+    # Nothing at the account changes, except that disabling removes the
+    # groups first.
+    refusal: str = ""
+    # The managed groups the job adds and removes; None when it leaves the
+    # groups alone. Only `plan` fills them in.
+    groups_to_add: list[str] | None = None
+    groups_to_remove: list[str] | None = None
 
 
 @dataclass
@@ -402,6 +427,10 @@ class Adapter:
     def list_accounts(self) -> Iterable[ExternalAccount]:
         return []
 
+    def new_account_groups(self) -> set[str]:
+        """The groups the app itself gives an account it creates."""
+        return set()
+
     def hands_out_sign_in(self) -> bool:
         """Whether creating an account arranges its first sign-in, such as an
         initial password or a setup email. A worker that stops between the
@@ -417,6 +446,69 @@ class Adapter:
         if groups:
             lines.append(f"{self.group_label}: " + ", ".join(groups) + ".")
         return "\n".join(lines)
+
+    # -- provisioning plans -----------------------------------------------------
+    # Reads only. A job and its rehearsal both follow them; read-only mode
+    # lets `plan` through, which runs the others.
+
+    def plan_ensure(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        """The account step of ensure_account for the account find_account
+        found (None: no account)."""
+        if account is None:
+            return AccountPlan("create")
+        return AccountPlan("keep" if account.active else "reactivate")
+
+    def plan_disable(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        """The account step of disable_account for the account found."""
+        if account is None:
+            return AccountPlan("no account")
+        return AccountPlan("disable" if account.active else "already disabled")
+
+    def changes_groups(self, action: str) -> bool:
+        """Whether a job with this action changes the account's groups."""
+        if not self.supports_groups:
+            return False
+        return action != "disable_account" or self.remove_groups_on_disable
+
+    def plan_groups(
+        self, account: ExternalAccount | None, wanted: set[str], managed_groups: set[str]
+    ) -> tuple[set[str], list[str], list[str]]:
+        """The account's groups now, and the groups to add and remove so it
+        is in exactly the wanted managed groups. Groups the app does not
+        manage stay. For an account not yet created (None): the groups a new
+        account gets."""
+        current = self.account_groups(account) if account is not None else self.new_account_groups()
+        return current, sorted(wanted - current), sorted((current & managed_groups) - wanted)
+
+    def plan(
+        self,
+        action: str,
+        spec: AccountSpec,
+        *,
+        found: ExternalAccount | None,
+        groups: set[str],
+        managed_groups: set[str],
+    ) -> AccountPlan:
+        """What ensure_account or disable_account (`action`) would do with the
+        account found: the plan a rehearsal describes."""
+        disabling = action == "disable_account"
+        plan = self.plan_disable(spec, found) if disabling else self.plan_ensure(spec, found)
+        # A refused ensure changes nothing; a refused disable removes the
+        # groups first.
+        if (plan.refusal and not disabling) or (disabling and found is None):
+            return plan
+        if not self.changes_groups(action):
+            return plan
+        wanted = set() if disabling else groups
+        try:
+            _, plan.groups_to_add, plan.groups_to_remove = self.plan_groups(
+                found, wanted, managed_groups
+            )
+        except Exception:
+            # The job stops at the refusal whether or not it reads the groups.
+            if not plan.refusal:
+                raise
+        return plan
 
     # -- provisioning operations ----------------------------------------------
 
@@ -435,22 +527,25 @@ class Adapter:
         `found` is the result of a `find_account` the caller already checked;
         the operation then changes that account, not one it looks up again."""
         account = self.find_account(spec, external_id) if found is LOOK_UP else found
-        if account is None:
+        plan = self.plan_ensure(spec, account)
+        if plan.refusal:
+            raise AdapterError(plan.refusal)
+        if plan.change == "create":
             result = self.create_account(spec)
             account = result.account
         else:
             result = EnsureResult(account=account)
-            if not account.active:
+            if plan.change == "reactivate":
                 account = self.set_active(account, True)
                 result.account = account
                 result.reactivated = True
-        if self.supports_groups:
+        if self.changes_groups("ensure_account"):
             try:
-                current = self.account_groups(account)
-                for group_id in sorted(groups - current):
+                current, add, remove = self.plan_groups(account, groups, managed_groups)
+                for group_id in add:
                     self.add_to_group(account, group_id)
                     result.groups_added.append(group_id)
-                for group_id in sorted((current & managed_groups) - groups):
+                for group_id in remove:
                     self.remove_from_group(account, group_id)
                     result.groups_removed.append(group_id)
             except Exception as exc:  # noqa: BLE001 - the engine reports it
@@ -469,13 +564,14 @@ class Adapter:
         found: ExternalAccount | None | object = LOOK_UP,
     ) -> DisableResult:
         account = self.find_account(spec, external_id) if found is LOOK_UP else found
+        plan = self.plan_disable(spec, account)
         if account is None:
             return DisableResult(account=None, notes=["No account found; nothing to disable."])
         result = DisableResult(account=account)
-        if self.supports_groups and self.remove_groups_on_disable:
+        if self.changes_groups("disable_account"):
             try:
-                current = self.account_groups(account)
-                for group_id in sorted(current & managed_groups):
+                current, _, remove = self.plan_groups(account, set(), managed_groups)
+                for group_id in remove:
                     self.remove_from_group(account, group_id)
                     result.groups_removed.append(group_id)
             except Exception as exc:  # noqa: BLE001 - the engine reports it
@@ -483,7 +579,9 @@ class Adapter:
                 account.groups = None
             else:
                 account.groups = frozenset(current - set(result.groups_removed))
-        if account.active:
+        if plan.refusal:
+            raise AdapterError(plan.refusal)
+        if plan.change in ("disable", "delete"):
             result.account = self.set_active(account, False)
             result.changed = True
         return result
@@ -522,6 +620,7 @@ class ReadOnlyAdapter:
             "can_read_accounts",
             "find_account",
             "account_groups",
+            "plan",
             "list_people",
             "skipped",
             "manual_instructions",

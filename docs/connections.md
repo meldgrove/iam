@@ -148,6 +148,9 @@ own client (docs/authentication.md).
   user exists. The note says where to send the email by hand.
 - Existing users keep their first and last name in sync. Username and email are
   never changed by the app; a differing email adds a note.
+- Keycloak puts a new user in the realm's default groups. The app then
+  removes the managed ones the person should not have, and a rehearsal reads
+  the default groups to say so.
 - Disabling removes the managed group memberships, turns the user off and, if
   set, ends its sessions.
 - Account comparisons skip service-account users.
@@ -331,8 +334,10 @@ organization UUID.
 - Lookups page through all users of the organization, by work email, then by
   login name. Several matches stop the job, and so does a user found by login
   name whose email differs from the work email.
-- A locked user counts as not active; activating it fails with a note that it
-  may be locked.
+- A locked user counts as not active. The app does not reactivate it: the
+  job fails and nothing is changed until someone unlocks it in Relution.
+  Disabling deactivates a locked user that is still activated, so unlocking
+  it later does not let the person in.
 - After every change the app reads the user or its memberships again and fails
   the job if Relution does not confirm the change.
 

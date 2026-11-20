@@ -19,6 +19,7 @@ from django.conf import settings
 
 from .base import (
     SYNC_INTERVAL_FIELD,
+    AccountPlan,
     AccountSpec,
     Adapter,
     AdapterError,
@@ -555,7 +556,7 @@ class KeycloakAdapter(Adapter):
         user = {key: value for key, value in user.items() if key != "access"}
         user["enabled"] = active
         self._request("PUT", self._user_path(account.external_id), what, json=user)
-        if not active and self.setting("logout_on_disable"):
+        if not active and self._ends_sessions():
             self._logout(account.external_id)
         updated = self._remember(user)
         updated.groups = account.groups
@@ -566,11 +567,32 @@ class KeycloakAdapter(Adapter):
 
     def disable_account(self, spec: AccountSpec, **kwargs):
         result = super().disable_account(spec, **kwargs)
-        if result.account is not None and not result.changed and self.setting("logout_on_disable"):
+        if result.account is not None and not result.changed and self._ends_sessions():
             # The user was disabled already, maybe by an earlier run whose
             # logout failed: end the sessions again.
             self._logout(result.account.external_id)
         return result
+
+    def plan_ensure(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_ensure(spec, account)
+        if account is not None and self._names_to_update(account.external_id, spec):
+            plan.also.append("update the name")
+        return plan
+
+    def plan_disable(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_disable(spec, account)
+        if account is not None and self._ends_sessions():
+            plan.also.append("end the user's sessions")
+        return plan
+
+    def _ends_sessions(self) -> bool:
+        """Whether disabling, or finding the user disabled already, ends its sessions."""
+        return bool(self.setting("logout_on_disable"))
+
+    def new_account_groups(self) -> set[str]:
+        """Keycloak puts a new user in the realm's default groups."""
+        groups = self._get_list(self._admin_path("default-groups"), "read the default groups")
+        return {str(group["id"]) for group in groups if group.get("id")}
 
     def account_groups(self, account: ExternalAccount) -> set[str]:
         if account.groups is not None:
@@ -626,8 +648,8 @@ class KeycloakAdapter(Adapter):
         user = self._users.get(result.account.external_id)
         if user is None:
             return
-        wanted = {"firstName": spec.first_name, "lastName": spec.last_name}
-        if any((user.get(key) or "") != value for key, value in wanted.items()):
+        wanted = self._names_to_update(result.account.external_id, spec)
+        if wanted:
             current = self._get_user(result.account.external_id)
             if current is not None:
                 current = {key: value for key, value in current.items() if key != "access"}
@@ -643,6 +665,15 @@ class KeycloakAdapter(Adapter):
             result.notes.append(
                 "The email in Keycloak differs from the work email; the app left it unchanged."
             )
+
+    def _names_to_update(self, user_id: str, spec: AccountSpec) -> dict[str, str]:
+        """The person's first and last name when the user read last has
+        others; empty when they match or the user is unknown."""
+        user = self._users.get(user_id)
+        wanted = {"firstName": spec.first_name, "lastName": spec.last_name}
+        if user is None or all((user.get(key) or "") == value for key, value in wanted.items()):
+            return {}
+        return wanted
 
     def list_accounts(self) -> Iterable[ExternalAccount]:
         for user in self._pages(

@@ -36,6 +36,7 @@ import httpx
 
 from .base import (
     SYNC_INTERVAL_FIELD,
+    AccountPlan,
     AccountSpec,
     Adapter,
     AdapterError,
@@ -56,6 +57,11 @@ MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 SENSITIVE_KEY_PARTS = ("password", "credential", "secret", "token")
 INACTIVE_STATES = {"disabled", "inactive", "suspended", "archived"}
 LOCAL_HOSTS = {"localhost", "127.0.0.1"}
+NEEDS_EMAIL = "A Relution account needs the person's work email."
+LOCKED = (
+    "The Relution user is locked. Nothing was changed. Unlock it in Relution, then run the "
+    "job again."
+)
 
 
 def _flag(value) -> bool:
@@ -171,8 +177,10 @@ class RelutionAdapter(Adapter):
 
     def __init__(self, config: dict, **kwargs):
         super().__init__(config, **kwargs)
-        # Whether each user read so far is activated, even if locked.
+        # Whether each user read so far is activated (even if locked), and
+        # whether it is locked.
         self._activated: dict[str, bool] = {}
+        self._locked: dict[str, bool] = {}
 
     # -- HTTP ------------------------------------------------------------------
 
@@ -280,6 +288,7 @@ class RelutionAdapter(Adapter):
 
     def _to_account(self, user: dict) -> ExternalAccount:
         self._activated[_entity_id(user)] = can_sign_in_later(user)
+        self._locked[_entity_id(user)] = user.get("locked") is True
         return ExternalAccount(
             external_id=_entity_id(user),
             username=str(user.get("name") or ""),
@@ -328,7 +337,7 @@ class RelutionAdapter(Adapter):
     def create_account(self, spec: AccountSpec) -> EnsureResult:
         email = _normalize(spec.email)
         if not email:
-            raise AdapterError("A Relution account needs the person's work email.")
+            raise AdapterError(NEEDS_EMAIL)
         payload = {
             "organizationUuid": self.organization_uuid,
             "name": email,
@@ -391,14 +400,22 @@ class RelutionAdapter(Adapter):
         updated.groups = account.groups
         return updated
 
-    def disable_account(self, spec: AccountSpec, **kwargs):
-        result = super().disable_account(spec, **kwargs)
-        account = result.account
-        if account is not None and not result.changed and self._activated.get(account.external_id):
-            # Locked users count as inactive but stay activated.
-            result.account = self.set_active(account, False)
-            result.changed = True
-        return result
+    def plan_ensure(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_ensure(spec, account)
+        if plan.change == "create" and not _normalize(spec.email):
+            plan.refusal = NEEDS_EMAIL
+        elif plan.change == "reactivate" and self._locked.get(account.external_id):
+            # Activating does not unlock: a person decides why it is locked.
+            plan.refusal = LOCKED
+        return plan
+
+    def plan_disable(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_disable(spec, account)
+        if plan.change == "already disabled" and self._activated.get(account.external_id):
+            # A locked user counts as inactive but stays activated: unlocking
+            # it would let the person in again.
+            plan.change = "disable"
+        return plan
 
     # -- groups ----------------------------------------------------------------
 

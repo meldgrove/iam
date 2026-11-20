@@ -45,7 +45,9 @@ explains how the pieces work together.
   every job. Not the same as a read-only connection, whose changes become
   manual tasks.
 - **Rehearsal**: a job run in read-only mode. It reads the account and its
-  groups and records what the job would change, without changing it.
+  groups and records what the job would change, without changing it. The
+  job and its rehearsal follow the same plan, so where the job would fail,
+  the rehearsal fails too.
 - **Sync run**: a read from a connection: group import, account comparison
   or people import. Never changes the connected app.
 - **Drift**: differences an account comparison finds between desired access

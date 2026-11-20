@@ -6,6 +6,8 @@ import pytest
 from iam.adapters.base import AccountSpec, AdapterError, TransientError
 from iam.adapters.scim import ScimAdapter
 
+from .rehearse import rehearse
+
 BASE = "https://app.example.invalid/scim/v2"
 TOKEN = "scim-test-token-value"
 
@@ -435,3 +437,35 @@ def test_a_user_name_match_with_the_persons_email_or_none_is_theirs(mock_transpo
 
         found = adapter(mock_transport(handler), user_name_source="username").find_account(spec())
         assert found.external_id == resource["id"]
+
+
+# -- rehearsals predict the job ------------------------------------------------
+
+
+@pytest.mark.parametrize(("mode", "change"), [("delete", "delete"), ("active_false", "disable")])
+def test_a_rehearsal_of_offboarding_says_whether_the_user_is_deleted(mock_transport, mode, change):
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=user("u1", groups=[]))
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(200, json=user("u1", active=False, groups=[]))
+
+    transport = mock_transport(handler)
+    scim = adapter(transport, deactivate_mode=mode)
+    plan = rehearse(scim, "disable_account", spec(), external_id="u1")
+    assert plan.change == change
+    assert {r.method for r in transport.requests} == {"GET"}
+    scim.disable_account(spec(), external_id="u1", managed_groups=set())
+    assert transport.requests[-1].method == ("DELETE" if mode == "delete" else "PATCH")
+
+
+def test_a_rehearsal_refuses_a_create_without_a_user_name(mock_transport):
+    transport = mock_transport(lambda request: httpx.Response(200, json=listing()))
+    scim = adapter(transport)
+    nameless = spec(username="", email="")
+    plan = rehearse(scim, "ensure_account", nameless)
+    assert (plan.change, plan.refusal) == ("create", "SCIM accounts need a work email or username.")
+    with pytest.raises(AdapterError) as exc:
+        scim.ensure_account(nameless, groups=set(), managed_groups=set())
+    assert str(exc.value) == plan.refusal

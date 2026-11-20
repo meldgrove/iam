@@ -11,6 +11,7 @@ import httpx
 
 from .base import (
     SYNC_INTERVAL_FIELD,
+    AccountPlan,
     AccountSpec,
     Adapter,
     AdapterError,
@@ -24,6 +25,7 @@ from .base import (
 
 USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
 PATCH_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+NEEDS_USER_NAME = "SCIM accounts need a work email or username."
 PAGE_SIZE = 100
 MAX_PAGES = 1000
 # Answers of servers that do not support a filter or a PATCH form.
@@ -285,7 +287,7 @@ class ScimAdapter(Adapter):
     def create_account(self, spec: AccountSpec) -> EnsureResult:
         user_name = self._user_name(spec)
         if not user_name:
-            raise AdapterError("SCIM accounts need a work email or username.")
+            raise AdapterError(NEEDS_USER_NAME)
         body = {
             "schemas": [USER_SCHEMA],
             "userName": user_name,
@@ -312,9 +314,24 @@ class ScimAdapter(Adapter):
             return result
         return EnsureResult(account=self._account(self._json(response)), created=True)
 
+    def plan_ensure(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_ensure(spec, account)
+        if plan.change == "create" and not self._user_name(spec):
+            plan.refusal = NEEDS_USER_NAME
+        return plan
+
+    def plan_disable(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_disable(spec, account)
+        if plan.change == "disable" and self._deletes_users():
+            plan.change = "delete"
+        return plan
+
+    def _deletes_users(self) -> bool:
+        return self.setting("deactivate_mode") == "delete"
+
     def set_active(self, account: ExternalAccount, active: bool) -> ExternalAccount:
         path = f"/Users/{quote(account.external_id, safe='')}"
-        if not active and self.setting("deactivate_mode") == "delete":
+        if not active and self._deletes_users():
             self._send("DELETE", path, "delete a user", allow=(404,))
             return replace(account, active=False, groups=frozenset())
         operations = [

@@ -154,8 +154,10 @@ after sign-in shows that the mode is on.
    go person by person.
 5. Compare accounts on each connection and review the drift. Jobs with the
    status "Checked only (read-only mode)" say what the app would do to each
-   account: create, reactivate or disable it, and which groups it would add
-   or remove. Fix the policy or the data and rehearse again with an access
+   account: create, reactivate, disable or delete it, what else it would
+   change there (such as the name or the sessions), and which groups it
+   would add or remove. A job the connected app would refuse fails with the
+   reason, as it would for real. Fix the policy or the data and rehearse again with an access
    update.
 
 To leave read-only mode:

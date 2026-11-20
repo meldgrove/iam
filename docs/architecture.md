@@ -128,10 +128,18 @@ in those apps:
 - **No email** leaves the app: no initial passwords, no task notifications.
 - **Jobs are rehearsed.** The worker finds the account and its groups as
   the job would, checks that the account is the person's, and records what
-  it would change (create, reactivate or disable the account; the groups
-  to add and remove). At connections without automation it records the
-  steps a person would get, without a task. The job ends as "Checked only
-  (read-only mode)". A read that fails is a failed job, as always.
+  it would change (create, reactivate, disable or delete the account; what
+  else the app changes there, such as the name or the sessions; the groups
+  to add and remove). The adapter decides that once, from reads alone, in
+  its plan (`plan_ensure`, `plan_disable`, `plan_groups` in
+  `iam/adapters/base.py`); a real job follows the same plan, so the
+  rehearsal says what the job will do. Where the job would fail (a locked
+  Relution user, a Google super admin, a HubSpot user to reactivate), the
+  rehearsal fails with the same message, and names the groups a disable
+  would remove before it stops. At connections without automation
+  it records the steps a person would get, without a task. The job ends as
+  "Checked only (read-only mode)". A read that fails is a failed job, as
+  always.
 - **Workflows complete** once their jobs are rehearsed, so people become
   active or offboarded in this app. The schedule, imports and account
   comparisons run as usual.

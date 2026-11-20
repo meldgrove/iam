@@ -11,6 +11,8 @@ from iam.adapters.base import (
 )
 from iam.adapters.google_workspace import GoogleWorkspaceAdapter
 
+from .rehearse import rehearse
+
 PREFIX = "/admin/directory/v1"
 
 
@@ -352,3 +354,103 @@ def test_google_hands_out_sign_in_unless_the_password_is_not_delivered(mock_tran
     transport = mock_transport(lambda request: httpx.Response(200, json={}))
     assert make_adapter(transport).hands_out_sign_in()
     assert not make_adapter(transport, deliver_initial_password=False).hands_out_sign_in()
+
+
+# -- rehearsals predict the job ------------------------------------------------
+
+
+class Watched(Directory):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.methods = []
+
+    def __call__(self, request):
+        self.methods.append(request.method)
+        return super().__call__(request)
+
+
+@pytest.mark.parametrize(
+    ("directory", "action", "person", "refusal"),
+    [
+        (
+            Watched([user(admin=True)]),
+            "disable_account",
+            spec(),
+            "Google Workspace super admins are not suspended automatically.",
+        ),
+        (
+            Watched([user(suspended=True, admin=True)]),
+            "ensure_account",
+            spec(),
+            "Suspended Google Workspace administrator accounts are not reactivated "
+            "automatically. Reactivate the account in the Google Admin console.",
+        ),
+        (
+            Watched(),
+            "ensure_account",
+            spec(email="ada@elsewhere.example.invalid"),
+            "The work email must be in the domain example.invalid.",
+        ),
+    ],
+)
+def test_a_rehearsal_fails_where_the_job_fails(mock_transport, directory, action, person, refusal):
+    google = make_adapter(mock_transport(directory))
+    plan = rehearse(google, action, person, groups={"g1"}, managed_groups={"g1"})
+    assert plan.refusal == refusal
+    assert set(directory.methods) <= {"GET"}
+    with pytest.raises(AdapterError) as exc:
+        if action == "disable_account":
+            google.disable_account(person, managed_groups={"g1"})
+        else:
+            google.ensure_account(person, groups={"g1"}, managed_groups={"g1"})
+    assert str(exc.value) == refusal
+    assert "PUT" not in directory.methods
+
+
+class WatchedAlias(Watched, AliasDirectory):
+    pass
+
+
+def test_a_rehearsal_refuses_to_create_an_address_that_is_an_alias(mock_transport):
+    directory = WatchedAlias(users=[user("grace", "grace@example.invalid")])
+    google = make_adapter(mock_transport(directory))
+    plan = rehearse(google, "ensure_account", spec(), groups={"g1"}, managed_groups={"g1"})
+    assert plan.change == "create"
+    assert plan.refusal.startswith("ada@example.invalid is an alias of another Google Workspace")
+    with pytest.raises(AdapterError) as exc:
+        google.ensure_account(spec(), groups={"g1"}, managed_groups={"g1"})
+    assert str(exc.value) == plan.refusal
+    assert set(directory.methods) == {"GET"}
+
+
+def test_a_rehearsal_of_offboarding_a_super_admin_lists_the_groups_removed_first(
+    mock_transport,
+):
+    """The job removes the managed groups, then stops at the suspension."""
+    directory = Watched([user(admin=True)], memberships={"g1": {"u1"}})
+    google = make_adapter(mock_transport(directory))
+    plan = rehearse(google, "disable_account", spec(), managed_groups={"g1"})
+    assert plan.refusal == "Google Workspace super admins are not suspended automatically."
+    assert plan.groups_to_remove == ["g1"]
+    assert set(directory.methods) == {"GET"}
+    with pytest.raises(AdapterError):
+        google.disable_account(spec(), managed_groups={"g1"})
+    assert directory.memberships["g1"] == set()
+
+
+def test_a_rehearsal_keeps_the_refusal_when_the_groups_are_unreadable(mock_transport):
+    """The job catches the group error and stops at the suspension."""
+    directory = Watched([user(admin=True)], memberships={"g1": {"u1"}})
+
+    def handler(request):
+        if request.url.path == f"{PREFIX}/groups":
+            return httpx.Response(404, json={"error": {"message": "Domain not found."}})
+        return directory(request)
+
+    google = make_adapter(mock_transport(handler))
+    plan = rehearse(google, "disable_account", spec(), managed_groups={"g1"})
+    assert plan.refusal == "Google Workspace super admins are not suspended automatically."
+    assert plan.groups_to_remove is None
+    with pytest.raises(AdapterError) as exc:
+        google.disable_account(spec(), managed_groups={"g1"})
+    assert str(exc.value) == plan.refusal

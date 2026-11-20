@@ -6,6 +6,8 @@ import pytest
 from iam.adapters.base import AccountSpec, AdapterError, ConfigurationError, TransientError
 from iam.adapters.relution import USERS_PATH, RelutionAdapter, update_payload
 
+from .rehearse import rehearse
+
 ORG = "org-1"
 CONFIG = {
     "base_url": "https://relution.example.invalid",
@@ -329,3 +331,59 @@ def test_a_username_match_without_an_email_is_theirs(fake, adapter):
     fake.add_user("u-1", "")
     fake.users["u-1"]["name"] = "ada"
     assert adapter.find_account(SPEC).external_id == "u-1"
+
+
+# -- rehearsals predict the job ------------------------------------------------
+
+
+def test_a_rehearsal_deactivates_a_locked_user_as_offboarding_does(fake, adapter):
+    """A locked user counts as inactive but stays activated: unlocking it
+    would let the person in again, so offboarding deactivates it."""
+    fake.add_user("u-1", "ada@example.invalid", locked=True)
+    plan = rehearse(adapter, "disable_account", SPEC, external_id="u-1")
+    assert (plan.change, plan.refusal) == ("disable", "")
+    assert fake.writes == []
+    result = adapter.disable_account(SPEC, external_id="u-1", managed_groups=set())
+    assert result.changed
+    assert fake.users["u-1"]["activated"] is False
+
+
+@pytest.mark.parametrize("activated", [True, False])
+def test_a_locked_user_is_not_reactivated(fake, adapter, activated):
+    fake.add_user("u-1", "ada@example.invalid", activated=activated, locked=True)
+    plan = rehearse(adapter, "ensure_account", SPEC, external_id="u-1", groups={"g-1"})
+    assert plan.refusal == (
+        "The Relution user is locked. Nothing was changed. Unlock it in Relution, then "
+        "run the job again."
+    )
+    with pytest.raises(AdapterError) as exc:
+        adapter.ensure_account(SPEC, external_id="u-1", groups={"g-1"}, managed_groups={"g-1"})
+    assert str(exc.value) == plan.refusal
+    assert fake.writes == []
+
+
+def test_a_rehearsal_refuses_a_create_without_a_work_email(fake, adapter):
+    spec = AccountSpec(first_name="Ada", last_name="Lovelace", username="ada")
+    plan = rehearse(adapter, "ensure_account", spec)
+    assert (plan.change, plan.refusal) == (
+        "create",
+        "A Relution account needs the person's work email.",
+    )
+    with pytest.raises(AdapterError) as exc:
+        adapter.ensure_account(spec, groups=set(), managed_groups=set())
+    assert str(exc.value) == plan.refusal
+
+
+def test_a_rehearsal_lists_the_groups_the_job_changes(fake, adapter):
+    fake.add_user("u-1", "ada@example.invalid", activated=False)
+    fake.members["u-1"] = {"g-2", "unmanaged"}
+    plan = rehearse(adapter, "ensure_account", SPEC, groups={"g-1"}, managed_groups={"g-1", "g-2"})
+    assert (plan.change, plan.groups_to_add, plan.groups_to_remove) == (
+        "reactivate",
+        ["g-1"],
+        ["g-2"],
+    )
+    assert fake.writes == []
+    result = adapter.ensure_account(SPEC, groups={"g-1"}, managed_groups={"g-1", "g-2"})
+    assert result.reactivated
+    assert (result.groups_added, result.groups_removed) == (["g-1"], ["g-2"])

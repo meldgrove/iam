@@ -23,8 +23,9 @@ and its history says so. Nothing here stores passwords: a new account's
 initial password is emailed once to the personal address and forgotten.
 
 In read-only mode (READ_ONLY=1) the worker rehearses every job instead: it
-reads what the job would change, records that in the result, changes
-nothing and hands nothing to a person, and no email leaves the app.
+reads what the job would change, from the plan the adapter follows when it
+runs the job, records that in the result, changes nothing and hands nothing
+to a person, and no email leaves the app.
 """
 
 from __future__ import annotations
@@ -847,28 +848,44 @@ def _rehearsed(job: Job, plan: dict) -> None:
 
 
 def _rehearse_change(job: Job, connection: Connection, person: Person) -> dict:
-    """What the job's adapter call would do, from reads alone."""
+    """What the job's adapter call would do: the plan the adapter follows
+    when it runs the job, made from reads alone. Where the job would fail,
+    the rehearsal fails with the same message."""
     adapter = connection.build_adapter()
-    _, found = _checked_account(adapter, connection, person, account_spec(person))
-    disabling = job.action == Job.Action.DISABLE_ACCOUNT
-    plan = {}
+    spec = account_spec(person)
+    _, found = _checked_account(adapter, connection, person, spec)
+    plan = adapter.plan(
+        job.action,
+        spec,
+        found=found,
+        groups=set(job.groups),
+        managed_groups=managed_groups(job),
+    )
+    if plan.refusal:
+        removed = _group_names(job, set(plan.groups_to_remove or ()))
+        first = f" The job would remove these groups first: {removed}." if removed else ""
+        raise AdapterError(plan.refusal + first)
+    result = {}
     if found is not None:
-        plan["account"] = found.username or found.email or found.external_id
-    if found is None:
-        plan["would"] = "change nothing: no account found" if disabling else "create the account"
-    elif disabling:
-        plan["would"] = "disable the account" + ("" if found.active else " (already disabled)")
-    else:
-        plan["would"] = "keep the account" if found.active else "reactivate the account"
-    if (disabling and found is None) or not adapter.supports_groups:
-        return plan
-    if disabling and not adapter.remove_groups_on_disable:
-        return plan
-    wanted = set() if disabling else set(job.groups)
-    current = adapter.account_groups(found) if found is not None else set()
-    plan["groups_to_add"] = _group_names(job, wanted - current) or "none"
-    plan["groups_to_remove"] = _group_names(job, (current & managed_groups(job)) - wanted) or "none"
-    return plan
+        result["account"] = found.username or found.email or found.external_id
+    result["would"] = REHEARSED_CHANGES[plan.change]
+    if plan.also:
+        result["also"] = ", ".join(plan.also)
+    if plan.groups_to_add is not None:
+        result["groups_to_add"] = _group_names(job, set(plan.groups_to_add)) or "none"
+        result["groups_to_remove"] = _group_names(job, set(plan.groups_to_remove)) or "none"
+    return result
+
+
+REHEARSED_CHANGES = {
+    "create": "create the account",
+    "reactivate": "reactivate the account",
+    "keep": "keep the account",
+    "disable": "disable the account",
+    "delete": "delete the account",
+    "already disabled": "disable the account (already disabled)",
+    "no account": "change nothing: no account found",
+}
 
 
 def _hand_to_person(job: Job) -> Task | None:

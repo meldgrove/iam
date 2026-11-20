@@ -10,6 +10,7 @@ import httpx
 
 from .base import (
     SYNC_INTERVAL_FIELD,
+    AccountPlan,
     AccountSpec,
     Adapter,
     AdapterError,
@@ -23,6 +24,11 @@ from .base import (
 
 API_URL = "https://api.hubapi.com"
 USERS_PATH = "/settings/users/2026-03"
+NEEDS_EMAIL = "HubSpot accounts need a work email."
+CANNOT_REACTIVATE = (
+    "HubSpot cannot reactivate a user through its API. Reactivate the user in HubSpot, then "
+    "run the job again."
+)
 TEAMS_PATH = f"{USERS_PATH}/teams"
 PAGE_SIZE = 100
 MAX_PAGES = 1000
@@ -229,7 +235,7 @@ class HubSpotAdapter(Adapter):
 
     def create_account(self, spec: AccountSpec) -> EnsureResult:
         if not spec.email:
-            raise AdapterError("HubSpot accounts need a work email.")
+            raise AdapterError(NEEDS_EMAIL)
         body = {
             "email": spec.email,
             "firstName": spec.first_name,
@@ -259,12 +265,24 @@ class HubSpotAdapter(Adapter):
         notes.append("Seats and permission sets are assigned in HubSpot, not by this app.")
         return EnsureResult(account=account, created=True, notes=notes)
 
+    def plan_ensure(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_ensure(spec, account)
+        if plan.change == "create" and not spec.email:
+            plan.refusal = NEEDS_EMAIL
+        elif plan.change == "reactivate":
+            plan.refusal = CANNOT_REACTIVATE
+        return plan
+
+    def plan_disable(self, spec: AccountSpec, account: ExternalAccount | None) -> AccountPlan:
+        plan = super().plan_disable(spec, account)
+        if plan.change == "disable":
+            # See set_active: HubSpot has no deactivation in its API.
+            plan.change = "delete"
+        return plan
+
     def set_active(self, account: ExternalAccount, active: bool) -> ExternalAccount:
         if active:
-            raise AdapterError(
-                "HubSpot cannot reactivate a user through its API. Reactivate the user in "
-                "HubSpot, then run the job again."
-            )
+            raise AdapterError(CANNOT_REACTIVATE)
         # HubSpot has no deactivation in its API: removing the user ends access.
         # Records the user owns stay in HubSpot and keep the user's name.
         self._send(
