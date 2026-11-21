@@ -477,8 +477,8 @@ export abstract class Adapter {
     const status = response.status;
     if (status < 300) return;
     if (status < 400) {
-      // Redirects are never followed (http.ts): the request did not reach the
-      // app's API, so it changed nothing and its answer says nothing.
+      // Redirects are never followed (http.ts), so a redirect is no answer of
+      // the app's API and never confirms that a request worked.
       throw new AdapterError(
         `${this.label} answered with a redirect (${status}) while trying to ${what}. ` +
           "Check the connection's URL.",
