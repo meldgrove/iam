@@ -522,6 +522,24 @@ describe("the SCIM adapter", () => {
     expect(transport.requests.at(-1)!.method).toBe(mode === "delete" ? "DELETE" : "PATCH");
   });
 
+  it("does not take a redirect for an answer", async () => {
+    // A base URL that moved, or a sign-in page in front of the API: no call
+    // reaches SCIM, so nothing connects and nothing counts as disabled.
+    const transport = transportFor(() => answer(302, "", { location: "https://app.example.invalid/login" }));
+    const scim = adapter(transport);
+    const known = externalAccount("u1", { username: "ada@example.invalid", groups: new Set() });
+    await raises(scim.disableAccount(spec(), { managedGroups: new Set(), found: known }), AdapterError);
+    expect((await scim.testConnection()).ok).toBe(false);
+  });
+
+  it("does not take a page that is no user for the user it reads by ID", async () => {
+    // A maintenance or sign-in page answers 200 to every request.
+    const transport = transportFor(() => answer(200, "<html>Back soon</html>"));
+    const scim = adapter(transport);
+    await raises(scim.findAccount(spec(), "u1"), AdapterError);
+    expect(transport.requests.map((request) => request.method)).toEqual(["GET"]);
+  });
+
   it("refuses a create without a user name in a rehearsal", async () => {
     const transport = transportFor(() => json(200, listing()));
     const scim = adapter(transport);
