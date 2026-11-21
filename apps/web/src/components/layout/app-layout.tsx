@@ -3,12 +3,11 @@ import { Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router"
 import { ShieldCheck } from "lucide-react";
 import { AppFrame, type FrameLink, type NavGroup, type SearchResult } from "@meldgrove/ui/app-frame";
 import { Alert, AlertDescription } from "@meldgrove/ui/alert";
-import { Button } from "@meldgrove/ui/button";
+import { useThemePreference } from "@meldgrove/ui/theme";
 import { UpdateButton } from "@meldgrove/ui/updates";
 import { ROLE_LABELS } from "@iam/shared/labels";
 import type { Paged, PersonRow } from "@iam/shared/api/iam";
 import { useMe } from "@/hooks/use-me";
-import { useTheme } from "@/lib/theme";
 import { api } from "@/lib/api";
 import { queryClient } from "@/lib/query";
 import { breadcrumbsFor, navigationFor, PREFERENCES_PATH } from "@/app/navigation";
@@ -55,7 +54,7 @@ export function AppLayout() {
   const router = useRouter();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const record = useRecordName(pathname);
-  const { theme, setTheme } = useTheme();
+  const [theme, setTheme] = useThemePreference();
   const appName = me.organizationName || "Meldgrove IAM";
   useEffect(() => {
     document.title = appName;
@@ -78,7 +77,7 @@ export function AppLayout() {
   const breadcrumbs = breadcrumbsFor(pathname, {
     items: nav.flatMap((group) => group.items),
     record,
-    preferences: "Settings",
+    preferences: "My settings",
   });
 
   const signOut = async () => {
@@ -95,7 +94,8 @@ export function AppLayout() {
         app={{
           name: appName,
           icon: <ShieldCheck />,
-          description: me.version ? `Meldgrove IAM ${me.version}` : "Meldgrove IAM",
+          // The software under the organization's name; the frame shows no version.
+          description: me.organizationName ? "Meldgrove IAM" : undefined,
         }}
         nav={nav}
         pathname={pathname}
@@ -112,17 +112,8 @@ export function AppLayout() {
         onSignOut={() => void signOut()}
         breadcrumbs={breadcrumbs}
         search={{ find: findPeople, allResultsHref: (query) => `/people?q=${encodeURIComponent(query)}` }}
-        headerEnd={
-          <>
-            {me.accountUrl ? (
-              <Button asChild variant="ghost" size="sm">
-                {/* The sign-in provider's account page (Keycloak), where people manage their sign-in. */}
-                <a href={me.accountUrl}>My account</a>
-              </Button>
-            ) : null}
-            {me.updatesButton ? <UpdateButton /> : null}
-          </>
-        }
+        // The sign-in provider's account page is on the person's settings page, not here.
+        headerEnd={me.updatesButton ? <UpdateButton /> : null}
       >
         {me.readOnly ? (
           <div className="mx-auto w-full max-w-7xl px-4 pt-4 md:px-6">

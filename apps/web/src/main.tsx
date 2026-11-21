@@ -5,7 +5,6 @@ import { RouterProvider } from "@tanstack/react-router";
 import { queryClient } from "@/lib/query";
 import { setUnauthorizedHandler } from "@/lib/api";
 import { reportCaughtError, startErrorReporting } from "@/lib/error-reporting";
-import { ThemeProvider } from "@/lib/theme";
 import { router } from "@/router";
 import "./styles.css";
 
@@ -29,10 +28,8 @@ createRoot(document.getElementById("root")!, {
   },
 }).render(
   <StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   </StrictMode>,
 );

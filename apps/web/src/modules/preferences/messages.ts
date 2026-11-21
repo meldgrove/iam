@@ -3,6 +3,9 @@ import { defineMessages } from "@/i18n";
 export const messages = defineMessages({
   en: {
     title: "My settings",
-    description: "Your appearance and keyboard shortcuts in this browser.",
+    description: "Your account, and how this app looks and works in this browser.",
+    account: "Account",
+    accountDescription: "Change your name, password and two-step sign-in at the sign-in provider.",
+    manageAccount: "Manage account",
   },
 });

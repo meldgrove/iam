@@ -1,6 +1,10 @@
 import type { Me } from "@iam/shared/api/iam";
 
-/** `shortcut`: "G then this letter" opens the page (main pages only, each letter once; "o" is the start page). */
+/**
+ * `shortcut`: "G then this letter" opens the page. Only for main pages people
+ * open often, with a letter they can guess, each letter once; none for admin
+ * pages; "o" is the start page.
+ */
 export type NavItem = { label: string; to: string; shortcut?: string; badge?: "tasks" | "jobs" };
 export type NavGroup = { label?: string; items: NavItem[] };
 
@@ -24,7 +28,7 @@ export function navigationFor(me: Pick<Me, "isAdmin">): NavGroup[] {
       label: "Access policy",
       items: [
         { label: "Access profiles", to: "/profiles", shortcut: "a" },
-        { label: "Teams", to: "/teams", shortcut: "e" },
+        { label: "Teams", to: "/teams" },
         { label: "Audit log", to: "/audit" },
       ],
     },
@@ -33,8 +37,8 @@ export function navigationFor(me: Pick<Me, "isAdmin">): NavGroup[] {
     groups.push({
       label: "Admin",
       items: [
-        { label: "Connections", to: "/admin/connections", shortcut: "c" },
-        { label: "Users and roles", to: "/admin/users", shortcut: "u" },
+        { label: "Connections", to: "/admin/connections" },
+        { label: "Users and roles", to: "/admin/users" },
         { label: "Settings", to: "/admin/settings" },
       ],
     });

@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { Toaster } from "@meldgrove/ui/sonner";
 import { Button } from "@meldgrove/ui/button";
 import { EmptyState } from "@meldgrove/ui/states";
+import { useThemePreference } from "@meldgrove/ui/theme";
 import { common } from "@/i18n/common";
 import { useT } from "@/i18n";
 
@@ -25,13 +26,19 @@ function NotFound() {
   );
 }
 
-export const rootRoute = createRootRouteWithContext<RouterContext>()({
-  component: () => (
+/** Every page, signed in or not: the person's appearance (saved in this browser), the toasts. */
+function Root() {
+  useThemePreference();
+  return (
     <>
       <Outlet />
       {/* Above the sticky save bars of forms, so a toast never covers Save. */}
       <Toaster richColors closeButton offset={{ bottom: 80 }} mobileOffset={{ bottom: 80 }} />
     </>
-  ),
+  );
+}
+
+export const rootRoute = createRootRouteWithContext<RouterContext>()({
+  component: Root,
   notFoundComponent: NotFound,
 });
