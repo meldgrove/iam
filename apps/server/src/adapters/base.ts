@@ -475,7 +475,15 @@ export abstract class Adapter {
    */
   raiseForStatus(response: HttpResponse, what: string): void {
     const status = response.status;
-    if (status < 400) return;
+    if (status < 300) return;
+    if (status < 400) {
+      // Redirects are never followed (http.ts), so a redirect is no answer of
+      // the app's API and never confirms that a request worked.
+      throw new AdapterError(
+        `${this.label} answered with a redirect (${status}) while trying to ${what}. ` +
+          "Check the connection's URL.",
+      );
+    }
     if (status === 429 || status >= 500) {
       throw new TransientError(`${this.label} answered ${status} while trying to ${what}.`);
     }

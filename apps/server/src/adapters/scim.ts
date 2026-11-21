@@ -298,7 +298,14 @@ export class ScimAdapter extends Adapter {
       const response = await this.transmit("GET", `/Users/${quote(externalId)}`, "read a user", {
         allow: [404],
       });
-      if (response.status !== 404) return toAccount(jsonObject(response));
+      if (response.status !== 404) {
+        const resource = jsonObject(response);
+        // A page that is no user (maintenance, a sign-in page) must not stand
+        // for the account: the job would then count it as changed.
+        if (!truthy(resource.id))
+          throw new AdapterError(`${this.label} sent an unexpected answer (read a user).`);
+        return toAccount(resource);
+      }
     }
     const userName = this.userName(spec);
     if (userName) {
