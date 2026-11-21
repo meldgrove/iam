@@ -6,3 +6,5 @@ apps/server/drizzle/
 playwright-report/
 test-results/
 *.md
+# The compose file of 0.2 as servers have it.
+tests/upgrade/compose.django.yaml

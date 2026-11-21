@@ -225,12 +225,19 @@ Database migrations run automatically in `migrate`.
 Versions 0.1 and 0.2 of IAM were a Django app; 0.3 is the same app in
 TypeScript (Node.js), with the same database, the same connections and the
 same sign-in client. Its release is marked as needing upgrade steps, so
-automatic updates do not install it.
+automatic updates on Stable do not install it; on Preview, its previews
+install like any other.
+
+The updater installs images, not files: a server it moves to 0.3 (a preview,
+or the update button) keeps the Django `compose.yaml`. The image runs that
+file's commands and health checks too, so the installation works and `.env`
+keeps working. Replace the file afterwards (step 2): only the new one passes
+the settings that 0.3 adds (`APP_URL`, `AUTH_SECRET`, `SESSION_HOURS`).
 
 1. **Back up the database** ([Backups](#backups)) and keep `ENCRYPTION_KEY`.
 2. **Get the new files:** in `/srv/iam`, `git pull` (branch `stable`). The new
-   `compose.yaml` starts the new processes and health checks; the Django
-   one cannot run the new image.
+   `compose.yaml` starts the new processes and health checks, and passes the
+   settings of 0.3.
 3. **`.env` stays as it is.** `compose.yaml` takes `AUTH_SECRET` from
    `DJANGO_SECRET_KEY` and `APP_URL` from `CSRF_TRUSTED_ORIGINS` while those
    are set; rename them when convenient. `ENCRYPTION_KEY` keeps working: the

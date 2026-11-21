@@ -87,7 +87,9 @@ restores `.env` and starts the version before. The channel is chosen in the app.
 `journalctl -u meldgrove-updater-iam` shows each installation.
 
 It installs images, not files: when a release changes `compose.yaml`, its upgrade
-steps say to run `git pull` in `/srv/iam` first.
+steps say to run `git pull` in `/srv/iam`. Each image still starts with the
+`compose.yaml` of the version before (0.3 with the Django one, see
+[Upgrade from the Django version](deployment.md#upgrade-from-the-django-version)).
 
 **Servers set up before the update button** (updater 0.1) keep following the tag in
 `IAM_VERSION`, and the app says that the channel needs the host setup again. As root
