@@ -31,18 +31,18 @@ function urlConnectTimeoutMs(url: string): number | undefined {
  * `prefer`: encrypted, the certificate unchecked (unless sslrootcert names
  * one), as in the Django version. node-postgres alone checks it like
  * `verify-full`, so a server with a certificate of its own would refuse a URL
- * that worked before. `verify-full` checks it either way.
+ * that worked before. `verify-full` checks it either way. Unlike PostgreSQL,
+ * `prefer` never falls back to an unencrypted connection (docs/configuration.md).
  */
 export function withLibpqSslModes(url: string): string {
-  let params: URLSearchParams;
-  try {
-    params = new URL(url).searchParams;
-  } catch {
-    return url;
-  }
+  // The query alone: URLs such as postgresql://iam@/iam?host=… have no host
+  // that URL accepts.
+  const query = url.split("#")[0]!.split("?")[1];
+  if (query === undefined) return url;
+  const params = new URLSearchParams(query);
   if (!["require", "prefer"].includes(params.get("sslmode") ?? "") || params.has("uselibpqcompat"))
     return url;
-  return `${url}${url.includes("?") ? "&" : "?"}uselibpqcompat=true`;
+  return `${url}&uselibpqcompat=true`;
 }
 
 /** How every connection connects: waiting fails instead of hanging, and dead connections are noticed. */

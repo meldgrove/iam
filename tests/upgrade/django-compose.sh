@@ -84,24 +84,26 @@ checked() {
   esac
   test "$(sql "select count(*) from django_session")" = 0
   test "$(sql "select count(*) from drizzle.__drizzle_migrations")" -gt 0
-  # This worker reached the database, and the web app sees it.
+  # This worker reached the database (a beat after it started), and the web
+  # app sees it; the 0.1.0 file checks the worker that way.
+  started=$(docker inspect --format '{{.State.StartedAt}}' "$(compose ps --quiet worker)")
   beat=0
   for _ in $(seq 1 60); do
-    beat=$(sql "select count(*) from iam_workerheartbeat where name = 'worker' and beat_at > '$1'")
+    beat=$(sql "select count(*) from iam_workerheartbeat where name = 'worker' and beat_at > '$started'")
     [ "$beat" = 1 ] && break
     sleep 1
   done
   test "$beat" = 1
   curl -fsS -H "X-Health-Token: $token" "http://127.0.0.1:$port/-/readyz" | grep -q '"worker":"ok"'
+  compose exec -T worker python -c "import os,urllib.request; r=urllib.request.Request('http://web:8000/-/readyz',headers={'X-Health-Token':os.environ['HEALTHCHECK_TOKEN'],'X-Forwarded-Proto':'https'}); urllib.request.urlopen(r,timeout=5)"
 }
 
 install 0.2.0
 django_runs
 django_session 1
 
-started=$(sql "select now()")
 install "${target#*:}"
-checked "$started"
+checked
 echo "The image runs with the compose file of 0.2."
 
 # The deploy script's rollback, after a later failure.
@@ -110,7 +112,6 @@ django_runs
 django_session 2
 echo "0.2.0 runs again on the database."
 
-started=$(sql "select now()")
 install "${target#*:}"
-checked "$started"
+checked
 echo "Installed again after the rollback."

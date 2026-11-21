@@ -12,6 +12,10 @@ describe("withLibpqSslModes", () => {
     expect(withLibpqSslModes(`${URL_BASE}?connect_timeout=5&sslmode=prefer`)).toBe(
       `${URL_BASE}?connect_timeout=5&sslmode=prefer&uselibpqcompat=true`,
     );
+    // The host in the query, which URL does not accept.
+    expect(withLibpqSslModes("postgresql://iam:secret@/iam?host=db.example.invalid&sslmode=require")).toBe(
+      "postgresql://iam:secret@/iam?host=db.example.invalid&sslmode=require&uselibpqcompat=true",
+    );
     // Encrypted, the certificate unchecked.
     const client = new pg.Client({ connectionString: withLibpqSslModes(`${URL_BASE}?sslmode=require`) });
     const { ssl } = (client as unknown as { connectionParameters: { ssl: { rejectUnauthorized?: boolean } } })
@@ -27,6 +31,7 @@ describe("withLibpqSslModes", () => {
       `${URL_BASE}?sslmode=no-verify`,
       `${URL_BASE}?sslmode=require&uselibpqcompat=false`,
       "not a url",
+      "not a url?sslmode=verify-full",
     ]) {
       expect(withLibpqSslModes(url)).toBe(url);
     }
