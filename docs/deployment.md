@@ -230,17 +230,23 @@ install like any other.
 
 The updater installs images, not files: a server it moves to 0.3 (a preview,
 or the update button) keeps the Django `compose.yaml`. The image runs that
-file's commands and health checks too, so the installation works and `.env`
-keeps working. Replace the file afterwards (step 2): only the new one passes
-the settings that 0.3 adds (`APP_URL`, `AUTH_SECRET`, `SESSION_HOURS`).
+file's commands and health checks too, so the installation works with the
+`.env` of 0.2 (step 3). Replace the file afterwards (step 2): only the new
+one passes the settings that 0.3 adds (`APP_URL`, `AUTH_SECRET`,
+`SESSION_HOURS`). When `migrate` refuses the settings, the server goes back
+to 0.2 without changing the database.
 
 1. **Back up the database** ([Backups](#backups)) and keep `ENCRYPTION_KEY`.
 2. **Get the new files:** in `/srv/iam`, `git pull` (branch `stable`). The new
    `compose.yaml` starts the new processes and health checks, and passes the
    settings of 0.3.
-3. **`.env` stays as it is.** `compose.yaml` takes `AUTH_SECRET` from
-   `DJANGO_SECRET_KEY` and `APP_URL` from `CSRF_TRUSTED_ORIGINS` while those
-   are set; rename them when convenient. `ENCRYPTION_KEY` keeps working: the
+3. **`.env` stays as it is.** `AUTH_SECRET` comes from `DJANGO_SECRET_KEY`
+   and `APP_URL` from `CSRF_TRUSTED_ORIGINS` while those are set; rename them
+   when convenient. `CSRF_TRUSTED_ORIGINS` may list origins with a wildcard
+   (`https://*.example.invalid`) besides IAM's own; when it names several
+   addresses, set `APP_URL` before the upgrade (with the new `compose.yaml`).
+   `DATABASE_URL` keeps its meaning, also `sslmode=require` with a server's
+   own certificate. `ENCRYPTION_KEY` keeps working: the
    saved connection secrets stay readable. `ALLOWED_HOSTS`,
    `TRUST_PROXY_HEADERS`, `FORWARDED_ALLOW_IPS`, `SECURE_SSL_REDIRECT`,
    `WEB_WORKERS`, `WEB_THREADS`, `DJANGO_DEBUG` and `DEPLOYMENT_ENV` are no

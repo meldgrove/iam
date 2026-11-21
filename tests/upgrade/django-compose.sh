@@ -7,8 +7,8 @@
 #
 #   tests/upgrade/django-compose.sh <image>     e.g. iam:ci
 #
-# Needs Docker with Compose 2.20 or later, and the host port UPGRADE_TEST_PORT
-# (default 18000).
+# Needs Docker with Compose 2.20 or later, Node.js, and the host port
+# UPGRADE_TEST_PORT (default 18000).
 set -euo pipefail
 
 image=${1:?Usage: tests/upgrade/django-compose.sh <image>}
@@ -19,21 +19,24 @@ target=ghcr.io/meldgrove/iam:0.0.0-upgrade-test
 
 cp "$root/tests/upgrade/compose.django.yaml" "$work/compose.yaml"
 cp "$root/compose.postgres.yaml" "$work/compose.postgres.yaml"
+cp "$root/tests/upgrade/compose.oidc.yaml" "$work/compose.oidc.yaml"
 random() { node -e "process.stdout.write(require('crypto').randomBytes($1).toString('base64url'))"; }
 password=$(random 24)
+token=$(random 24)
 # A .env of 0.2 (docs/deployment.md of 0.2.0), with the bundled PostgreSQL.
+# Django allows origins with a wildcard; IAM's own one is the other entry.
 cat > "$work/.env" << EOF
-COMPOSE_FILE=compose.yaml:compose.postgres.yaml
+COMPOSE_FILE=compose.yaml:compose.postgres.yaml:compose.oidc.yaml
 IAM_VERSION=0.2.0
 IAM_PORT=$port
 DJANGO_SECRET_KEY=$(random 48)
 ENCRYPTION_KEY=$(random 32)=
 ALLOWED_HOSTS=iam.example.invalid,localhost,127.0.0.1
-CSRF_TRUSTED_ORIGINS=https://iam.example.invalid
+CSRF_TRUSTED_ORIGINS=https://*.example.invalid/,https://iam.example.invalid
 POSTGRES_PASSWORD=$password
 DATABASE_URL=postgresql://iam:$password@postgres:5432/iam
-HEALTHCHECK_TOKEN=$(random 24)
-OIDC_ISSUER=https://sso.example.invalid/realms/iam
+HEALTHCHECK_TOKEN=$token
+OIDC_ISSUER=http://sso.example.invalid:8080/realms/iam
 OIDC_CLIENT_ID=iam
 OIDC_CLIENT_SECRET=upgrade-test
 EOF
@@ -58,10 +61,13 @@ install() {
   compose up --detach --wait --wait-timeout 300 --quiet-pull
 }
 sql() { compose exec -T postgres psql -U iam -d iam -tAc "$1"; }
-
 # A session of the Django version, which migrate ends.
 django_session() {
   sql "insert into django_session (session_key, session_data, expire_date) values ('upgrade-test-$1', 'e30', now() + interval '1 day')" > /dev/null
+}
+# Django answers (through the proxy, which sets X-Forwarded-Proto).
+django_runs() {
+  curl -fsS -H "X-Forwarded-Proto: https" "http://127.0.0.1:$port/login/" | grep -q "Sign in to manage people and access."
 }
 checked() {
   # Healthy by the old file's Python health checks.
@@ -70,24 +76,41 @@ checked() {
   done
   curl -fsS -H "accept: text/html" "http://127.0.0.1:$port/login" | grep -q '<div id="root">'
   test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/v1/me")" = 401
+  # Sign-in sends the provider back to IAM's own origin.
+  location=$(curl -s -o /dev/null -w '%{redirect_url}' "http://127.0.0.1:$port/oidc/authenticate/")
+  case "$location" in
+    http://sso.example.invalid:8080/realms/iam/protocol/openid-connect/auth\?*redirect_uri=https%3A%2F%2Fiam.example.invalid%2Foidc%2Fcallback%2F*) ;;
+    *) echo "Sign-in redirects to: $location" >&2 && return 1 ;;
+  esac
   test "$(sql "select count(*) from django_session")" = 0
   test "$(sql "select count(*) from drizzle.__drizzle_migrations")" -gt 0
+  # This worker reached the database, and the web app sees it.
+  beat=0
+  for _ in $(seq 1 60); do
+    beat=$(sql "select count(*) from iam_workerheartbeat where name = 'worker' and beat_at > '$1'")
+    [ "$beat" = 1 ] && break
+    sleep 1
+  done
+  test "$beat" = 1
+  curl -fsS -H "X-Health-Token: $token" "http://127.0.0.1:$port/-/readyz" | grep -q '"worker":"ok"'
 }
 
 install 0.2.0
-curl -fsS "http://127.0.0.1:$port/-/healthz" > /dev/null
+django_runs
 django_session 1
 
+started=$(sql "select now()")
 install "${target#*:}"
-checked
+checked "$started"
 echo "The image runs with the compose file of 0.2."
 
 # The deploy script's rollback, after a later failure.
 install 0.2.0
-curl -fsS "http://127.0.0.1:$port/login/" > /dev/null
+django_runs
 django_session 2
 echo "0.2.0 runs again on the database."
 
+started=$(sql "select now()")
 install "${target#*:}"
-checked
+checked "$started"
 echo "Installed again after the rollback."

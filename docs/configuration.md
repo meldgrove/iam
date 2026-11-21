@@ -10,10 +10,10 @@ can read the database, and the sign-in settings.
 
 | Variable | Meaning |
 | --- | --- |
-| `APP_URL` | The public address, e.g. `https://iam.example.invalid`: `https://` in production (`http://` only for `localhost`). Links, the sign-in redirect (`/oidc/callback/`) and the check of the browser's origin come from it; on HTTPS the cookies carry the `__Host-` prefix. Without it, the first entry of `CSRF_TRUSTED_ORIGINS` (Django version) counts. |
+| `APP_URL` | The public address, e.g. `https://iam.example.invalid`: `https://` in production (`http://` only for `localhost`). Links, the sign-in redirect (`/oidc/callback/`) and the check of the browser's origin come from it; on HTTPS the cookies carry the `__Host-` prefix. Without it, the one entry of `CSRF_TRUSTED_ORIGINS` (Django version) without a wildcard counts; with several such entries, set `APP_URL`. |
 | `AUTH_SECRET` | Random value, at least 32 characters (`openssl rand -base64 48`). Signs the sign-in's state. Without it, `DJANGO_SECRET_KEY` (Django version) counts. |
 | `ENCRYPTION_KEY` | Fernet key that encrypts connection secrets: 32 url-safe base64-encoded bytes. Create one with `cli generate-key` (`docker run --rm ghcr.io/meldgrove/iam:0.3 cli generate-key`). Several comma-separated keys: the first encrypts, all decrypt (rotation below). Losing it makes the saved connection secrets unreadable. The keys of the Django version keep working. |
-| `DATABASE_URL` | PostgreSQL, e.g. `postgresql://iam:password@postgres:5432/iam`. Connecting gives up after 10 seconds; TCP keepalives notice a server that went away. |
+| `DATABASE_URL` | PostgreSQL, e.g. `postgresql://iam:password@postgres:5432/iam`. Connecting gives up after 10 seconds; TCP keepalives notice a server that went away. `sslmode` means what it means in PostgreSQL: `require` encrypts without checking the certificate, `verify-full` checks it. |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The sign-in client ([authentication.md](authentication.md)). |
 | `OIDC_ISSUER` **or** `KEYCLOAK_URL` + `KEYCLOAK_REALM` | The sign-in provider. |
 

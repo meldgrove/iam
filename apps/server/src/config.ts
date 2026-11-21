@@ -50,10 +50,11 @@ const schema = z
     HOST: optional(z.string()),
     /**
      * The public URL of the app, e.g. https://iam.example.invalid. A list (as
-     * compose.yaml passes CSRF_TRUSTED_ORIGINS of the Django version): its first entry.
+     * compose.yaml passes CSRF_TRUSTED_ORIGINS of the Django version): its one
+     * entry without a wildcard (publicUrl).
      */
     APP_URL: optional(z.string()),
-    /** Django version: the public origin. Its first entry stands in for APP_URL. */
+    /** Django version: the public origins. Stands in for APP_URL (publicUrl). */
     CSRF_TRUSTED_ORIGINS: optional(z.string()),
     DATABASE_URL: z.string().min(1),
     DATABASE_POOL_SIZE: withDefault(z.coerce.number().int().min(1).max(200), 10),
@@ -150,6 +151,32 @@ function isLocal(url: string): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
 }
 
+/**
+ * The public URL: APP_URL, or else CSRF_TRUSTED_ORIGINS of the Django version,
+ * whose compose.yaml passes no APP_URL (and the new one passes that list as
+ * APP_URL while APP_URL is unset). Django allows origins with a wildcard
+ * (https://*.example.invalid), which name no address. Of the others, the
+ * list must name exactly one: sign-in sends the provider back to it, and a
+ * wrong guess would pass every health check while nobody can sign in.
+ */
+export function publicUrl(
+  appUrl: string | undefined,
+  trustedOrigins: string | undefined,
+): { url?: string; problem?: string } {
+  const listed = splitList(appUrl ?? "");
+  const origins = listed.length > 0 ? listed : splitList(trustedOrigins ?? "");
+  if (origins.length === 0) return {};
+  const addresses = origins.filter((origin) => !origin.includes("*"));
+  if (addresses.length === 1) return { url: addresses[0] };
+  const source = listed.length > 0 ? "APP_URL" : "CSRF_TRUSTED_ORIGINS (Django version)";
+  return {
+    problem:
+      addresses.length === 0
+        ? `${source} names only origins with a wildcard. Set APP_URL to the public URL, e.g. https://iam.example.invalid`
+        : `${source} names several addresses. Set APP_URL to the public URL of IAM`,
+  };
+}
+
 function splitList(value: string, lower = false): string[] {
   return value
     .split(",")
@@ -196,11 +223,8 @@ export function config(): Config {
   const problems: string[] = [];
   const isDevelopment = value.NODE_ENV !== "production";
 
-  const legacyOrigin = splitList(value.CSRF_TRUSTED_ORIGINS ?? "")[0];
-  let appUrl =
-    splitList(value.APP_URL ?? "")[0] ??
-    legacyOrigin ??
-    (isDevelopment ? `http://localhost:${value.PORT}` : "");
+  const named = publicUrl(value.APP_URL, value.CSRF_TRUSTED_ORIGINS);
+  let appUrl = named.url ?? (isDevelopment && !named.problem ? `http://localhost:${value.PORT}` : "");
   appUrl = appUrl.replace(/\/+$/, "");
   // Scheme and host in lower case (HTTPS://… counts as https), no default
   // port, no slash at the end. The callback URL built from it must match the
@@ -208,7 +232,8 @@ export function config(): Config {
   // from a parsed URL; the Django version built it from the browser's Host
   // header, which never names a default port either.
   if (appUrl && URL.canParse(appUrl)) appUrl = new URL(appUrl).href.replace(/\/+$/, "");
-  if (!appUrl) problems.push("APP_URL: Set the public URL, e.g. https://iam.example.invalid");
+  if (named.problem) problems.push(`APP_URL: ${named.problem}`);
+  else if (!appUrl) problems.push("APP_URL: Set the public URL, e.g. https://iam.example.invalid");
   else if (!z.url({ protocol: /^https?$/ }).safeParse(appUrl).success) {
     problems.push("APP_URL: Must be an http:// or https:// URL");
   } else if (value.NODE_ENV === "production" && !/^https:/i.test(appUrl) && !isLocal(appUrl)) {
