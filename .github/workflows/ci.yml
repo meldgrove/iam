@@ -99,6 +99,11 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/me)" = "401"
           docker run --rm --network host "${env_args[@]}" iam:ci cli generate-key | grep -Eq '^[A-Za-z0-9_-]{43}=$'
 
+      # The updater installs images, not files: a server of 0.2 starts the
+      # image with the Django compose.yaml.
+      - name: Upgrade from 0.2 with its compose file, and back
+        run: tests/upgrade/django-compose.sh iam:ci
+
       - name: Show logs on failure
         if: failure()
         run: docker logs web || true

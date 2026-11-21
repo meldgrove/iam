@@ -54,6 +54,9 @@ COPY --from=build --chown=iam:iam /app/apps/server/dist ./apps/server/dist
 COPY --from=build --chown=iam:iam /app/apps/server/drizzle ./apps/server/drizzle
 COPY --from=build --chown=iam:iam /app/apps/web/dist ./apps/web/dist
 COPY --chown=iam:iam docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# A server that the updater moves from the Django version (0.2) still has its
+# compose.yaml, which runs `python manage.py ...` and Python health checks.
+COPY --chmod=755 docker-django-compat.sh /usr/local/bin/python
 # The release workflow sets the version; images built from source have none.
 ARG APP_VERSION=""
 ENV APP_VERSION=${APP_VERSION}

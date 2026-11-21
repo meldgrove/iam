@@ -38,7 +38,8 @@ newest release.
 1. Back up the PostgreSQL resource.
 2. Keep the environment variables: `compose.coolify.yaml` takes `AUTH_SECRET`
    from `DJANGO_SECRET_KEY` and `APP_URL` from `CSRF_TRUSTED_ORIGINS` while
-   those are set ([deployment.md](deployment.md#upgrade-from-the-django-version)).
+   those are set; set `APP_URL` when `CSRF_TRUSTED_ORIGINS` names several
+   addresses ([deployment.md](deployment.md#upgrade-from-the-django-version)).
 3. Set `IAM_VERSION` to `0.3` and redeploy: Coolify reads the new
    `compose.coolify.yaml` from `stable`, `migrate` takes over the database,
    and everyone signs in again. The domain stays on `web`, port 8000.

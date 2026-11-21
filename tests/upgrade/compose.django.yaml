@@ -1,0 +1,150 @@
+# compose.yaml of IAM 0.2.0, unchanged: what a server has when the updater
+# installs 0.3 on it (tests/upgrade/django-compose.sh).
+
+# Production on a Linux server (Debian, Ubuntu) with Docker Compose: the
+# application as one stack (migrations, web, worker, updater). Settings live
+# in .env next to this file (docs/deployment.md); start it with:
+#
+#   docker compose up -d --pull always
+#
+# IAM_VERSION in .env is the image tag (docs/updates.md): a version such as
+# 0.1.3, or a series such as 0.1. With automatic updates, the server writes
+# each version it installs there.
+#
+# PostgreSQL runs separately (a managed database or a server of your own), or
+# next to the app with compose.postgres.yaml
+# (COMPOSE_FILE=compose.yaml:compose.postgres.yaml in .env); set DATABASE_URL
+# to it and back it up.
+#
+# `web` listens on 127.0.0.1:8000 (IAM_PORT changes the host port), for a
+# reverse proxy on the same server, such as Caddy, that terminates HTTPS. The
+# branch `stable` is at the newest release. On Coolify, use
+# compose.coolify.yaml (docs/coolify.md). Local development uses
+# compose.dev.yaml.
+x-image: &image ghcr.io/meldgrove/iam:${IAM_VERSION:?Set the release series, e.g. 0.1}
+
+x-application: &application
+  image: *image
+  restart: unless-stopped
+  mem_limit: 512m
+  environment:
+    DJANGO_DEBUG: "0"
+    DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-production}
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set a random secret of at least 50 characters}
+    ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a Fernet key (manage.py generate_key)}
+    ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Include the public hostname}
+    CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set the public HTTPS origin}
+    DATABASE_URL: ${DATABASE_URL:?Set the PostgreSQL URL}
+    # The reverse proxy sets X-Forwarded-Proto. `web` is published on
+    # 127.0.0.1 only, so only the server and the stack's own containers reach
+    # it; the proxy's requests come from the Docker network's gateway.
+    TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-1}
+    FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+    HEALTHCHECK_TOKEN: ${HEALTHCHECK_TOKEN:?Set a random health check token}
+    TZ: ${TZ:-UTC}
+    # 1: read connected apps, change nothing in them and send no email (docs/architecture.md).
+    READ_ONLY: ${READ_ONLY:-0}
+    # Sign-in: OIDC_ISSUER for any OpenID Connect provider, or KEYCLOAK_URL and KEYCLOAK_REALM.
+    OIDC_ISSUER: ${OIDC_ISSUER:-}
+    KEYCLOAK_URL: ${KEYCLOAK_URL:-}
+    KEYCLOAK_REALM: ${KEYCLOAK_REALM:-}
+    OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set the sign-in client ID}
+    OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Set the sign-in client secret}
+    OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-}
+    OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
+    OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
+    OIDC_ADMIN_GROUPS: ${OIDC_ADMIN_GROUPS:-}
+    OIDC_APPROVER_GROUPS: ${OIDC_APPROVER_GROUPS:-}
+    OIDC_VIEWER_GROUPS: ${OIDC_VIEWER_GROUPS:-}
+    BOOTSTRAP_ADMIN_EMAILS: ${BOOTSTRAP_ADMIN_EMAILS:-}
+    SENTRY_DSN: ${SENTRY_DSN:-}
+    SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+    SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+    # The updater below, for the admins' update button (docs/updates.md).
+    UPDATER_URL: ${UPDATER_URL:-http://updater:8080}
+
+services:
+  # One-time job before web and worker start.
+  migrate:
+    <<: *application
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    restart: "no"
+
+  web:
+    <<: *application
+    ports:
+      # Only on the server itself, for the reverse proxy. IAM_PORT picks
+      # another host port when 8000 is taken, e.g. by another app.
+      - "127.0.0.1:${IAM_PORT:-8000}:8000"
+    # gunicorn finishes running requests for up to 30 seconds after SIGTERM.
+    stop_grace_period: 40s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/-/healthz', timeout=3)"]
+      interval: 30s
+      start_period: 30s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    <<: *application
+    command: ["python", "manage.py", "run_worker"]
+    # On SIGTERM the worker finishes the job it is running. Killed midway, the
+    # job runs again after JOB_LEASE_SECONDS.
+    stop_grace_period: 2m
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # The worker's watchdog touches this file while the worker gets anywhere,
+      # and ends a stuck worker, which the restart policy then starts again.
+      test: ["CMD", "python", "-c", "import os,sys,tempfile,time; sys.exit(time.time() - os.path.getmtime(os.path.join(tempfile.gettempdir(), 'iam-worker-alive')) > 60)"]
+      interval: 30s
+      start_period: 60s
+      timeout: 5s
+      retries: 3
+
+  # Updates (docs/updates.md): checks for new versions, shows them to admins in
+  # the app (the update button, Admin > Settings > Updates) and installs them
+  # once the server runs `updater host-setup`: for each installation the
+  # server writes the version into IAM_VERSION in .env, pulls it, runs
+  # `docker compose up --wait`, and goes back to the version before when it
+  # does not become healthy. Without the host setup, it only checks. Its API
+  # has no authentication: never publish its port.
+  updater:
+    image: ghcr.io/meldgrove/updater:0.2
+    restart: unless-stopped
+    mem_limit: 64m
+    environment:
+      IMAGE: *image
+      VERSION_VARIABLE: IAM_VERSION
+      COOLDOWN: ${UPDATE_COOLDOWN:-3d}
+      WINDOW: ${UPDATE_WINDOW:-}
+      TZ: ${TZ:-UTC}
+      REGISTRY_USERNAME: ${UPDATE_REGISTRY_USERNAME:-}
+      REGISTRY_PASSWORD: ${UPDATE_REGISTRY_PASSWORD:-}
+    volumes:
+      - updater:/trigger
+
+  # Backups for Meldgrove Backups (docs/deployment.md#backups): the database,
+  # sent when Backups asks. Idle while BACKUP_URL is empty; it only reads and
+  # opens no port.
+  backup-agent:
+    image: ghcr.io/meldgrove/backup-agent:0.1
+    restart: unless-stopped
+    # The app's user, so that the agent reads every file the app writes.
+    user: "10001:10001"
+    environment:
+      # From the app's source in Meldgrove Backups. Empty: the agent idles.
+      BACKUP_URL: ${BACKUP_URL:-}
+      BACKUP_TOKEN: ${BACKUP_TOKEN:-}
+      DATABASE_URL: ${DATABASE_URL:?Set the PostgreSQL URL}
+      APP_NAME: iam
+      APP_IMAGE: *image
+      # Settings a restore needs that are not in the backup (names only).
+      APP_SECRETS: ENCRYPTION_KEY
+
+volumes:
+  updater:

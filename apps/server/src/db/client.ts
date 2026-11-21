@@ -26,10 +26,33 @@ function urlConnectTimeoutMs(url: string): number | undefined {
   }
 }
 
+/**
+ * The database URL with the meaning PostgreSQL gives `sslmode`, as in the
+ * Django version: `require` and `prefer` encrypt without checking the
+ * certificate (unless sslrootcert names a CA), `verify-ca` checks it against
+ * sslrootcert but not the name. node-postgres alone checks all three like
+ * `verify-full`, so a server with a certificate of its own, or reached by
+ * another name, would refuse a URL that worked before. Unlike PostgreSQL,
+ * `prefer` never falls back to an unencrypted connection, and `verify-ca`
+ * without sslrootcert stays `verify-full` (docs/configuration.md).
+ */
+export function withLibpqSslModes(url: string): string {
+  // The query alone, from the first "?": URLs such as postgresql://iam@/iam?host=…
+  // have no host that URL accepts, and values may hold a "?".
+  const start = url.indexOf("?");
+  if (start < 0) return url;
+  const params = new URLSearchParams(url.slice(start + 1).split("#")[0]);
+  // The last one counts, as in libpq and node-postgres.
+  const mode = params.getAll("sslmode").at(-1) ?? "";
+  const libpq = ["require", "prefer"].includes(mode) || (mode === "verify-ca" && params.has("sslrootcert"));
+  if (!libpq || params.has("uselibpqcompat")) return url;
+  return `${url}&uselibpqcompat=true`;
+}
+
 /** How every connection connects: waiting fails instead of hanging, and dead connections are noticed. */
 export function connectionOptions(): pg.ClientConfig {
   return {
-    connectionString: config().DATABASE_URL,
+    connectionString: withLibpqSslModes(config().DATABASE_URL),
     // Also the longest wait for a free connection of the pool. A
     // connect_timeout in DATABASE_URL wins, as it did in the Django version
     // (node-postgres itself reads it only for its native driver).

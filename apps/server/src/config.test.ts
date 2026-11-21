@@ -42,12 +42,32 @@ describe("config", () => {
       NODE_ENV: "production",
       APP_URL: undefined,
       AUTH_SECRET: undefined,
-      CSRF_TRUSTED_ORIGINS: "https://iam.example.invalid/, https://other.example.invalid",
+      CSRF_TRUSTED_ORIGINS: "https://*.example.invalid/, https://iam.example.invalid/",
       DJANGO_SECRET_KEY: "x".repeat(50),
       ENCRYPTION_KEY: KEY,
     })();
     expect(settings.APP_URL).toBe("https://iam.example.invalid");
     expect(settings.AUTH_SECRET).toBe("x".repeat(50));
+  });
+
+  it("refuses to guess the public URL from several origins or only wildcards", () => {
+    const django = { NODE_ENV: "production", APP_URL: undefined, ENCRYPTION_KEY: KEY };
+    expect(
+      configWith({
+        ...django,
+        CSRF_TRUSTED_ORIGINS: "http://localhost:8000,https://iam.example.invalid",
+      }),
+    ).toThrow(/APP_URL: CSRF_TRUSTED_ORIGINS \(Django version\) names several addresses/);
+    expect(configWith({ ...django, CSRF_TRUSTED_ORIGINS: "https://*.example.invalid" })).toThrow(
+      /APP_URL: CSRF_TRUSTED_ORIGINS \(Django version\) names only origins with a wildcard/,
+    );
+    // compose.yaml passes the list as APP_URL while APP_URL is unset.
+    expect(configWith({ ...django, APP_URL: "https://*.example.invalid" })).toThrow(
+      /APP_URL: APP_URL names only origins with a wildcard/,
+    );
+    expect(
+      configWith({ ...django, APP_URL: "https://*.example.invalid/,https://iam.example.invalid" })().APP_URL,
+    ).toBe("https://iam.example.invalid");
   });
 
   it("needs Fernet keys", () => {
