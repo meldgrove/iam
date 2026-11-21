@@ -42,7 +42,8 @@ export function withLibpqSslModes(url: string): string {
   const start = url.indexOf("?");
   if (start < 0) return url;
   const params = new URLSearchParams(url.slice(start + 1).split("#")[0]);
-  const mode = params.get("sslmode") ?? "";
+  // The last one counts, as in libpq and node-postgres.
+  const mode = params.getAll("sslmode").at(-1) ?? "";
   const libpq = ["require", "prefer"].includes(mode) || (mode === "verify-ca" && params.has("sslrootcert"));
   if (!libpq || params.has("uselibpqcompat")) return url;
   return `${url}&uselibpqcompat=true`;

@@ -23,6 +23,9 @@ describe("withLibpqSslModes", () => {
     expect(withLibpqSslModes(`${URL_BASE}?sslmode=verify-ca&sslrootcert=/run/ca.pem`)).toBe(
       `${URL_BASE}?sslmode=verify-ca&sslrootcert=/run/ca.pem&uselibpqcompat=true`,
     );
+    expect(withLibpqSslModes(`${URL_BASE}?sslmode=verify-full&sslmode=require`)).toBe(
+      `${URL_BASE}?sslmode=verify-full&sslmode=require&uselibpqcompat=true`,
+    );
     // Encrypted, the certificate unchecked.
     const client = new pg.Client({ connectionString: withLibpqSslModes(`${URL_BASE}?sslmode=require`) });
     const { ssl } = (client as unknown as { connectionParameters: { ssl: { rejectUnauthorized?: boolean } } })
@@ -40,6 +43,7 @@ describe("withLibpqSslModes", () => {
       "not a url",
       "not a url?sslmode=verify-full",
       `${URL_BASE}?sslmode=verify-ca`,
+      `${URL_BASE}?sslmode=require&sslmode=verify-full`,
     ]) {
       expect(withLibpqSslModes(url)).toBe(url);
     }
