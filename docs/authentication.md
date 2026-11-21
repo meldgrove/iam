@@ -49,7 +49,8 @@ Set `KEYCLOAK_URL` (without `/realms/...`) and `KEYCLOAK_REALM` instead of
 3. Set `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` from the client's
    credentials tab.
 
-The top bar then links to Keycloak's account console ("My account").
+People then find a link to Keycloak's account console on their settings page
+(Settings in the user menu, card "Account").
 
 Signing in and managing Keycloak accounts are separate: the Keycloak
 *connection* in the admin section uses its own service-account client
