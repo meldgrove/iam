@@ -27,21 +27,24 @@ function urlConnectTimeoutMs(url: string): number | undefined {
 }
 
 /**
- * The database URL with the meaning PostgreSQL gives `sslmode=require` and
- * `prefer`: encrypted, the certificate unchecked (unless sslrootcert names
- * one), as in the Django version. node-postgres alone checks it like
- * `verify-full`, so a server with a certificate of its own would refuse a URL
- * that worked before. `verify-full` checks it either way. Unlike PostgreSQL,
- * `prefer` never falls back to an unencrypted connection (docs/configuration.md).
+ * The database URL with the meaning PostgreSQL gives `sslmode`, as in the
+ * Django version: `require` and `prefer` encrypt without checking the
+ * certificate (unless sslrootcert names a CA), `verify-ca` checks it against
+ * sslrootcert but not the name. node-postgres alone checks all three like
+ * `verify-full`, so a server with a certificate of its own, or reached by
+ * another name, would refuse a URL that worked before. Unlike PostgreSQL,
+ * `prefer` never falls back to an unencrypted connection, and `verify-ca`
+ * without sslrootcert stays `verify-full` (docs/configuration.md).
  */
 export function withLibpqSslModes(url: string): string {
-  // The query alone: URLs such as postgresql://iam@/iam?host=… have no host
-  // that URL accepts.
-  const query = url.split("#")[0]!.split("?")[1];
-  if (query === undefined) return url;
-  const params = new URLSearchParams(query);
-  if (!["require", "prefer"].includes(params.get("sslmode") ?? "") || params.has("uselibpqcompat"))
-    return url;
+  // The query alone, from the first "?": URLs such as postgresql://iam@/iam?host=…
+  // have no host that URL accepts, and values may hold a "?".
+  const start = url.indexOf("?");
+  if (start < 0) return url;
+  const params = new URLSearchParams(url.slice(start + 1).split("#")[0]);
+  const mode = params.get("sslmode") ?? "";
+  const libpq = ["require", "prefer"].includes(mode) || (mode === "verify-ca" && params.has("sslrootcert"));
+  if (!libpq || params.has("uselibpqcompat")) return url;
   return `${url}&uselibpqcompat=true`;
 }
 

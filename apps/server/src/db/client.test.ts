@@ -16,6 +16,13 @@ describe("withLibpqSslModes", () => {
     expect(withLibpqSslModes("postgresql://iam:secret@/iam?host=db.example.invalid&sslmode=require")).toBe(
       "postgresql://iam:secret@/iam?host=db.example.invalid&sslmode=require&uselibpqcompat=true",
     );
+    // A "?" in a value, and verify-ca with its CA.
+    expect(withLibpqSslModes(`${URL_BASE}?application_name=iam?preview&sslmode=require`)).toBe(
+      `${URL_BASE}?application_name=iam?preview&sslmode=require&uselibpqcompat=true`,
+    );
+    expect(withLibpqSslModes(`${URL_BASE}?sslmode=verify-ca&sslrootcert=/run/ca.pem`)).toBe(
+      `${URL_BASE}?sslmode=verify-ca&sslrootcert=/run/ca.pem&uselibpqcompat=true`,
+    );
     // Encrypted, the certificate unchecked.
     const client = new pg.Client({ connectionString: withLibpqSslModes(`${URL_BASE}?sslmode=require`) });
     const { ssl } = (client as unknown as { connectionParameters: { ssl: { rejectUnauthorized?: boolean } } })
@@ -32,6 +39,7 @@ describe("withLibpqSslModes", () => {
       `${URL_BASE}?sslmode=require&uselibpqcompat=false`,
       "not a url",
       "not a url?sslmode=verify-full",
+      `${URL_BASE}?sslmode=verify-ca`,
     ]) {
       expect(withLibpqSslModes(url)).toBe(url);
     }

@@ -246,8 +246,8 @@ to 0.2 without changing the database.
    (`https://*.example.invalid`) besides IAM's own; when it names several
    addresses, set `APP_URL` before the upgrade (with the new `compose.yaml`).
    `DATABASE_URL` keeps its meaning, also `sslmode=require` with a server's
-   own certificate; only `sslmode=prefer` needs a server with TLS
-   ([configuration](configuration.md)). `ENCRYPTION_KEY` keeps working: the
+   own certificate or `verify-ca` with `sslrootcert`; only `sslmode=prefer`
+   needs a server with TLS ([configuration](configuration.md)). `ENCRYPTION_KEY` keeps working: the
    saved connection secrets stay readable. `ALLOWED_HOSTS`,
    `TRUST_PROXY_HEADERS`, `FORWARDED_ALLOW_IPS`, `SECURE_SSL_REDIRECT`,
    `WEB_WORKERS`, `WEB_THREADS`, `DJANGO_DEBUG` and `DEPLOYMENT_ENV` are no
