@@ -19,7 +19,7 @@ server.
 4. Set the environment variables from the table in
    [deployment.md](deployment.md#setup), step 3, with `DATABASE_URL` set to
    the PostgreSQL resource's internal URL and `IAM_VERSION` to a release
-   series such as `0.1`, or `preview` (see
+   series such as `0.3`, or `preview` (see
    [Automatic updates](#automatic-updates)).
 5. Deploy. Sign in, then continue with the
    [first steps](deployment.md#first-steps-after-the-first-sign-in).
@@ -32,6 +32,16 @@ needed" in the release notes ([releases.md](releases.md)). Take the steps,
 then change `IAM_VERSION` in the resource's environment variables and
 redeploy. Coolify reads `compose.coolify.yaml` from `stable`, which is at the
 newest release.
+
+### From the Django version (0.1, 0.2)
+
+1. Back up the PostgreSQL resource.
+2. Keep the environment variables: `compose.coolify.yaml` takes `AUTH_SECRET`
+   from `DJANGO_SECRET_KEY` and `APP_URL` from `CSRF_TRUSTED_ORIGINS` while
+   those are set ([deployment.md](deployment.md#upgrade-from-the-django-version)).
+3. Set `IAM_VERSION` to `0.3` and redeploy: Coolify reads the new
+   `compose.coolify.yaml` from `stable`, `migrate` takes over the database,
+   and everyone signs in again. The domain stays on `web`, port 8000.
 
 ## Backups
 

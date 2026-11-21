@@ -20,50 +20,60 @@ needs), groups under
 ```sh
 docker compose -f compose.dev.yaml up -d
 cp .env.example .env
-uv sync
-npm ci                                   # Node.js 26; the files from @meldgrove/ui
-uv run python manage.py migrate
-uv run python manage.py runserver        # http://localhost:8000
-uv run python manage.py run_worker       # second terminal
+npm ci                                   # Node.js 26
+npm run db:migrate
+npm run dev                              # http://localhost:5173
 ```
 
-The update button, the Updates settings, the eye button of secret fields and
-the colors come from the npm package `@meldgrove/ui`, which the Meldgrove apps
-share. `npm ci` copies three of its files to `iam/static/iam/vendor/` (ignored
-by git): `meldgrove-updates.js` (the custom elements
-`<meldgrove-update-button>` and `<meldgrove-updates-settings>`),
-`meldgrove-secret-input.js` (`<meldgrove-secret-input>`, around the secret
-fields of the connection form) and `tokens.css` (the colors, light and dark).
-Run `npm ci` again after an update of the package; the Docker image copies
-them in its `ui` stage. `app.css` uses the tokens' names (`--background`,
-`--foreground`, `--muted-foreground`, `--primary`, …) and sets IAM's accent
-(`--mg-accent`). Dark mode is the class `dark` on `<html>`, which
-`static/iam/theme.js` sets from the device's setting.
+`npm run dev` starts the server (API, sign-in, worker; port 8000, reloads on
+changes) and Vite with the web app on port 5173, which passes `/api`,
+`/oidc` and `/-/` on to the server. The server reads `.env`; `APP_URL` is
+Vite's address, which the development realm allows as a sign-in redirect.
 
-`manage.py` reads `.env`. To try the app with the development Keycloak as a
-connection: Admin › Connections › Add › Keycloak with URL
-`http://localhost:8098`, realm `iam`, client `iam-provisioner` and its secret.
-For email: Email (SMTP), host `localhost`, port `1027`, security none.
+The repository is an npm workspace:
 
-`uv run python manage.py seed_demo` adds demo people, profiles, teams and a
-manual app. Without Keycloak, set `DEV_LOGIN=1` in `.env` and sign in at
-`/login/dev/` as any app user (development mode only).
+| Folder | What |
+| --- | --- |
+| `apps/server` | Hono server: the API (`src/modules`), sign-in (`src/auth`, `src/http/sign-in.ts`), the engine (`src/engine`), the adapters (`src/adapters`), the worker (`src/worker`), the database (`src/db`: Drizzle schema, migrations in `drizzle/`, the takeover of a Django database in `django.ts`), operator commands (`src/cli.ts`) |
+| `apps/web` | React web app: the app frame and pages from `@meldgrove/ui`, TanStack Router and Query; one folder per area in `src/modules` |
+| `packages/shared` | API types and request schemas (`src/api/iam.ts`), labels of the choices (`src/labels.ts`) |
+
+The theme, the components, the app frame, the update button and the eye
+button of secret fields come from the npm package `@meldgrove/ui`, which the
+Meldgrove apps share ([meldgrove/ui](https://github.com/meldgrove/ui)).
+
+To try the app with the development Keycloak as a connection: Admin ›
+Connections › Add › Keycloak with URL `http://localhost:8098`, realm `iam`,
+client `iam-provisioner` and its secret. For email: Email (SMTP), host
+`localhost`, port `1027`, security none.
+
+`npm run cli --workspace @iam/server -- seed-demo` adds demo people, profiles,
+teams and a manual app. Without Keycloak, set `DEV_LOGIN=1` in `.env` and sign
+in at `/login/dev` as any app user (development mode only). Other commands:
+`generate-key`, `create-admin --email <address>`, `rotate-secrets`.
+
+A schema change: edit `apps/server/src/db/schema.ts`, then `npm run
+db:generate` writes the migration. Keep the names of the Django version for
+existing tables, and give a new column of an existing table a database default
+(the Django version must still run after a rollback).
 
 ## Checks
 
 CI (`.github/workflows/ci.yml`) runs the same:
 
 ```sh
-uv run ruff check . && uv run ruff format --check .
-uv run python manage.py makemigrations --check --dry-run
-uv run pytest                                               # SQLite
-TEST_DATABASE_URL=postgresql://iam:iam@localhost:55438/iam uv run pytest
-python3 scripts/check_public_repository.py
+npm run lint && npm run format:check && npm run typecheck
+npm test                                                   # unit tests
+TEST_DATABASE_URL=postgres://iam:iam@localhost:55438/iam_test npm run test:integration
+npm run db:generate                                        # must leave apps/server/drizzle unchanged
+node scripts/check-public-repository.mjs
 ```
 
-Adapters are tested against `httpx.MockTransport` fakes (`mock_transport`
-fixture); the engine against an in-memory adapter (`tests/fakes.py`). No test
-reaches an updater: the `updater` fixture answers for it.
+Integration tests recreate the database of `TEST_DATABASE_URL`. Adapters are
+tested against fake HTTP answers (`src/test/mock-fetch.ts`); the engine
+against an in-memory adapter (`src/test/fake-adapter.ts`). One test takes over
+a database of the Django version (`src/db/fixtures/django-0.2.sql`) and checks
+that it ends with the schema of a new one. No test reaches an updater.
 
 The update button needs an updater at `UPDATER_URL` (`.env.example` leaves it
 empty, which hides the button). Any server that answers the updater's API
@@ -72,7 +82,7 @@ status.
 
 ## End-to-end check
 
-`tests/browser/e2e.cjs` drives a browser through the real flow against the
+`tests/browser/e2e.mjs` drives a browser through the real flow against the
 local stack: sign-in through Keycloak, Keycloak and SMTP connections set up in
 the admin section, a profile, a team and a person, onboarding (it checks the
 Keycloak user, its groups and the setup email in Mailpit), offboarding (user
@@ -81,7 +91,7 @@ the app on port 8000 and a running worker.
 
 ```sh
 cd tests/browser && npm ci && npx playwright install chromium && cd ../..
-node tests/browser/e2e.cjs          # screenshots in test-results/
+node tests/browser/e2e.mjs          # screenshots in test-results/
 ```
 
 CI runs it against the production image.
@@ -91,6 +101,6 @@ CI runs it against the production image.
 - Adapters never touch the database and never put secrets or provider
   responses in error messages.
 - Every change by a person or the worker writes an audit event
-  (`iam.audit.record`), never with secret values.
-- Use only `example.invalid` in examples; `scripts/check_public_repository.py`
+  (`record` in `apps/server/src/engine/audit.ts`), never with secret values.
+- Use only `example.invalid` in examples; `scripts/check-public-repository.mjs`
   rejects other hosts and credential-shaped values.

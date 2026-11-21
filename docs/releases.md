@@ -2,7 +2,7 @@
 
 A release bundles everything merged to `main` since the previous one. Maintainers
 start it by hand; nothing is released on merge. A release is a `vX.Y.Z` tag on a
-`main` commit that passed CI. No file holds the version (`pyproject.toml` stays at
+`main` commit that passed CI. No file holds the version (`package.json` stays at
 `0.0.0`), and releasing pushes nothing to `main`. Every Meldgrove project releases
 the same way.
 

@@ -1,7 +1,0 @@
-{% extends "iam/plain.html" %}
-{% block title %}Sign-in unavailable{% endblock %}
-{% block content %}
-<p>The sign-in provider cannot be reached right now.</p>
-<p class="muted small">Try again in a minute. If this persists, check the provider and OIDC_ISSUER.</p>
-<a class="btn" href="{% url 'login' %}">Try again</a>
-{% endblock %}

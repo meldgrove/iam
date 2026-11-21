@@ -1,41 +1,63 @@
-FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
+# One image for every process. The command selects the role:
+#   all      web app and worker
+#   web      web app and API (port 8000)
+#   worker   jobs, the schedule and the reads from connected apps
+#   migrate  apply database migrations (taking over a database of the Django version), then exit
+#   cli      operator commands, e.g. `cli create-admin --email ...` (apps/server/src/cli.ts)
 
-# The update button, the eye button of secret fields and the shared colors
-# from @meldgrove/ui (package.json).
-FROM node:26.13.0-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS ui
+FROM node:26.13.0-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS base
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts --no-audit --no-fund && npm run static
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+COPY packages/shared/package.json packages/shared/
 
-FROM python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72 AS base
-COPY --from=uv /uv /usr/local/bin/uv
-RUN groupadd --gid 10001 iam && useradd --uid 10001 --gid iam --create-home iam
+FROM base AS deps
+RUN npm ci --no-audit --no-fund
+
+FROM deps AS build
+COPY . .
+RUN npm run build
+# Release builds upload the source maps of the server and the web app to
+# Sentry, which finds them by the debug IDs the build wrote into the bundles
+# (scripts/inject-debug-ids.mjs). Without the token, nothing is uploaded.
+ARG SENTRY_ORG=""
+ARG SENTRY_PROJECT=""
+RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
+    if [ -n "$SENTRY_AUTH_TOKEN" ]; then \
+      export SENTRY_CLI_NO_TELEMETRY=1 SENTRY_CLI_NO_UPDATE_CHECK=1 \
+      && node_modules/.bin/sentry sourcemap upload apps/server/dist \
+      && node_modules/.bin/sentry sourcemap upload apps/web/dist; \
+    fi
+# The web app's source maps would be public under /assets: they stay out of
+# the image. The server's are never served.
+RUN find apps/web/dist -name '*.map' -delete
+
+FROM base AS prod-deps
+# Optional packages here are build and test tools that libraries name as
+# optional peers (vitest, drizzle-kit, esbuild): the server needs none of them.
+RUN npm ci --omit=dev --omit=optional --workspace @iam/server --include-workspace-root=false --no-audit --no-fund
+
+FROM node:26.13.0-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS runtime
+# The user of the Django version (uid 10001), which compose.yaml's backup
+# agent runs as too.
+RUN groupadd --gid 10001 iam && useradd --uid 10001 --gid iam --no-create-home --shell /usr/sbin/nologin iam
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=8000 \
+    WORKER_ALIVE_FILE=/tmp/iam-worker-alive
 WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
-COPY pyproject.toml uv.lock ./
-
-FROM base AS test
-ENV DJANGO_DEBUG=1 DEPLOYMENT_ENV=development
-RUN uv sync --locked
-COPY . .
-RUN chown -R iam:iam /app
-USER iam
-ENV PATH="/app/.venv/bin:$PATH"
-CMD ["sh", "-c", "ruff check . && ruff format --check . && python manage.py makemigrations --check --dry-run && pytest"]
-
-FROM base AS runtime
-RUN uv sync --locked --no-dev
-COPY . .
-COPY --from=ui /app/iam/static/iam/vendor/ iam/static/iam/vendor/
-# Static files need only development defaults, whatever build arguments Coolify
-# passes, but the manifest of production (STATIC_MANIFEST=1).
-RUN env -i PATH="$PATH" PYTHONDONTWRITEBYTECODE=1 DJANGO_DEBUG=1 DEPLOYMENT_ENV=development STATIC_MANIFEST=1 \
-    /app/.venv/bin/python manage.py collectstatic --noinput \
-    && mkdir -p var && chown -R iam:iam /app/var
+COPY --from=prod-deps --chown=iam:iam /app/node_modules ./node_modules
+COPY --from=build --chown=iam:iam /app/package.json ./package.json
+COPY --from=build --chown=iam:iam /app/apps/server/package.json ./apps/server/package.json
+COPY --from=build --chown=iam:iam /app/apps/server/dist ./apps/server/dist
+COPY --from=build --chown=iam:iam /app/apps/server/drizzle ./apps/server/drizzle
+COPY --from=build --chown=iam:iam /app/apps/web/dist ./apps/web/dist
+COPY --chown=iam:iam docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The release workflow sets the version; images built from source have none.
 ARG APP_VERSION=""
 ENV APP_VERSION=${APP_VERSION}
 USER iam
-ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
-CMD ["sh", "/app/scripts/start-web.sh"]
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["web"]

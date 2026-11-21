@@ -42,7 +42,7 @@ shown as cancelled: the job ends as done, and its history says that the
 cancel came too late. Cancelling a workflow names the jobs that were already
 running, and the workflow's page names them while they run.
 
-**Jobs.** The worker (`manage.py run_worker`) runs queued jobs. For a
+**Jobs.** The worker (the `worker` process) runs queued jobs. For a
 connection in automatic mode it calls the adapter:
 
 - *Create or update account*: find the account (by its saved ID, then by
@@ -132,7 +132,7 @@ in those apps:
   else the app changes there, such as the name or the sessions; the groups
   to add and remove). The adapter decides that once, from reads alone, in
   its plan (`plan_ensure`, `plan_disable`, `plan_groups` in
-  `iam/adapters/base.py`); a real job follows the same plan, so the
+  `apps/server/src/adapters/base.ts`); a real job follows the same plan, so the
   rehearsal says what the job will do. Where the job would fail (a locked
   Relution user, a Google super admin, a HubSpot user to reactivate), the
   rehearsal fails with the same message, and names the groups a disable
@@ -200,11 +200,11 @@ another reads, and a job's result counts only from the worker that holds
 its current claim.
 
 The worker writes a heartbeat each round, after each job, and during a long
-read while it gets answers, which the dashboard and `/-/readyz` check. A watchdog thread ends a worker that made
+read while it gets answers, which the dashboard and `/-/readyz` check. A watchdog ends a worker that made
 no progress for `WORKER_STALL_SECONDS` (every answer from a connected app
 counts), for example one stuck on a database connection whose server went
-away. It logs where each thread was, and the container's restart policy
-starts a fresh worker.
+away. It logs that it stops, and the container's restart policy starts a
+fresh worker.
 
 ## Audit log
 
@@ -214,7 +214,7 @@ values.
 
 ## Adapters
 
-Each connected app is an adapter in `iam/adapters/`. Adapters get their
+Each connected app is an adapter in `apps/server/src/adapters/`. Adapters get their
 configuration as a dict, never touch the database, and return plain data;
-the engine (`iam/jobs.py`, `iam/sync.py`) records the results. See
+the engine (`apps/server/src/engine/jobs.ts`, `sync.ts`) records the results. See
 "Writing a new adapter" in [connections.md](connections.md).

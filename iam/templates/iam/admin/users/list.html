@@ -1,9 +1,0 @@
-{% extends "iam/base.html" %}
-{% block title %}Users and roles{% endblock %}
-{% block content %}
-<div class="page-head"><div><h1>Users and roles</h1><p class="sub">Who may use this app. Viewers read; approvers manage people, workflows and tasks; admins also manage policy, connections, users and settings.</p></div>
-<div class="actions"><a class="btn primary" href="{% url 'user_create' %}">Add user</a></div></div>
-<div class="table-wrap"><table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Role from</th><th>Signed in</th><th>State</th></tr></thead><tbody>
-{% for u in users %}<tr><td><a href="{% url 'user_edit' u.pk %}">{{ u.email }}</a></td><td>{{ u.display_name|default:"—" }}</td><td>{{ u.get_role_display }}</td><td class="small">{{ u.get_role_source_display }}</td><td class="small muted">{{ u.last_login|date:"d.m.Y H:i"|default:"never" }}</td><td>{% if u.is_active %}<span class="badge ok">Active</span>{% else %}<span class="badge">Off</span>{% endif %}</td></tr>{% endfor %}
-</tbody></table></div>
-{% endblock %}

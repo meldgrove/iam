@@ -1,12 +1,10 @@
-.venv/
+node_modules
+dist/
 .env
-var/
-staticfiles/
-__pycache__/
-*.pyc
-.pytest_cache/
-.ruff_cache/
-node_modules/
-# Copied from @meldgrove/ui by npm ci (package.json).
-iam/static/iam/vendor/
+.env.*
+!.env.example
+coverage/
 test-results/
+playwright-report/
+*.log
+.vite*/

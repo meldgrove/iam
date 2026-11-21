@@ -8,6 +8,9 @@
 # 0.1.3, or a series such as 0.1. With automatic updates, the server writes
 # each version it installs there.
 #
+# Upgrading from the Django version (0.1, 0.2): replace this file; .env keeps
+# working (docs/deployment.md, Upgrade from the Django version).
+#
 # PostgreSQL runs separately (a managed database or a server of your own), or
 # next to the app with compose.postgres.yaml
 # (COMPOSE_FILE=compose.yaml:compose.postgres.yaml in .env); set DATABASE_URL
@@ -25,18 +28,14 @@ x-application: &application
   restart: unless-stopped
   mem_limit: 512m
   environment:
-    DJANGO_DEBUG: "0"
-    DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-production}
-    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set a random secret of at least 50 characters}
-    ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a Fernet key (manage.py generate_key)}
-    ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Include the public hostname}
-    CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set the public HTTPS origin}
+    # The public URL, e.g. https://iam.example.invalid. A .env of the Django
+    # version (0.2) has none: its CSRF_TRUSTED_ORIGINS stands in.
+    APP_URL: ${APP_URL:-${CSRF_TRUSTED_ORIGINS:?Set APP_URL to the public HTTPS address}}
+    # Signs sessions: at least 32 random characters. The Django version's
+    # DJANGO_SECRET_KEY stands in.
+    AUTH_SECRET: ${AUTH_SECRET:-${DJANGO_SECRET_KEY:?Set AUTH_SECRET to a random secret of at least 32 characters}}
+    ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a Fernet key (docs/configuration.md)}
     DATABASE_URL: ${DATABASE_URL:?Set the PostgreSQL URL}
-    # The reverse proxy sets X-Forwarded-Proto. `web` is published on
-    # 127.0.0.1 only, so only the server and the stack's own containers reach
-    # it; the proxy's requests come from the Docker network's gateway.
-    TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-1}
-    FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
     HEALTHCHECK_TOKEN: ${HEALTHCHECK_TOKEN:?Set a random health check token}
     TZ: ${TZ:-UTC}
     # 1: read connected apps, change nothing in them and send no email (docs/architecture.md).
@@ -54,6 +53,7 @@ x-application: &application
     OIDC_APPROVER_GROUPS: ${OIDC_APPROVER_GROUPS:-}
     OIDC_VIEWER_GROUPS: ${OIDC_VIEWER_GROUPS:-}
     BOOTSTRAP_ADMIN_EMAILS: ${BOOTSTRAP_ADMIN_EMAILS:-}
+    SESSION_HOURS: ${SESSION_HOURS:-12}
     SENTRY_DSN: ${SENTRY_DSN:-}
     SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
     SENTRY_RELEASE: ${SENTRY_RELEASE:-}
@@ -64,22 +64,29 @@ services:
   # One-time job before web and worker start.
   migrate:
     <<: *application
-    command: ["python", "manage.py", "migrate", "--noinput"]
+    command: ["migrate"]
     restart: "no"
 
   web:
     <<: *application
+    command: ["web"]
     ports:
       # Only on the server itself, for the reverse proxy. IAM_PORT picks
       # another host port when 8000 is taken, e.g. by another app.
       - "127.0.0.1:${IAM_PORT:-8000}:8000"
-    # gunicorn finishes running requests for up to 30 seconds after SIGTERM.
+    # The server finishes running requests after SIGTERM.
     stop_grace_period: 40s
     depends_on:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/-/healthz', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8000/-/healthz',{signal:AbortSignal.timeout(3000)}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
       interval: 30s
       start_period: 30s
       timeout: 5s
@@ -87,7 +94,7 @@ services:
 
   worker:
     <<: *application
-    command: ["python", "manage.py", "run_worker"]
+    command: ["worker"]
     # On SIGTERM the worker finishes the job it is running. Killed midway, the
     # job runs again after JOB_LEASE_SECONDS.
     stop_grace_period: 2m
@@ -97,7 +104,13 @@ services:
     healthcheck:
       # The worker's watchdog touches this file while the worker gets anywhere,
       # and ends a stuck worker, which the restart policy then starts again.
-      test: ["CMD", "python", "-c", "import os,sys,tempfile,time; sys.exit(time.time() - os.path.getmtime(os.path.join(tempfile.gettempdir(), 'iam-worker-alive')) > 60)"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "process.exit(Date.now()-require('fs').statSync('/tmp/iam-worker-alive').mtimeMs>60000?1:0)",
+        ]
       interval: 30s
       start_period: 60s
       timeout: 5s

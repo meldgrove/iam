@@ -35,11 +35,9 @@ now all rights are reserved.
 ```sh
 docker compose -f compose.dev.yaml up -d   # PostgreSQL, Keycloak, Mailpit
 cp .env.example .env
-uv sync
-npm ci                                     # the files from @meldgrove/ui
-uv run python manage.py migrate
-uv run python manage.py runserver          # http://localhost:8000
-uv run python manage.py run_worker         # in a second terminal
+npm ci
+npm run db:migrate
+npm run dev                                # web app, API and worker: http://localhost:5173
 ```
 
 Sign in with `admin` / `admin` (the development Keycloak's admin user, member
@@ -60,6 +58,11 @@ Keycloak connection: see [docs/development.md](docs/development.md).
 
 ## Stack
 
-Django 6.1 on Python 3.13, PostgreSQL, one Docker image with three
-processes: `migrate` (one-time), `web` (gunicorn) and `worker`
-(`manage.py run_worker`, jobs and schedule; no Redis or queue needed).
+TypeScript on Node.js 26, like the other Meldgrove apps: a Hono server
+(`apps/server`, Drizzle ORM on PostgreSQL) and a React web app (`apps/web`,
+Vite, TanStack Router and Query) built from the shared interface package
+[`@meldgrove/ui`](https://github.com/meldgrove/ui) and its app frame. One
+Docker image with three processes: `migrate` (one-time), `web` and `worker`
+(jobs and schedule; no Redis or queue needed). Versions 0.1 and 0.2 were a
+Django app; 0.3 takes over their database in place
+([upgrade](docs/deployment.md#upgrade-from-the-django-version)).

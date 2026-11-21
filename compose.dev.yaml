@@ -1,7 +1,7 @@
 # Local development: PostgreSQL, a Keycloak with a ready realm, and Mailpit.
 # The app runs on the host (docs/development.md):
 #   docker compose -f compose.dev.yaml up -d
-#   cp .env.example .env && uv run python manage.py migrate && uv run python manage.py runserver
+#   cp .env.example .env && npm ci && npm run db:migrate && npm run dev
 # Keycloak: http://localhost:8098 (admin/admin; realm "iam", user admin@example.invalid / admin)
 # Mailpit:  http://localhost:8027 (SMTP on 1027)
 name: iam-dev
@@ -37,7 +37,11 @@ services:
     volumes:
       - ./dev/keycloak:/opt/keycloak/data/import:ro
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3",
+        ]
       interval: 5s
       retries: 60
 

@@ -59,7 +59,7 @@ Signing in and managing Keycloak accounts are separate: the Keycloak
 
 Choose one:
 
-- `python manage.py createadmin --email admin@example.invalid` adds an admin
+- `docker compose run --rm migrate cli create-admin --email admin@example.invalid` adds an admin
   app user. The first sign-in with that verified address links it.
 - `BOOTSTRAP_ADMIN_EMAILS=admin@example.invalid`: a sign-in with that
   verified address creates an admin, but only while no active admin exists.

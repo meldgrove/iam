@@ -25,7 +25,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
-      - scripts/start-web.sh
+      - docker-entrypoint.sh
       - .github/workflows/release.yml
 
 permissions:

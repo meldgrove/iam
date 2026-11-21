@@ -1,8 +1,0 @@
-{% extends "iam/base.html" %}
-{% block title %}Audit log{% endblock %}
-{% block content %}
-<div class="page-head"><div><h1>Audit log</h1><p class="sub">Every change by a person or the worker. Secret values are never recorded.</p></div></div>
-<form class="filters" method="get"><input type="search" name="q" value="{{ q }}" placeholder="Search" aria-label="Search"><button class="btn" type="submit">Search</button></form>
-<div class="table-wrap">{% include "iam/includes/events.html" with events=page.object_list show_person=True %}</div>
-{% include "iam/includes/pagination.html" %}
-{% endblock %}
