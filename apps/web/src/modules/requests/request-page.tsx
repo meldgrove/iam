@@ -67,11 +67,19 @@ function FindPerson({ onChoose }: { onChoose: (person: Candidate) => void }) {
       ) : results.data.items.length === 0 ? (
         <p className="text-muted-foreground text-sm">No one matches.</p>
       ) : (
-        <PeopleTable
-          label="People found"
-          people={results.data.items.slice(0, 10).map((person) => ({ ...person, reason: null }))}
-          onChoose={onChoose}
-        />
+        <>
+          <PeopleTable
+            label="People found"
+            people={results.data.items.map((person) => ({ ...person, reason: null }))}
+            onChoose={onChoose}
+          />
+          {results.data.total > results.data.items.length ? (
+            <p className="text-muted-foreground text-sm">
+              {results.data.total} people match; the first {results.data.items.length} show. Search for more
+              of the name or the email.
+            </p>
+          ) : null}
+        </>
       )}
     </div>
   );

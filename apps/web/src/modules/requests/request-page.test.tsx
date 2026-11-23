@@ -142,7 +142,7 @@ describe("identity request page", () => {
     const click = userEvent.setup();
     renderPage(<RequestPage id={5} />);
     expect(await screen.findByText("No one here has the same name or email.")).toBeVisible();
-    await click.type(screen.getByLabelText("Find another person"), "Brewster");
+    await click.type(screen.getByLabelText("Find another person"), "Grace Brewster");
     await click.click(screen.getByRole("button", { name: "Find" }));
     const row = (await screen.findByRole("link", { name: "Grace Brewster" })).closest("tr")!;
     expect(within(row).getByText("gb@example.invalid")).toBeVisible();
@@ -154,7 +154,7 @@ describe("identity request page", () => {
     await click.click(within(dialog).getByRole("button", { name: "Link" }));
     await waitFor(() => expect(requests(fetch, "POST /identity-requests/5/link")).toHaveLength(1));
     expect(requests(fetch, "POST /identity-requests/5/link")[0]!.body).toEqual({ personId: 7 });
-    expect(requests(fetch, "GET /people")[0]!.url).toContain("q=Brewster");
+    expect(requests(fetch, "GET /people")[0]!.url).toContain("q=Grace+Brewster");
   });
 
   it("shows a viewer the request without the decision", async () => {

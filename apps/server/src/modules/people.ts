@@ -63,6 +63,8 @@ router.get("/people", async (c) => {
         sql`${people.lastName} ilike ${pattern}`,
         sql`${people.workEmail} ilike ${pattern}`,
         sql`${people.username} ilike ${pattern}`,
+        // A full name, e.g. "Ada Lovelace".
+        sql`(${people.firstName} || ' ' || ${people.lastName}) ilike ${pattern}`,
       ),
     );
   }
