@@ -40,7 +40,12 @@ type Candidate = { id: number; name: string; workEmail: string | null };
 function FindPerson({ onChoose }: { onChoose: (person: Candidate) => void }) {
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
-  const results = useQuery({ ...peopleQuery({ q: search }), enabled: search !== "" });
+  // No previous results while a new search loads: a Link there would pick from the old search.
+  const results = useQuery({
+    ...peopleQuery({ q: search }),
+    placeholderData: undefined,
+    enabled: search !== "",
+  });
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setSearch(text.trim());

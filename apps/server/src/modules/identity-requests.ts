@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, sql, type SQL } from "drizzle-orm";
 import {
   apiKeyInputSchema,
   linkRequestSchema,
@@ -107,7 +107,13 @@ router.get("/identity-requests/:id", async (c) => {
         q()
           .select()
           .from(people)
-          .where(sql`lower(${people.workEmail}) = ${request.managerEmail.toLowerCase()}`)
+          // As the person form: an archived person is no manager.
+          .where(
+            and(
+              sql`lower(${people.workEmail}) = ${request.managerEmail.toLowerCase()}`,
+              ne(people.status, "archived"),
+            ),
+          )
           .limit(1),
       )
     : null;

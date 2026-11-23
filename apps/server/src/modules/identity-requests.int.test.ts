@@ -238,10 +238,21 @@ describe("identity requests", () => {
     const key = await createKey();
     await allow("intern");
     const existing = await makePerson({ personalEmail: "grace@personal.example.invalid", firstName: "G." });
+    await makePerson({
+      firstName: "Old",
+      lastName: "Boss",
+      workEmail: "boss@example.invalid",
+      status: "archived",
+    });
     const approver = await makeUser("approver");
 
-    const { body: first } = await call("POST", "/identity-requests", key, REQUEST);
+    const { body: first } = await call("POST", "/identity-requests", key, {
+      ...REQUEST,
+      managerEmail: "boss@example.invalid",
+    });
     const detail = await request("GET", `/api/v1/identity-requests/${first.id}`, { user: approver });
+    // An archived person is no manager: the approval form must not pick them.
+    expect(detail.body).toMatchObject({ managerEmail: "boss@example.invalid", manager: null });
     expect(detail.body.matches).toEqual([
       expect.objectContaining({ id: existing.id, reason: "Same personal email" }),
     ]);
