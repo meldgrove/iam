@@ -13,9 +13,10 @@ import { useAction } from "@/hooks/use-action";
 import { useFormatter } from "@/lib/format";
 import { useRecordTitle } from "@/app/record-name";
 import { Detail, Details, Section } from "@/components/detail";
-import { TextareaField } from "@/components/form-fields";
+import { SelectField, TextareaField } from "@/components/form-fields";
 import { StatusBadge } from "@/components/status";
 import { TextLink } from "@/components/lists";
+import { personOptionsQuery } from "@/modules/people/api";
 import { requestQuery } from "./api";
 
 /** An address of the sending app, as a link that opens in a new tab. */
@@ -27,46 +28,76 @@ function ExternalLink({ href, children }: { href: string; children: string }) {
   );
 }
 
-/** People who may be this person: an approver links one instead of adding a new person. */
+/**
+ * People who may be this person, and a choice of everyone else: an approver
+ * links one instead of adding a new person.
+ */
 function Matches({ request }: { request: IdentityRequestDetail }) {
-  const [chosen, setChosen] = useState<IdentityRequestDetail["matches"][number] | null>(null);
+  const [chosen, setChosen] = useState<{ id: number; name: string } | null>(null);
+  const [other, setOther] = useState("");
+  const people = useQuery(personOptionsQuery()).data?.managers ?? [];
   const link = useAction();
-  if (request.matches.length === 0) return null;
   return (
     <Section
       title="Already here?"
-      description="People who may be the requested person. Link one to approve the request without adding a new person."
+      description="Link a person who is already here, e.g. one Personio imported or someone who returns, to approve the request without adding a new person."
     >
-      <Table scrollLabel="Possible matches">
-        <TableHeader>
-          <TableRow>
-            <TableHead>Person</TableHead>
-            <TableHead>Work email</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Why</TableHead>
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {request.matches.map((match) => (
-            <TableRow key={match.id}>
-              <TableCell>
-                <TextLink to={`/people/${match.id}`}>{match.name}</TextLink>
-              </TableCell>
-              <TableCell className="text-muted-foreground">{match.workEmail ?? "—"}</TableCell>
-              <TableCell>
-                <StatusBadge value={match.status} labels={PERSON_STATUS_LABELS} />
-              </TableCell>
-              <TableCell className="text-sm">{match.reason}</TableCell>
-              <TableCell className="text-right">
-                <Button variant="outline" size="sm" onClick={() => setChosen(match)}>
-                  Link
-                </Button>
-              </TableCell>
+      {request.matches.length > 0 ? (
+        <Table scrollLabel="Possible matches">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Person</TableHead>
+              <TableHead>Work email</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Why</TableHead>
+              <TableHead />
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {request.matches.map((match) => (
+              <TableRow key={match.id}>
+                <TableCell>
+                  <TextLink to={`/people/${match.id}`}>{match.name}</TextLink>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{match.workEmail ?? "—"}</TableCell>
+                <TableCell>
+                  <StatusBadge value={match.status} labels={PERSON_STATUS_LABELS} />
+                </TableCell>
+                <TableCell className="text-sm">{match.reason}</TableCell>
+                <TableCell className="text-right">
+                  <Button variant="outline" size="sm" onClick={() => setChosen(match)}>
+                    Link
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <p className="text-muted-foreground text-sm">No one here has the same name or email.</p>
+      )}
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="w-full sm:w-80">
+          <SelectField
+            id="link-person"
+            label="Another person"
+            options={people.map((person) => ({ value: String(person.id), label: person.name }))}
+            empty="Choose a person"
+            value={other}
+            onChange={setOther}
+          />
+        </div>
+        <Button
+          variant="outline"
+          disabled={other === ""}
+          onClick={() => {
+            const person = people.find((candidate) => String(candidate.id) === other);
+            if (person) setChosen(person);
+          }}
+        >
+          Link
+        </Button>
+      </div>
       <ConfirmDialog
         open={chosen !== null}
         onOpenChange={(open) => {

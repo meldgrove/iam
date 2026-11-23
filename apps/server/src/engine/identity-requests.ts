@@ -19,6 +19,7 @@ import { record } from "./audit";
 import { sendEmail } from "./email";
 import { fullName } from "./people";
 import { loadSettings, notificationRecipients } from "./settings";
+import { logger } from "../logger";
 
 /**
  * Identity requests: other apps ask for a person through the API
@@ -157,7 +158,12 @@ export async function receiveRequest(
       target: { type: "identityrequest", id: created.id },
       details: { person_type: created.personType, external_id: created.externalId },
     });
-    onCommit(() => notifyRequest(created));
+    // Not awaited: a slow mail server must not hold up the sending app's answer.
+    onCommit(() => {
+      void notifyRequest(created).catch((error: unknown) =>
+        logger.warn({ err: error, requestId: created.id }, "identity request email failed"),
+      );
+    });
     return { request: created, created: true };
   });
 }

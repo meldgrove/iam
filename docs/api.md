@@ -14,8 +14,10 @@ workflows.
    apps may request (employee, intern, freelancer, volunteer, external).
    With none chosen, the app accepts no requests.
 2. **Admin › API keys:** create a key per app, named after it. The key is
-   shown once; store it in the other app. Revoke a key that leaked or is no
-   longer used; create a new one instead.
+   shown once; store it in the other app. IAM keeps its SHA-256 and its
+   first characters, to tell keys apart. Revoke a key that leaked or is no
+   longer used; create a new one instead. Every key may read and cancel every
+   request, so a new key takes over from the one it replaces.
 3. Optional: **Admin › Settings › Notification emails** get an email for each
    new request (through the email connection).
 
@@ -59,7 +61,7 @@ list means the app accepts no requests.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `externalId` | yes | The sender's reference, e.g. `helpdesk:<ticket ID>`, at most 255 characters. One request per reference: sending it again answers with the request stored first (`200` instead of `201`), whatever the body says. |
+| `externalId` | yes | The sender's reference, at most 255 characters. References are shared by every key, so start them with the app, e.g. `helpdesk:<ID>`. One request per reference: sending a valid body with it again answers with the request stored first (`200` instead of `201`), even when the body differs. |
 | `externalUrl` | no | An http(s) link to the sender's record, shown to approvers. |
 | `requestedBy` | no | `{ "name", "email" }` of whoever asked, as the sender knows them. IAM does not check it. |
 | `firstName`, `lastName` | yes | |
@@ -112,7 +114,8 @@ the same person (same personal or work email, or same name). An approver:
   the approver completes it (e.g. the work email) and saves. The request is
   approved in the same step. Onboarding follows as for anyone added by hand.
 - **links a person** who is already here, e.g. one Personio imported or
-  someone who returns. Nothing changes in the person's record.
+  someone who returns: one of the suggestions, or anyone else. Nothing
+  changes in the person's record.
 - **rejects** the request with a reason the sender shows the people who asked.
 
 Every step is in the audit log; the key's actions under `API key "<name>"`.
