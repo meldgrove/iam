@@ -29,6 +29,13 @@
       "when": 1795435073368,
       "tag": "0003_identity_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795438533548,
+      "tag": "0004_request_fingerprint",
+      "breakpoints": true
     }
   ]
 }

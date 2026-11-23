@@ -41,6 +41,7 @@ names the fields to fix, with a message each.
 | `403` `identity_requests_off` | The installation accepts no identity requests (Admin › Settings). |
 | `404` | No request with this ID. |
 | `409` `request_closed` | The request was decided already, so it cannot be cancelled. |
+| `409` `reference_reused` | The reference was already used for a request with other details. |
 | `422` `validation_error` | Fix the named fields, e.g. a person type this installation does not accept. |
 
 ### `GET /identity-requests/options`
@@ -61,7 +62,7 @@ list means the app accepts no requests.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `externalId` | yes | The sender's reference, at most 255 characters. References are shared by every key, so start them with the app, e.g. `helpdesk:<ID>`. One request per reference: sending a valid body with it again answers with the request stored first (`200` instead of `201`), even when the body differs. |
+| `externalId` | yes | The sender's reference, at most 255 characters. References are shared by every key, so start them with the app, e.g. `helpdesk:<ID>`. One request per reference: the same details again answer with the request stored first (`200` instead of `201`); other details under the same reference are refused (`409 reference_reused`). Send changes as a new request. |
 | `externalUrl` | no | An http(s) link to the sender's record, shown to approvers. |
 | `requestedBy` | no | `{ "name", "email" }` of whoever asked, as the sender knows them. IAM does not check it. |
 | `firstName`, `lastName` | yes | |
@@ -107,8 +108,10 @@ them.
 ## What approvers see
 
 **Requests** lists the open requests; the sidebar counts them. A request
-shows what was asked, who asked, through which key, and people who may be
-the same person (same personal or work email, or same name). An approver:
+shows what was asked, who asked, through which key, people who may be the
+same person (same personal or work email, or same name), and other open or
+approved requests that may be for the same person (same personal email, or
+same name and start date), e.g. sent from two tickets. An approver:
 
 - **adds the person:** the person form opens prefilled from the request;
   the approver completes it (e.g. the work email) and saves. The request is

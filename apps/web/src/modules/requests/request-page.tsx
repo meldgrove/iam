@@ -167,6 +167,47 @@ function Matches({ request }: { request: IdentityRequestDetail }) {
   );
 }
 
+/** Other requests that may be for the same person, e.g. sent from two tickets: a hint, never a block. */
+function Duplicates({ request }: { request: IdentityRequestDetail }) {
+  const format = useFormatter();
+  if (request.duplicates.length === 0) return null;
+  return (
+    <Section
+      title="Possible duplicate requests"
+      description="Other requests that may be for the same person. If one is, reject this request with a reason such as “Duplicate of the request from …”."
+    >
+      <Table scrollLabel="Possible duplicate requests">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Request</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Sent with</TableHead>
+            <TableHead>Received</TableHead>
+            <TableHead>Why</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {request.duplicates.map((other) => (
+            <TableRow key={other.id}>
+              <TableCell>
+                <TextLink to={`/requests/${other.id}`}>{other.name}</TextLink>
+              </TableCell>
+              <TableCell>
+                <StatusBadge value={other.status} labels={IDENTITY_REQUEST_STATUS_LABELS} />
+              </TableCell>
+              <TableCell className="text-sm">{other.source ? `API key "${other.source}"` : "—"}</TableCell>
+              <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+                {format.dateTime(other.createdAt)}
+              </TableCell>
+              <TableCell className="text-sm">{other.reason}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Section>
+  );
+}
+
 /** Approvers add the person (a prefilled form) or reject the request with a reason. */
 function Decide({ request }: { request: IdentityRequestDetail }) {
   const [reason, setReason] = useState("");
@@ -271,6 +312,7 @@ export function RequestPage({ id }: { id: number }) {
       {request.status === "open" ? (
         me.isApprover ? (
           <>
+            <Duplicates request={request} />
             <Matches request={request} />
             <Decide request={request} />
           </>

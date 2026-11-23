@@ -800,6 +800,11 @@ export const identityRequests = pgTable(
     externalUrl: varchar("external_url", { length: 500 })
       .notNull()
       .$default(() => ""),
+    /**
+     * SHA-256 of what was sent, so a resend of the reference with other
+     * details is refused instead of silently answered with the first request.
+     */
+    requestFingerprint: varchar("request_fingerprint", { length: 64 }).notNull().default(""),
     /** Who asked, as the sending app states it. */
     requestedByName: varchar("requested_by_name", { length: 200 })
       .notNull()
