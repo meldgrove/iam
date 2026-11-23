@@ -63,6 +63,7 @@ describe("users and settings", () => {
         automaticOffboarding: false,
         removalLimitPerDay: 2,
         notificationEmails: "it@example.invalid",
+        identityRequestTypes: [],
       },
     });
     expect(response.status).toBe(200);

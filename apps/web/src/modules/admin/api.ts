@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, type QueryClient, type QueryKey } from "@t
 import { toast } from "sonner";
 import type {
   AdapterInfo,
+  ApiKeyRow,
   ConnectionDetail,
   ConnectionForm,
   ConnectionRow,
@@ -58,6 +59,8 @@ export const userOptionsQuery = {
 };
 
 export const settingsQuery = { queryKey: ["settings"], queryFn: () => api.get<Settings>("/settings") };
+
+export const apiKeysQuery = { queryKey: ["api-keys"], queryFn: () => api.get<ApiKeyRow[]>("/api-keys") };
 
 /**
  * What a change to a connection may change elsewhere: its pages, the group

@@ -5,7 +5,12 @@ import type { Me } from "@iam/shared/api/iam";
  * open often, with a letter they can guess, each letter once; none for admin
  * pages; "o" is the start page.
  */
-export type NavItem = { label: string; to: string; shortcut?: string; badge?: "tasks" | "jobs" };
+export type NavItem = {
+  label: string;
+  to: string;
+  shortcut?: string;
+  badge?: "tasks" | "jobs" | "requests";
+};
 export type NavGroup = { label?: string; items: NavItem[] };
 
 /**
@@ -19,6 +24,7 @@ export function navigationFor(me: Pick<Me, "isAdmin">): NavGroup[] {
       items: [
         { label: "Dashboard", to: "/", shortcut: "o" },
         { label: "People", to: "/people", shortcut: "p" },
+        { label: "Requests", to: "/requests", shortcut: "r", badge: "requests" },
         { label: "Tasks", to: "/tasks", shortcut: "t", badge: "tasks" },
         { label: "Workflows", to: "/workflows", shortcut: "w" },
         { label: "Jobs", to: "/jobs", shortcut: "j", badge: "jobs" },
@@ -39,6 +45,7 @@ export function navigationFor(me: Pick<Me, "isAdmin">): NavGroup[] {
       items: [
         { label: "Connections", to: "/admin/connections" },
         { label: "Users and roles", to: "/admin/users" },
+        { label: "API keys", to: "/admin/api-keys" },
         { label: "Settings", to: "/admin/settings" },
       ],
     });
@@ -52,7 +59,7 @@ export const PREFERENCES_PATH = "/preferences";
 export type Crumb = { label: string; href?: string };
 
 /** Labels of the pages below a sidebar item. */
-const SUB_PAGES: Record<string, string> = { new: "New", edit: "Edit" };
+const SUB_PAGES: Record<string, string> = { new: "New", edit: "Edit", approve: "Approve" };
 
 /**
  * Where a page sits: the sidebar item it belongs to, then the record by its

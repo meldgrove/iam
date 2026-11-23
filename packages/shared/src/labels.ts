@@ -93,6 +93,14 @@ export type TaskKind = keyof typeof TASK_KIND_LABELS;
 export const TASK_STATUS_LABELS = { open: "Open", done: "Done", cancelled: "Cancelled" } as const;
 export type TaskStatus = keyof typeof TASK_STATUS_LABELS;
 
+export const IDENTITY_REQUEST_STATUS_LABELS = {
+  open: "Open",
+  approved: "Approved",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
+} as const;
+export type IdentityRequestStatus = keyof typeof IDENTITY_REQUEST_STATUS_LABELS;
+
 export const SYNC_KIND_LABELS = {
   groups: "Group import",
   accounts: "Account comparison",
@@ -134,7 +142,7 @@ export const FINISHED_JOB_STATUSES = [
 /** The tone of a status badge. */
 export type Tone = "ok" | "info" | "warn" | "danger" | "neutral";
 const TONES: Record<Exclude<Tone, "neutral">, string[]> = {
-  ok: ["active", "succeeded", "completed", "done", "ok"],
+  ok: ["active", "succeeded", "completed", "done", "ok", "approved"],
   info: ["onboarding", "running", "queued", "planned", "untested", "unknown", "rehearsed"],
   warn: ["held", "manual", "waiting", "offboarding", "open", "missing"],
   danger: ["failed", "error"],

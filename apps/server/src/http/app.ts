@@ -11,6 +11,7 @@ import { webApp } from "./static";
 import { config } from "../config";
 import { API_MODULES } from "../modules";
 import health from "../modules/health";
+import integration from "../modules/integration";
 import { signInRoutes } from "./sign-in";
 import { logger } from "../logger";
 import { errorReportingSources, tracingMiddleware } from "../error-reporting";
@@ -144,6 +145,8 @@ export function createApp() {
   api.use("*", bodyLimit({ maxSize: 2 * 1024 * 1024 }), sameOrigin, authenticate);
   for (const module of API_MODULES) api.route("/", module);
   app.route("/api/v1", api);
+  // Other apps, with an API key instead of a session (docs/api.md).
+  app.route("/api/integration/v1", integration);
   app.all("/api/*", (c) => c.json({ error: { code: "not_found", message: "Not found" } }, 404));
 
   app.route("/", webApp());

@@ -8,7 +8,7 @@ import { jsonBody, requireRole } from "../http/middleware";
 import { record } from "../engine/audit";
 import { loadSettings } from "../engine/settings";
 
-/** Admin › Settings: lifecycle rules and notifications. */
+/** Admin › Settings: lifecycle rules, notifications and which identity requests other apps may send. */
 const router = new Hono<AppEnv>();
 
 const FIELD_NAMES: Record<keyof Settings, string> = {
@@ -18,6 +18,7 @@ const FIELD_NAMES: Record<keyof Settings, string> = {
   automaticOffboarding: "automatic_offboarding",
   removalLimitPerDay: "removal_limit_per_day",
   notificationEmails: "notification_emails",
+  identityRequestTypes: "identity_request_types",
 };
 
 function view(settings: Settings): Settings {
@@ -28,6 +29,7 @@ function view(settings: Settings): Settings {
     automaticOffboarding: settings.automaticOffboarding,
     removalLimitPerDay: settings.removalLimitPerDay,
     notificationEmails: settings.notificationEmails,
+    identityRequestTypes: settings.identityRequestTypes,
   };
 }
 
@@ -42,7 +44,7 @@ router.put("/settings", async (c) => {
   await atomic(async () => {
     const current = view(await loadSettings());
     const changed = (Object.keys(FIELD_NAMES) as (keyof Settings)[]).filter(
-      (key) => current[key] !== input[key],
+      (key) => JSON.stringify(current[key]) !== JSON.stringify(input[key]),
     );
     await q().update(appSettings).set(input).where(eq(appSettings.id, 1));
     await record("settings.saved", "Changed settings", {

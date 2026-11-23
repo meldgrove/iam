@@ -71,6 +71,8 @@ export function AppLayout() {
           <Count value={me.counts.openTasks} />
         ) : item.badge === "jobs" ? (
           <Count value={me.counts.failedJobs + me.counts.heldJobs} alert />
+        ) : item.badge === "requests" ? (
+          <Count value={me.counts.openRequests} />
         ) : undefined,
     })),
   }));

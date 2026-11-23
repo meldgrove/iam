@@ -15,7 +15,7 @@ export function me(role: Me["role"]): Me {
     updatesButton: false,
     readOnly: false,
     version: "0.0.0",
-    counts: { openTasks: 0, failedJobs: 0, heldJobs: 0 },
+    counts: { openTasks: 0, failedJobs: 0, heldJobs: 0, openRequests: 0 },
   };
 }
 

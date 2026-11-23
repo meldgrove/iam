@@ -3,7 +3,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { devLoginSchema, type AuthConfig, type Me } from "@iam/shared/api/iam";
 import { ROLE_LABELS } from "@iam/shared/labels";
 import { config } from "../config";
-import { jobs, tasks, users } from "../db/schema";
+import { identityRequests, jobs, tasks, users } from "../db/schema";
 import { q } from "../db/tx";
 import type { AppEnv } from "../http/env";
 import { hasRole, jsonBody, requireRole } from "../http/middleware";
@@ -47,6 +47,7 @@ router.get("/me", async (c) => {
       openTasks: await countOf(tasks, eq(tasks.status, "open")),
       failedJobs: await countOf(jobs, eq(jobs.status, "failed")),
       heldJobs: await countOf(jobs, eq(jobs.status, "held")),
+      openRequests: await countOf(identityRequests, eq(identityRequests.status, "open")),
     },
   };
   return c.json(body);

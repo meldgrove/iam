@@ -7,6 +7,7 @@ import { ConnectionPage } from "./connection-page";
 import { UsersPage } from "./users-page";
 import { UserFormPage } from "./user-form-page";
 import { SettingsPage } from "./settings-page";
+import { ApiKeysPage } from "./api-keys-page";
 
 /** A route parameter of the current page. */
 function useParam(name: "connectionId" | "userId" | "adapter"): string {
@@ -59,8 +60,9 @@ const userRoute = createRoute({
 });
 
 const settingsRoute = createRoute({ ...admin, path: "/admin/settings", component: SettingsPage });
+const apiKeysRoute = createRoute({ ...admin, path: "/admin/api-keys", component: ApiKeysPage });
 
-/** Admin: connections, users and roles, settings (admins only; the server checks too). */
+/** Admin: connections, users and roles, API keys, settings (admins only; the server checks too). */
 export const routes: AnyRoute[] = [
   connectionsRoute,
   chooseAdapterRoute,
@@ -70,5 +72,6 @@ export const routes: AnyRoute[] = [
   usersRoute,
   userNewRoute,
   userRoute,
+  apiKeysRoute,
   settingsRoute,
 ];

@@ -22,6 +22,7 @@ import {
   teams,
   workflows,
   type Person,
+  type User,
   type WorkflowKind,
 } from "../db/schema";
 import { atomic, q } from "../db/tx";
@@ -213,10 +214,10 @@ router.get("/people/:id", async (c) => {
   return c.json(body);
 });
 
-type Values = Omit<typeof people.$inferInsert, "id">;
+export type Values = Omit<typeof people.$inferInsert, "id">;
 
 /** Validates the form as Django's PersonForm did, beyond the schema: choices that exist, a unique work email. */
-async function cleanPerson(
+export async function cleanPerson(
   input: ReturnType<typeof personInputSchema.parse>,
   personId: number | null,
 ): Promise<Values> {
@@ -278,18 +279,23 @@ const FIELD_NAMES: Record<string, string> = {
   notes: "notes",
 };
 
-router.post("/people", async (c) => {
-  const user = requireRole(c, "approver");
-  const values = await cleanPerson(await jsonBody(c, personInputSchema), null);
-  const person = await atomic(async () => {
+/** Adds a person from the checked values of the form, and audits it. */
+export async function addPerson(values: Values, actor: User): Promise<Person> {
+  return atomic(async () => {
     const [created] = await q().insert(people).values(values).returning();
     await record("person.created", `Added ${fullName(created!)}`, {
-      actor: user,
+      actor,
       personId: created!.id,
       target: { type: "person", id: created!.id },
     });
     return created!;
   });
+}
+
+router.post("/people", async (c) => {
+  const user = requireRole(c, "approver");
+  const values = await cleanPerson(await jsonBody(c, personInputSchema), null);
+  const person = await addPerson(values, user);
   return c.json({ id: person.id, message: `Added ${fullName(person)}.` }, 201);
 });
 

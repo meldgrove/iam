@@ -15,6 +15,7 @@ const settings: Settings = {
   automaticOffboarding: true,
   removalLimitPerDay: 5,
   notificationEmails: "",
+  identityRequestTypes: ["employee"],
 };
 
 function renderSettings() {
@@ -52,5 +53,22 @@ describe("settings", () => {
       onboardingLeadDays: 10,
       removalLimitPerDay: 3,
     });
+  });
+
+  it("chooses the person types other apps may request", async () => {
+    const fetch = stubApi({
+      "GET /settings": { body: settings },
+      "PUT /settings": { body: { ...settings, identityRequestTypes: ["volunteer"], message: "Saved." } },
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    const employee = await screen.findByRole("checkbox", { name: "Employee" });
+    expect(employee).toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: "Volunteer" }));
+    await user.click(employee);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // (The toast of the test before stays in sonner's store: wait for the request instead.)
+    await waitFor(() => expect(requests(fetch, "PUT /settings")).toHaveLength(1));
+    expect(requests(fetch, "PUT /settings")[0]!.body).toMatchObject({ identityRequestTypes: ["volunteer"] });
   });
 });

@@ -8,6 +8,10 @@ them should have, and the onboarding and offboarding that follow from it.
   added by hand or imported from Personio.
 - **Access profiles** say which apps a kind of person gets an account in, and
   the groups there. **Teams** add their own groups.
+- **Identity requests** from other apps, such as Meldgrove Helpdesk: they
+  ask for a new person through an API with a key; an approver adds the
+  person, links one who is already here, or rejects the request. Admins
+  choose which person types other apps may request.
 - **Workflows** carry out onboarding, access updates and offboarding. The worker
   makes each change in the connected app, retries what fails for a moment, and
   hands everything else to a person as a task.
@@ -52,6 +56,7 @@ Keycloak connection: see [docs/development.md](docs/development.md).
 - [Sign-in and roles](docs/authentication.md): OpenID Connect, Keycloak, roles, first admin
 - [Connections](docs/connections.md): setting up each app
 - [How it works](docs/architecture.md): desired access, workflows, jobs, tasks, sync
+- [API for other apps](docs/api.md): identity requests with an API key
 - [Updates](docs/updates.md) and [releases](docs/releases.md)
 - [Development](docs/development.md): local stack, tests, end-to-end check
 - [Glossary](CONTEXT.md)

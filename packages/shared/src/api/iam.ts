@@ -3,6 +3,7 @@ import { isEmail } from "../email";
 import type {
   AccountStatus,
   AdapterKind,
+  IdentityRequestStatus,
   ConnectionMode,
   ConnectionStatus,
   JobAction,
@@ -107,7 +108,7 @@ export type Me = {
   readOnly: boolean;
   version: string;
   /** For the sidebar. */
-  counts: { openTasks: number; failedJobs: number; heldJobs: number };
+  counts: { openTasks: number; failedJobs: number; heldJobs: number; openRequests: number };
 };
 
 export const devLoginSchema = z.object({ email: z.string().min(1).max(254) });
@@ -497,6 +498,8 @@ export type Settings = {
   automaticOffboarding: boolean;
   removalLimitPerDay: number;
   notificationEmails: string;
+  /** The person types other apps may request (identity requests). Empty: none. */
+  identityRequestTypes: PersonType[];
 };
 
 const count = z
@@ -512,5 +515,136 @@ export const settingsInputSchema = z.object({
   automaticOffboarding: z.boolean(),
   removalLimitPerDay: count,
   notificationEmails: z.string().max(100_000),
+  identityRequestTypes: z
+    .array(z.enum(PERSON_TYPES as [PersonType, ...PersonType[]], "Select a valid choice."))
+    .max(PERSON_TYPES.length)
+    // Stored in the order of the types, once each.
+    .transform((types) => PERSON_TYPES.filter((type) => types.includes(type))),
 });
 export type SettingsInput = z.input<typeof settingsInputSchema>;
+
+// -- identity requests and API keys ----------------------------------------------------
+
+export type IdentityRequestRow = {
+  id: number;
+  name: string;
+  personType: PersonType;
+  status: IdentityRequestStatus;
+  startDate: string | null;
+  requestedBy: string;
+  createdAt: string;
+  person: Ref | null;
+};
+
+export type IdentityRequestDetail = IdentityRequestRow & {
+  firstName: string;
+  lastName: string;
+  personalEmail: string;
+  jobTitle: string;
+  team: Ref | null;
+  managerEmail: string;
+  /** The person whose work email is the manager email, if any. */
+  manager: Ref | null;
+  endDate: string | null;
+  notes: string;
+  requestedByName: string;
+  requestedByEmail: string;
+  externalId: string;
+  externalUrl: string;
+  /** The API key the request came with. */
+  source: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  decisionNote: string;
+  /** People who may be the same person: same personal or work email, or same name. */
+  matches: (Ref & { status: PersonStatus; workEmail: string | null; reason: string })[];
+};
+
+export const rejectRequestSchema = z.object({
+  reason: z.string().trim().min(1, "Say why, for the person who asked.").max(1000),
+});
+
+export const linkRequestSchema = z.object({
+  personId: z.number("Select a person.").int().positive("Select a person."),
+});
+
+export type ApiKeyRow = {
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  createdBy: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+};
+
+export const apiKeyInputSchema = z.object({
+  name: required(100),
+});
+
+/** A new key: `key` is shown this once. */
+export type ApiKeyCreated = { key: string; apiKey: ApiKeyRow; message: string };
+
+// -- the API for other apps (/api/integration/v1, with an API key) ------------------------
+
+/** An http(s) URL, or empty. */
+const linkField = z
+  .string()
+  .trim()
+  .max(500, "Ensure this value has at most 500 characters.")
+  .refine(
+    (value) => value === "" || (/^https?:\/\//i.test(value) && URL.canParse(value)),
+    "Enter a valid URL.",
+  );
+
+/** What another app sends to request a person (POST /api/integration/v1/identity-requests). */
+export const identityRequestCreateSchema = z
+  .object({
+    /** The sender's reference, e.g. its ticket. Sending it again returns the same request. */
+    externalId: required(255),
+    externalUrl: linkField.default(""),
+    requestedBy: z
+      .object({ name: trimmed(200).default(""), email: emailField.default("") })
+      .default({ name: "", email: "" }),
+    firstName: required(150),
+    lastName: required(150),
+    personalEmail: emailField.default(""),
+    jobTitle: trimmed(200).default(""),
+    personType: z.enum(PERSON_TYPES as [PersonType, ...PersonType[]], "Select a valid choice."),
+    teamId: idField,
+    managerEmail: emailField.default(""),
+    startDate: dateField,
+    endDate: dateField,
+    notes: z.string().trim().max(5000, "Ensure this value has at most 5000 characters.").default(""),
+  })
+  .superRefine((value, ctx) => {
+    if (value.startDate && value.endDate && value.endDate < value.startDate) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["endDate"],
+        message: "The last day cannot be before the start date.",
+      });
+    }
+  });
+export type IdentityRequestCreate = z.input<typeof identityRequestCreateSchema>;
+
+/** A request as the sending app reads it back. */
+export type IdentityRequestView = {
+  id: number;
+  externalId: string;
+  status: IdentityRequestStatus;
+  createdAt: string;
+  decidedAt: string | null;
+  /** Rejected: why. */
+  reason: string;
+  /** The request's page in IAM. */
+  url: string;
+  /** Approved: the person in IAM. */
+  person: { status: PersonStatus; workEmail: string | null; startDate: string | null } | null;
+};
+
+/** The choices of a request form: the person types this installation accepts, and the teams. */
+export type IdentityRequestOptions = {
+  personTypes: { value: PersonType; label: string }[];
+  teams: Ref[];
+};
