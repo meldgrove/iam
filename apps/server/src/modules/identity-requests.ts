@@ -29,6 +29,7 @@ import { fullName } from "../engine/people";
 import {
   approveRequest,
   newApiKey,
+  possibleDuplicates,
   possibleMatches,
   rejectRequest,
   requestName,
@@ -145,6 +146,7 @@ router.get("/identity-requests/:id", async (c) => {
     decidedBy: decidedBy ? decidedBy.displayName || decidedBy.email : null,
     decisionNote: request.decisionNote,
     matches: request.status === "open" ? await possibleMatches(request) : [],
+    duplicates: request.status === "open" ? await possibleDuplicates(request) : [],
   };
   return c.json(body);
 });

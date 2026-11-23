@@ -40,6 +40,7 @@ function identityRequest(overrides: Partial<IdentityRequestDetail> = {}): Identi
     decidedBy: null,
     decisionNote: "",
     matches: [],
+    duplicates: [],
     ...overrides,
   };
 }
@@ -155,6 +156,37 @@ describe("identity request page", () => {
     await waitFor(() => expect(requests(fetch, "POST /identity-requests/5/link")).toHaveLength(1));
     expect(requests(fetch, "POST /identity-requests/5/link")[0]!.body).toEqual({ personId: 7 });
     expect(requests(fetch, "GET /people")[0]!.url).toContain("q=Grace+Brewster");
+  });
+
+  it("points out other requests that may be for the same person", async () => {
+    user.current = me("approver");
+    stubApi({
+      "GET /identity-requests/5": {
+        body: identityRequest({
+          duplicates: [
+            {
+              id: 4,
+              name: "Grace Hopper",
+              status: "open",
+              source: "Helpdesk",
+              externalId: "HD-41",
+              createdAt: "2026-11-22T09:00:00.000Z",
+              reason: "Same personal email",
+            },
+          ],
+        }),
+      },
+      "GET /people/options": { body: options },
+    });
+    renderPage(<RequestPage id={5} />);
+    const section = (await screen.findByRole("heading", { name: "Possible duplicate requests" })).closest(
+      "[data-slot=card]",
+    ) as HTMLElement;
+    expect(within(section).getByRole("link", { name: "Grace Hopper" })).toHaveAttribute(
+      "href",
+      "/requests/4",
+    );
+    expect(within(section).getByText("Same personal email")).toBeVisible();
   });
 
   it("shows a viewer the request without the decision", async () => {

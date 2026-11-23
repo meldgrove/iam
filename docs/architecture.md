@@ -123,7 +123,10 @@ stored, not a person: nothing reaches people, policy or connected apps
 until an approver decides. Admin › Settings chooses the person types other
 apps may request; other types are refused, and with none chosen every
 request is. A reference (`externalId`) makes a resent request return the
-one stored first.
+one stored first; IAM keeps a fingerprint of the details, so the same
+reference with other details is refused (409) rather than answered with
+the first request. The inbox points out other open or approved requests that
+may be for the same person.
 
 An approver adds the person from the request (the person form, prefilled;
 saving adds the person and approves the request in one transaction), links

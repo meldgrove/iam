@@ -558,6 +558,14 @@ export type IdentityRequestDetail = IdentityRequestRow & {
   decisionNote: string;
   /** People who may be the same person: same personal or work email, or same name. */
   matches: (Ref & { status: PersonStatus; workEmail: string | null; reason: string })[];
+  /** Other open or approved requests that may be for the same person (a hint, never a block). */
+  duplicates: (Ref & {
+    status: IdentityRequestStatus;
+    source: string;
+    externalId: string;
+    createdAt: string;
+    reason: string;
+  })[];
 };
 
 export const rejectRequestSchema = z.object({

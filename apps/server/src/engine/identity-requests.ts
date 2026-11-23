@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { z } from "zod";
 import type { identityRequestCreateSchema, IdentityRequestView } from "@iam/shared/api/iam";
 import { PERSON_TYPE_LABELS } from "@iam/shared/labels";
@@ -98,18 +98,50 @@ type CreateInput = z.output<typeof identityRequestCreateSchema>;
 /** Lower-case plural of a type for messages, e.g. "interns". */
 const typePlural = (type: CreateInput["personType"]) => `${PERSON_TYPE_LABELS[type].toLowerCase()}s`;
 
+/** JSON with sorted keys: the same details give the same text. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/** The fingerprint of a request's details, after validation (trimmed, defaults filled in). */
+export function requestFingerprint(input: CreateInput): string {
+  return createHash("sha256").update(canonical(input)).digest("hex");
+}
+
 /**
- * Stores a request from another app. The same `externalId` again returns
- * the request stored first (`created: false`), whatever the settings now say.
+ * The request stored for this reference. A resend with the same details is
+ * answered with it; other details under the same reference are refused, so
+ * the sender never believes IAM holds what it does not.
+ */
+function sameRequest(request: IdentityRequest, fingerprint: string): IdentityRequest {
+  if (request.requestFingerprint && request.requestFingerprint !== fingerprint) {
+    throw conflict(
+      "This reference was already used for a request with other details. Send changes as a new request.",
+      "reference_reused",
+    );
+  }
+  return request;
+}
+
+/**
+ * Stores a request from another app. The same `externalId` with the same
+ * details returns the request stored first (`created: false`), whatever the
+ * settings now say; with other details it is refused (409 reference_reused).
  */
 export async function receiveRequest(
   input: CreateInput,
   key: ApiKey,
 ): Promise<{ request: IdentityRequest; created: boolean }> {
+  const fingerprint = requestFingerprint(input);
   const existing = async () =>
     (await q().select().from(identityRequests).where(eq(identityRequests.externalId, input.externalId)))[0];
   const first = await existing();
-  if (first) return { request: first, created: false };
+  if (first) return { request: sameRequest(first, fingerprint), created: false };
 
   const allowed = (await loadSettings()).identityRequestTypes;
   if (allowed.length === 0) {
@@ -135,6 +167,7 @@ export async function receiveRequest(
       .values({
         externalId: input.externalId,
         externalUrl: input.externalUrl,
+        requestFingerprint: fingerprint,
         requestedByName: input.requestedBy.name,
         requestedByEmail: input.requestedBy.email.toLowerCase(),
         firstName: input.firstName,
@@ -152,7 +185,7 @@ export async function receiveRequest(
       .onConflictDoNothing({ target: identityRequests.externalId })
       .returning();
     // Sent twice at once: the other one stored it.
-    if (!created) return { request: (await existing())!, created: false };
+    if (!created) return { request: sameRequest((await existing())!, fingerprint), created: false };
     await record("identity_request.received", `Received an identity request for ${requestName(created)}`, {
       actorLabel: keyLabel(key),
       target: { type: "identityrequest", id: created.id },
@@ -297,5 +330,46 @@ export async function possibleMatches(request: IdentityRequest) {
         : email && (person.workEmail ?? "").toLowerCase() === email
           ? "Work email is the requested personal email"
           : "Same name",
+  }));
+}
+
+/**
+ * Other requests that may be for the same person: open or approved ones
+ * with the same personal email, or the same name and start date. A hint for
+ * approvers (two people can share a name), never a block.
+ */
+export async function possibleDuplicates(request: IdentityRequest) {
+  const email = request.personalEmail.toLowerCase();
+  const sameName = and(
+    sql`lower(${identityRequests.firstName}) = ${request.firstName.toLowerCase()}`,
+    sql`lower(${identityRequests.lastName}) = ${request.lastName.toLowerCase()}`,
+  );
+  const rows = await q()
+    .select({ request: identityRequests, key: apiKeys.name })
+    .from(identityRequests)
+    .leftJoin(apiKeys, eq(apiKeys.id, identityRequests.apiKeyId))
+    .where(
+      and(
+        ne(identityRequests.id, request.id),
+        inArray(identityRequests.status, ["open", "approved"]),
+        or(
+          email ? sql`lower(${identityRequests.personalEmail}) = ${email}` : undefined,
+          request.startDate ? and(sameName, eq(identityRequests.startDate, request.startDate)) : undefined,
+        ),
+      ),
+    )
+    .orderBy(desc(identityRequests.createdAt), desc(identityRequests.id))
+    .limit(10);
+  return rows.map(({ request: other, key }) => ({
+    id: other.id,
+    name: requestName(other),
+    status: other.status,
+    source: key ?? "",
+    externalId: other.externalId,
+    createdAt: other.createdAt.toISOString(),
+    reason:
+      email && other.personalEmail.toLowerCase() === email
+        ? "Same personal email"
+        : "Same name and start date",
   }));
 }

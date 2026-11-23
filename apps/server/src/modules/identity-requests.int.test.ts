@@ -129,9 +129,22 @@ describe("identity requests", () => {
     });
     expect(created.body.url).toMatch(/\/requests\/\d+$/);
 
-    const again = await call("POST", "/identity-requests", key, { ...REQUEST, firstName: "Other" });
+    // The same details again (spelled with other spaces and capitals where IAM normalizes them): the same request.
+    const again = await call("POST", "/identity-requests", key, {
+      ...REQUEST,
+      firstName: " Grace ",
+      teamId: team.id,
+    });
     expect(again.status).toBe(200);
     expect(again.body.id).toBe(created.body.id);
+    // Other details under the same reference: refused, so the sender cannot believe IAM holds them.
+    const changed = await call("POST", "/identity-requests", key, {
+      ...REQUEST,
+      firstName: "Other",
+      teamId: team.id,
+    });
+    expect(changed.status).toBe(409);
+    expect(changed.body.error.code).toBe("reference_reused");
     const rows = await getDb().select().from(identityRequests);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -333,5 +346,32 @@ describe("identity requests", () => {
     expect(response.body.identityRequestTypes).toEqual(["employee", "volunteer"]);
     const [event] = await getDb().select().from(auditEvents).where(eq(auditEvents.action, "settings.saved"));
     expect(event!.details).toEqual({ fields: ["identity_request_types", "organization_name"] });
+  });
+
+  it("points approvers to other requests that may be for the same person", async () => {
+    const key = await createKey();
+    await allow("intern", "volunteer");
+    const approver = await makeUser("approver");
+    const send = async (externalId: string, changes: Record<string, unknown> = {}) =>
+      (await call("POST", "/identity-requests", key, { ...REQUEST, externalId, ...changes })).body
+        .id as number;
+    const first = await send("helpdesk:a");
+    const sameEmail = await send("helpdesk:b", { firstName: "G.", startDate: "2027-02-01" });
+    const sameNameAndStart = await send("helpdesk:c", { personalEmail: "other@personal.example.invalid" });
+    await send("helpdesk:d", { firstName: "Ada", personalEmail: "", startDate: "2027-01-04" });
+    const rejected = await send("helpdesk:e");
+    await request("POST", `/api/v1/identity-requests/${rejected}/reject`, {
+      user: approver,
+      body: { reason: "Duplicate." },
+    });
+
+    const detail = await request("GET", `/api/v1/identity-requests/${first}`, { user: approver });
+    expect(
+      detail.body.duplicates.map((other: { id: number; reason: string }) => [other.id, other.reason]),
+    ).toEqual([
+      [sameNameAndStart, "Same name and start date"],
+      [sameEmail, "Same personal email"],
+    ]);
+    expect(detail.body.duplicates[0]).toMatchObject({ source: "Helpdesk", externalId: "helpdesk:c" });
   });
 });
