@@ -4,7 +4,7 @@ import type { ActionResult } from "@iam/shared/api/iam";
 import { api, errorMessage } from "@/lib/api";
 
 /**
- * The queries an action on a person, workflow, job or task may change: they
+ * The queries an action on a person, workflow, job, task or identity request may change: they
  * all show the same work. `["me"]` holds the counts of the sidebar badges.
  */
 export const WORK_QUERY_KEYS: QueryKey[] = [
@@ -18,6 +18,8 @@ export const WORK_QUERY_KEYS: QueryKey[] = [
   ["task"],
   ["dashboard"],
   ["audit"],
+  ["identity-requests"],
+  ["identity-request"],
   ["me"],
 ];
 

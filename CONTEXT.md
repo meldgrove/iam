@@ -10,6 +10,12 @@ explains how the pieces work together.
 - **App user**: someone who may use this app, with a role (viewer, approver,
   admin). May be linked to a person; offboarding that person turns the app
   user off.
+- **Identity request**: another app's request to add a person (open,
+  approved, rejected, cancelled). An approver adds the person from it, links
+  a person already here, or rejects it. Only the person types chosen in
+  Admin › Settings can be requested.
+- **API key**: what another app sends identity requests with. Shown once;
+  the app keeps its hash. It reaches only the API for identity requests.
 - **Connection**: one connected app or service, configured in Admin ›
   Connections: an adapter type, settings, encrypted secrets, a mode
   (automatic, manual, read only) and an on/off switch.

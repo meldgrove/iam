@@ -7,7 +7,7 @@ import { authentication } from "../http/middleware";
 /** Empties every table between tests. */
 export async function resetDatabase() {
   await getDb().execute(sql`
-    truncate table iam_auditevent, iam_task, iam_job, iam_workflow, iam_syncrun, iam_account,
+    truncate table iam_identityrequest, iam_apikey, iam_auditevent, iam_task, iam_job, iam_workflow, iam_syncrun, iam_account,
       iam_profilegrant_groups, iam_profilegrant, iam_team_groups, iam_person, iam_providergroup,
       iam_connection, iam_accessprofile, iam_team, iam_session, iam_user, iam_appsettings,
       iam_workerheartbeat restart identity cascade

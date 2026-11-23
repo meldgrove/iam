@@ -130,8 +130,9 @@ when a deploy stops it, and web 40 seconds to finish its requests.
    unlinked.
 5. **People:** add them, or connect Personio to import them.
 6. **Admin › Settings:** onboarding lead time, automatic onboarding and
-   offboarding, the daily removal limit, who gets task emails, and the update
-   channel ([updates.md](updates.md#channels)).
+   offboarding, the daily removal limit, who gets task emails, the person
+   types other apps may request ([api.md](api.md)), and the update channel
+   ([updates.md](updates.md#channels)).
 7. Turn the connections on.
 
 ## Trying it with real data: read-only mode

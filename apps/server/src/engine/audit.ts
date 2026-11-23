@@ -13,6 +13,8 @@ export async function record(
   summary: string,
   options: {
     actor?: Pick<User, "id" | "email"> | null;
+    /** Who acted when it was no app user, e.g. an API key; default: the worker. */
+    actorLabel?: string;
     personId?: number | null;
     target?: Target | null;
     details?: Record<string, unknown>;
@@ -23,7 +25,7 @@ export async function record(
     .insert(auditEvents)
     .values({
       actorId: actor?.id ?? null,
-      actorLabel: (actor ? actor.email : WORKER_LABEL).slice(0, 255),
+      actorLabel: (actor ? actor.email : (options.actorLabel ?? WORKER_LABEL)).slice(0, 255),
       action,
       summary: summary.slice(0, 500),
       personId: options.personId ?? null,

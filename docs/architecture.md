@@ -115,6 +115,23 @@ would create it again. Keycloak can instead send its own set-password email;
 when it cannot send it (or set the temporary password), a task asks a person
 to do that.
 
+## Identity requests
+
+Other apps ask for people through the API for identity requests
+([api.md](api.md)), with an API key from Admin › API keys. A request is
+stored, not a person: nothing reaches people, policy or connected apps
+until an approver decides. Admin › Settings chooses the person types other
+apps may request; other types are refused, and with none chosen every
+request is. A reference (`externalId`) makes a resent request return the
+one stored first.
+
+An approver adds the person from the request (the person form, prefilled;
+saving adds the person and approves the request in one transaction), links
+a person already here, or rejects it with a reason. The sending app may
+cancel a request while it is open. The sending app reads the outcome and,
+once approved, the person's status and work email. Read-only mode stores
+requests as usual and sends no notification email.
+
 ## Read-only mode
 
 With `READ_ONLY=1` ([configuration.md](configuration.md)) the app can be

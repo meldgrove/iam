@@ -21,7 +21,8 @@ import { FormErrors, SelectField, TextareaField, TextField } from "@/components/
 import { useRecordTitle } from "@/app/record-name";
 import { personOptionsQuery, personQuery } from "./api";
 
-type Values = {
+/** The form's values, as text (IDs as strings, "" for none). */
+export type PersonFormValues = {
   firstName: string;
   lastName: string;
   workEmail: string;
@@ -42,6 +43,8 @@ const PERSON_TYPE_OPTIONS = Object.entries(PERSON_TYPE_LABELS).map(([value, labe
 /** The fields the form shows; the server's messages for others show above the buttons. */
 const SHOWN =
   /^(firstName|lastName|workEmail|personalEmail|username|jobTitle|personType|teamId|managerId|accessProfileId|startDate|endDate|notes)$/;
+
+type Values = PersonFormValues;
 
 function initialValues(person?: PersonDetail): Values {
   return {
@@ -86,23 +89,44 @@ function Required({ children }: { children: ReactNode }) {
 const toOptions = (refs: { id: number; name: string }[]) =>
   refs.map((ref) => ({ value: String(ref.id), label: ref.name }));
 
-/** Adds a person, or changes one (`person`). After saving, the person's page shows. */
-export function PersonForm({ person, options }: { person?: PersonDetail; options: PersonOptions }) {
+/**
+ * Adds a person, or changes one (`person`). With `request`, adds the person
+ * from an identity request, prefilled from it, and approves the request.
+ * After saving, the person's page shows.
+ */
+export function PersonForm({
+  person,
+  options,
+  request,
+}: {
+  person?: PersonDetail;
+  options: PersonOptions;
+  request?: { id: number; initial: Partial<Values> };
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [values, setValues] = useState(() => initialValues(person));
+  const [values, setValues] = useState(() => ({ ...initialValues(person), ...request?.initial }));
   const [checked, setChecked] = useState<FieldErrors>({});
   const save = useMutation({
     mutationFn: (input: PersonInput) =>
-      person
-        ? api.put<ActionResult>(`/people/${person.id}`, input)
-        : api.post<ActionResult>("/people", input),
+      request
+        ? api.post<ActionResult>(`/identity-requests/${request.id}/approve`, input)
+        : person
+          ? api.put<ActionResult>(`/people/${person.id}`, input)
+          : api.post<ActionResult>("/people", input),
     onSuccess: async (result) => {
       toast.success(result.message);
       await Promise.all(
-        [["people"], ["person"], ["person-options"], ["dashboard"], ["audit"]].map((queryKey) =>
-          queryClient.invalidateQueries({ queryKey }),
-        ),
+        [
+          ["people"],
+          ["person"],
+          ["person-options"],
+          ["dashboard"],
+          ["audit"],
+          ["identity-requests"],
+          ["identity-request"],
+          ["me"],
+        ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
       );
       void navigate({ to: `/people/${result.id}` });
     },
@@ -202,11 +226,13 @@ export function PersonForm({ person, options }: { person?: PersonDetail; options
       <FormErrors messages={formMessages} />
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" asChild>
-          <Link to={person ? `/people/${person.id}` : "/people"}>Cancel</Link>
+          <Link to={request ? `/requests/${request.id}` : person ? `/people/${person.id}` : "/people"}>
+            Cancel
+          </Link>
         </Button>
         <Button type="submit" disabled={save.isPending}>
           {save.isPending ? <Spinner /> : null}
-          Save
+          {request ? "Add person and approve" : "Save"}
         </Button>
       </div>
     </form>

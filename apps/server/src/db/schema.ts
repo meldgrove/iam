@@ -78,6 +78,9 @@ export type TaskKind = (typeof TASK_KINDS)[number];
 export const TASK_STATUSES = ["open", "done", "cancelled"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const IDENTITY_REQUEST_STATUSES = ["open", "approved", "rejected", "cancelled"] as const;
+export type IdentityRequestStatus = (typeof IDENTITY_REQUEST_STATUSES)[number];
+
 export const SYNC_KINDS = ["groups", "accounts", "people"] as const;
 export type SyncKind = (typeof SYNC_KINDS)[number];
 export const SYNC_STATUSES = ["running", "succeeded", "failed"] as const;
@@ -171,6 +174,11 @@ export const appSettings = pgTable(
       .notNull()
       .$default(() => ""),
     updatedAt: stamp("updated_at").notNull().$defaultFn(now).$onUpdateFn(now),
+    /**
+     * The person types other apps may request through the API. Empty: no
+     * identity requests. A database default, so the Django version still saves the row.
+     */
+    identityRequestTypes: jsonb("identity_request_types").$type<PersonType[]>().notNull().default([]),
   },
   (t) => [
     check("iam_appsettings_onboarding_lead_days_check", sql`${t.onboardingLeadDays} >= 0`),
@@ -747,6 +755,116 @@ export const auditEvents = pgTable(
   ],
 );
 
+/**
+ * A key another app (e.g. Meldgrove Helpdesk) uses for the API of identity
+ * requests. The key is shown once; this row keeps its SHA-256 and its prefix.
+ */
+export const apiKeys = pgTable(
+  "iam_apikey",
+  {
+    id: id(),
+    name: varchar("name", { length: 100 }).notNull(),
+    /** The first characters of the key, to tell keys apart. */
+    prefix: varchar("prefix", { length: 20 }).notNull(),
+    keyHash: varchar("key_hash", { length: 64 }).notNull(),
+    createdAt: stamp("created_at").notNull().$defaultFn(now),
+    lastUsedAt: stamp("last_used_at"),
+    revokedAt: stamp("revoked_at"),
+    createdById: ref("created_by_id"),
+  },
+  (t) => [
+    unique("iam_apikey_key_hash_key").on(t.keyHash),
+    foreignKey({
+      name: "iam_apikey_created_by_id_fk_iam_user_id",
+      columns: [t.createdById],
+      foreignColumns: [users.id],
+    }).onDelete("set null"),
+  ],
+);
+
+/**
+ * A request from another app to add a person. An approver creates the
+ * person from it, links it to a person already here, or rejects it; the
+ * app that sent it reads the outcome through the API.
+ */
+export const identityRequests = pgTable(
+  "iam_identityrequest",
+  {
+    id: id(),
+    status: varchar("status", { length: 20 })
+      .$type<IdentityRequestStatus>()
+      .notNull()
+      .$default(() => "open"),
+    /** The sending app's reference, e.g. its ticket: one request per reference. */
+    externalId: varchar("external_id", { length: 255 }).notNull(),
+    externalUrl: varchar("external_url", { length: 500 })
+      .notNull()
+      .$default(() => ""),
+    /** Who asked, as the sending app states it. */
+    requestedByName: varchar("requested_by_name", { length: 200 })
+      .notNull()
+      .$default(() => ""),
+    requestedByEmail: varchar("requested_by_email", { length: 254 })
+      .notNull()
+      .$default(() => ""),
+    firstName: varchar("first_name", { length: 150 }).notNull(),
+    lastName: varchar("last_name", { length: 150 }).notNull(),
+    personalEmail: varchar("personal_email", { length: 254 })
+      .notNull()
+      .$default(() => ""),
+    jobTitle: varchar("job_title", { length: 200 })
+      .notNull()
+      .$default(() => ""),
+    personType: varchar("person_type", { length: 20 }).$type<PersonType>().notNull(),
+    teamId: ref("team_id"),
+    /** The manager's work email; the approval form looks up the person. */
+    managerEmail: varchar("manager_email", { length: 254 })
+      .notNull()
+      .$default(() => ""),
+    startDate: date("start_date", { mode: "string" }),
+    endDate: date("end_date", { mode: "string" }),
+    notes: text("notes")
+      .notNull()
+      .$default(() => ""),
+    createdAt: stamp("created_at").notNull().$defaultFn(now),
+    updatedAt: stamp("updated_at").notNull().$defaultFn(now).$onUpdateFn(now),
+    decidedAt: stamp("decided_at"),
+    /** Why it was rejected. */
+    decisionNote: text("decision_note")
+      .notNull()
+      .$default(() => ""),
+    decidedById: ref("decided_by_id"),
+    apiKeyId: ref("api_key_id"),
+    /** The person created from the request, or linked to it. */
+    personId: ref("person_id"),
+  },
+  (t) => [
+    unique("iam_identityrequest_external_id_key").on(t.externalId),
+    index("iam_identityrequest_status_idx").on(t.status),
+    index("iam_identityrequest_person_id_idx").on(t.personId),
+    foreignKey({
+      name: "iam_identityrequest_team_id_fk_iam_team_id",
+      columns: [t.teamId],
+      foreignColumns: [teams.id],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "iam_identityrequest_decided_by_id_fk_iam_user_id",
+      columns: [t.decidedById],
+      foreignColumns: [users.id],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "iam_identityrequest_api_key_id_fk_iam_apikey_id",
+      columns: [t.apiKeyId],
+      foreignColumns: [apiKeys.id],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "iam_identityrequest_person_id_fk_iam_person_id",
+      columns: [t.personId],
+      foreignColumns: [people.id],
+    }).onDelete("set null"),
+  ],
+);
+
 /** When the worker last finished a loop. */
 export const workerHeartbeats = pgTable("iam_workerheartbeat", {
   name: varchar("name", { length: 50 }).primaryKey(),
@@ -768,3 +886,5 @@ export type Job = typeof jobs.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type SyncRun = typeof syncRuns.$inferSelect;
 export type AuditEvent = typeof auditEvents.$inferSelect;
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type IdentityRequest = typeof identityRequests.$inferSelect;

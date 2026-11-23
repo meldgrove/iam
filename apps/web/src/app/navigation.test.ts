@@ -29,6 +29,7 @@ describe("navigation", () => {
     expect(keys).toEqual({
       o: "Dashboard",
       p: "People",
+      r: "Requests",
       t: "Tasks",
       w: "Workflows",
       j: "Jobs",
@@ -56,6 +57,11 @@ describe("breadcrumbs", () => {
     expect(crumbs("/people/7", "Ada Lovelace")).toEqual([
       { label: "People", href: "/people" },
       { label: "Ada Lovelace" },
+    ]);
+    expect(crumbs("/requests/3/approve", "Grace Hopper")).toEqual([
+      { label: "Requests", href: "/requests" },
+      { label: "Grace Hopper", href: "/requests/3" },
+      { label: "Approve" },
     ]);
     expect(crumbs("/people/7/edit", "Ada Lovelace")).toEqual([
       { label: "People", href: "/people" },

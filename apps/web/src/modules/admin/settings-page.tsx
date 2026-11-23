@@ -8,19 +8,20 @@ import { Spinner } from "@meldgrove/ui/spinner";
 import { ErrorState, LoadingState } from "@meldgrove/ui/states";
 import { UpdatesSettingsCard } from "@meldgrove/ui/updates";
 import { settingsInputSchema, type Settings, type SettingsInput } from "@iam/shared/api/iam";
+import { PERSON_TYPE_LABELS, type PersonType } from "@iam/shared/labels";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { otherErrors, serverFieldErrors, validate, type FieldErrors } from "@/lib/form";
 import { CheckboxField, FormErrors, TextareaField, TextField } from "@/components/form-fields";
 import { refresh, settingsQuery } from "./api";
 
-/** Admin › Settings: lifecycle rules and notifications, then the updates of the app. */
+/** Admin › Settings: lifecycle rules, notifications and identity requests, then the updates of the app. */
 export function SettingsPage() {
   const query = useQuery(settingsQuery);
   return (
     <Page className="max-w-4xl">
       <PageHeader
         title="Settings"
-        description="Lifecycle rules and notifications. Sign-in and deployment settings are environment variables (docs/configuration.md)."
+        description="Lifecycle rules, notifications and identity requests. Sign-in and deployment settings are environment variables (docs/configuration.md)."
       />
       {query.isPending ? (
         <LoadingState />
@@ -56,6 +57,9 @@ function SettingsForm({ settings }: { settings: Settings }) {
   const [automaticOffboarding, setAutomaticOffboarding] = useState(settings.automaticOffboarding);
   const [removalLimitPerDay, setRemovalLimitPerDay] = useState(String(settings.removalLimitPerDay));
   const [notificationEmails, setNotificationEmails] = useState(settings.notificationEmails);
+  const [identityRequestTypes, setIdentityRequestTypes] = useState<PersonType[]>(
+    settings.identityRequestTypes,
+  );
   const [errors, setErrors] = useState<FieldErrors>({});
 
   const save = useMutation({
@@ -83,6 +87,7 @@ function SettingsForm({ settings }: { settings: Settings }) {
       automaticOffboarding,
       removalLimitPerDay: "value" in removalLimit ? removalLimit.value : 0,
       notificationEmails,
+      identityRequestTypes,
     };
     const invalid: FieldErrors = { ...validate(settingsInputSchema, input) };
     if ("error" in leadDays) invalid.onboardingLeadDays = leadDays.error;
@@ -150,13 +155,35 @@ function SettingsForm({ settings }: { settings: Settings }) {
             <TextareaField
               id="notification-emails"
               label="Notification emails"
-              hint="Addresses that get an email for new manual tasks, one per line."
+              hint="Addresses that get an email for new manual tasks and identity requests, one per line."
               value={notificationEmails}
               onChange={setNotificationEmails}
               error={errors.notificationEmails}
               rows={3}
             />
           </div>
+          <fieldset className="grid gap-3 sm:col-span-2" aria-describedby="identity-request-types-hint">
+            <legend className="mb-1 text-sm font-medium">Identity requests</legend>
+            <p id="identity-request-types-hint" className="text-muted-foreground text-sm">
+              The person types other apps, such as Meldgrove Helpdesk, may request with an API key (Admin ›
+              API keys). None: the app accepts no requests.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {(Object.entries(PERSON_TYPE_LABELS) as [PersonType, string][]).map(([type, label]) => (
+                <CheckboxField
+                  key={type}
+                  id={`identity-request-type-${type}`}
+                  label={label}
+                  checked={identityRequestTypes.includes(type)}
+                  onChange={(checked) =>
+                    setIdentityRequestTypes((current) =>
+                      checked ? [...current, type] : current.filter((value) => value !== type),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          </fieldset>
         </CardContent>
       </Card>
       <FormErrors

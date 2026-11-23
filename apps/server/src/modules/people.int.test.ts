@@ -11,7 +11,7 @@ import {
   type PersonStatus,
   type WorkflowKind,
 } from "../db/schema";
-import { makeUser, standardSetup, useEngineFixtures } from "../test/fixtures";
+import { makePerson, makeUser, standardSetup, useEngineFixtures } from "../test/fixtures";
 import { request, signInWithTestHeader } from "../test/helpers";
 
 /**
@@ -74,6 +74,13 @@ describe("people", () => {
     stopTestHeader = signInWithTestHeader();
   });
   afterAll(() => stopTestHeader());
+
+  it("finds people by their full name, archived ones too", async () => {
+    const viewer = await makeUser("viewer");
+    await makePerson({ firstName: "Grace", lastName: "Brewster", workEmail: null, status: "archived" });
+    const found = await request("GET", "/api/v1/people?q=grace%20brewster", { user: viewer });
+    expect(found.body.items.map((person: { name: string }) => person.name)).toEqual(["Grace Brewster"]);
+  });
 
   it("adds a person with the default profile of the type, and audits it", async () => {
     const { profile } = await standardSetup();

@@ -417,8 +417,8 @@ Integrations > API credentials.
 
 ## Email (SMTP)
 
-Sends notifications about new manual tasks and the initial passwords of new
-accounts, through any SMTP server or sending service. The app uses the first
+Sends notifications about new manual tasks and identity requests, and the
+initial passwords of new accounts, through any SMTP server or sending service. The app uses the first
 email connection that is turned on. Notification recipients are set in
 **Admin > Settings**.
 

@@ -20,7 +20,7 @@ const me = (isAdmin: boolean): Me => ({
   updatesButton: false,
   readOnly: false,
   version: "",
-  counts: { openTasks: 0, failedJobs: 0, heldJobs: 0 },
+  counts: { openTasks: 0, failedJobs: 0, heldJobs: 0, openRequests: 0 },
 });
 
 const team: TeamDetail = {
