@@ -100,7 +100,6 @@ const typePlural = (type: CreateInput["personType"]) => `${PERSON_TYPE_LABELS[ty
 
 /** JSON with sorted keys: the same details give the same text. */
 function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1));
     return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
@@ -108,9 +107,19 @@ function canonical(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-/** The fingerprint of a request's details, after validation (trimmed, defaults filled in). */
-export function requestFingerprint(input: CreateInput): string {
-  return createHash("sha256").update(canonical(input)).digest("hex");
+/**
+ * The fingerprint of a request's details, after validation (trimmed,
+ * defaults filled in) and with email addresses in lower case, as IAM
+ * compares and stores them.
+ */
+function requestFingerprint(input: CreateInput): string {
+  const normalized = {
+    ...input,
+    personalEmail: input.personalEmail.toLowerCase(),
+    managerEmail: input.managerEmail.toLowerCase(),
+    requestedBy: { ...input.requestedBy, email: input.requestedBy.email.toLowerCase() },
+  };
+  return createHash("sha256").update(canonical(normalized)).digest("hex");
 }
 
 /**
@@ -339,37 +348,38 @@ export async function possibleMatches(request: IdentityRequest) {
  * approvers (two people can share a name), never a block.
  */
 export async function possibleDuplicates(request: IdentityRequest) {
-  const email = request.personalEmail.toLowerCase();
-  const sameName = and(
-    sql`lower(${identityRequests.firstName}) = ${request.firstName.toLowerCase()}`,
-    sql`lower(${identityRequests.lastName}) = ${request.lastName.toLowerCase()}`,
-  );
+  const email = request.personalEmail.trim();
+  // Without an email or a start date, nothing marks a duplicate.
+  if (!email && !request.startDate) return [];
+  const sameEmail = email
+    ? sql<boolean>`lower(${identityRequests.personalEmail}) = lower(${email})`
+    : sql<boolean>`false`;
+  const sameNameAndStart = request.startDate
+    ? and(
+        sql`lower(${identityRequests.firstName}) = lower(${request.firstName})`,
+        sql`lower(${identityRequests.lastName}) = lower(${request.lastName})`,
+        eq(identityRequests.startDate, request.startDate),
+      )
+    : sql<boolean>`false`;
   const rows = await q()
-    .select({ request: identityRequests, key: apiKeys.name })
+    .select({ request: identityRequests, key: apiKeys.name, sameEmail })
     .from(identityRequests)
     .leftJoin(apiKeys, eq(apiKeys.id, identityRequests.apiKeyId))
     .where(
       and(
         ne(identityRequests.id, request.id),
         inArray(identityRequests.status, ["open", "approved"]),
-        or(
-          email ? sql`lower(${identityRequests.personalEmail}) = ${email}` : undefined,
-          request.startDate ? and(sameName, eq(identityRequests.startDate, request.startDate)) : undefined,
-        ),
+        or(sameEmail, sameNameAndStart),
       ),
     )
     .orderBy(desc(identityRequests.createdAt), desc(identityRequests.id))
     .limit(10);
-  return rows.map(({ request: other, key }) => ({
+  return rows.map(({ request: other, key, sameEmail: emailMatches }) => ({
     id: other.id,
     name: requestName(other),
     status: other.status,
     source: key ?? "",
-    externalId: other.externalId,
     createdAt: other.createdAt.toISOString(),
-    reason:
-      email && other.personalEmail.toLowerCase() === email
-        ? "Same personal email"
-        : "Same name and start date",
+    reason: emailMatches ? "Same personal email" : "Same name and start date",
   }));
 }

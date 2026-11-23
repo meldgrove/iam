@@ -137,6 +137,14 @@ describe("identity requests", () => {
     });
     expect(again.status).toBe(200);
     expect(again.body.id).toBe(created.body.id);
+    // Email addresses in other capitals are the same details: IAM stores them in lower case.
+    const capitals = await call("POST", "/identity-requests", key, {
+      ...REQUEST,
+      teamId: team.id,
+      requestedBy: { name: "Hanna HR", email: "HANNA@example.invalid" },
+      personalEmail: "Grace@Personal.example.invalid",
+    });
+    expect(capitals.status).toBe(200);
     // Other details under the same reference: refused, so the sender cannot believe IAM holds them.
     const changed = await call("POST", "/identity-requests", key, {
       ...REQUEST,
@@ -372,6 +380,10 @@ describe("identity requests", () => {
       [sameNameAndStart, "Same name and start date"],
       [sameEmail, "Same personal email"],
     ]);
-    expect(detail.body.duplicates[0]).toMatchObject({ source: "Helpdesk", externalId: "helpdesk:c" });
+    expect(detail.body.duplicates[0]).toMatchObject({ source: "Helpdesk" });
+    // Without an email and a start date nothing marks a duplicate, not even the same name.
+    const bare = await send("helpdesk:f", { personalEmail: "", startDate: null });
+    const bareDetail = await request("GET", `/api/v1/identity-requests/${bare}`, { user: approver });
+    expect(bareDetail.body.duplicates).toEqual([]);
   });
 });

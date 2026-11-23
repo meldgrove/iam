@@ -562,7 +562,6 @@ export type IdentityRequestDetail = IdentityRequestRow & {
   duplicates: (Ref & {
     status: IdentityRequestStatus;
     source: string;
-    externalId: string;
     createdAt: string;
     reason: string;
   })[];

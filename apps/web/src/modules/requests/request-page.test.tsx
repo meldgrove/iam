@@ -169,7 +169,6 @@ describe("identity request page", () => {
               name: "Grace Hopper",
               status: "open",
               source: "Helpdesk",
-              externalId: "HD-41",
               createdAt: "2026-11-22T09:00:00.000Z",
               reason: "Same personal email",
             },
