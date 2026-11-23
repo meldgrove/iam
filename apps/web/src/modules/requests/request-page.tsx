@@ -1,22 +1,28 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@meldgrove/ui/button";
 import { ConfirmDialog } from "@meldgrove/ui/confirm-dialog";
+import { Input } from "@meldgrove/ui/input";
 import { Page, PageHeader } from "@meldgrove/ui/page";
 import { ErrorState, LoadingState } from "@meldgrove/ui/states";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@meldgrove/ui/table";
-import { IDENTITY_REQUEST_STATUS_LABELS, PERSON_STATUS_LABELS, PERSON_TYPE_LABELS } from "@iam/shared/labels";
+import {
+  IDENTITY_REQUEST_STATUS_LABELS,
+  PERSON_STATUS_LABELS,
+  PERSON_TYPE_LABELS,
+  type PersonStatus,
+} from "@iam/shared/labels";
 import type { IdentityRequestDetail } from "@iam/shared/api/iam";
 import { useMe } from "@/hooks/use-me";
 import { useAction } from "@/hooks/use-action";
 import { useFormatter } from "@/lib/format";
 import { useRecordTitle } from "@/app/record-name";
 import { Detail, Details, Section } from "@/components/detail";
-import { SelectField, TextareaField } from "@/components/form-fields";
+import { TextareaField } from "@/components/form-fields";
 import { StatusBadge } from "@/components/status";
 import { TextLink } from "@/components/lists";
-import { personOptionsQuery } from "@/modules/people/api";
+import { peopleQuery } from "@/modules/people/api";
 import { requestQuery } from "./api";
 
 /** An address of the sending app, as a link that opens in a new tab. */
@@ -28,14 +34,95 @@ function ExternalLink({ href, children }: { href: string; children: string }) {
   );
 }
 
+type Candidate = { id: number; name: string; workEmail: string | null };
+
+/** A person by name, email or username (archived people too), for someone the suggestions miss. */
+function FindPerson({ onChoose }: { onChoose: (person: Candidate) => void }) {
+  const [text, setText] = useState("");
+  const [search, setSearch] = useState("");
+  const results = useQuery({ ...peopleQuery({ q: search }), enabled: search !== "" });
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    setSearch(text.trim());
+  };
+  return (
+    <div className="grid gap-3">
+      <form role="search" onSubmit={submit} className="flex flex-wrap items-center gap-2">
+        <Input
+          type="search"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder="Name, email or username"
+          aria-label="Find another person"
+          className="w-full sm:w-72"
+        />
+        <Button type="submit" variant="outline" disabled={text.trim() === ""}>
+          Find
+        </Button>
+      </form>
+      {search === "" ? null : results.isPending ? (
+        <LoadingState />
+      ) : results.isError ? (
+        <ErrorState error={results.error} onRetry={() => void results.refetch()} />
+      ) : results.data.items.length === 0 ? (
+        <p className="text-muted-foreground text-sm">No one matches.</p>
+      ) : (
+        <PeopleTable
+          label="People found"
+          people={results.data.items.slice(0, 10).map((person) => ({ ...person, reason: null }))}
+          onChoose={onChoose}
+        />
+      )}
+    </div>
+  );
+}
+
+function PeopleTable(props: {
+  label: string;
+  people: (Candidate & { status: PersonStatus; reason: string | null })[];
+  onChoose: (person: Candidate) => void;
+}) {
+  const withReason = props.people.some((person) => person.reason);
+  return (
+    <Table scrollLabel={props.label}>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Person</TableHead>
+          <TableHead>Work email</TableHead>
+          <TableHead>Status</TableHead>
+          {withReason ? <TableHead>Why</TableHead> : null}
+          <TableHead />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {props.people.map((person) => (
+          <TableRow key={person.id}>
+            <TableCell>
+              <TextLink to={`/people/${person.id}`}>{person.name}</TextLink>
+            </TableCell>
+            <TableCell className="text-muted-foreground">{person.workEmail ?? "—"}</TableCell>
+            <TableCell>
+              <StatusBadge value={person.status} labels={PERSON_STATUS_LABELS} />
+            </TableCell>
+            {withReason ? <TableCell className="text-sm">{person.reason}</TableCell> : null}
+            <TableCell className="text-right">
+              <Button variant="outline" size="sm" onClick={() => props.onChoose(person)}>
+                Link
+              </Button>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 /**
- * People who may be this person, and a choice of everyone else: an approver
+ * People who may be this person, and a search for anyone else: an approver
  * links one instead of adding a new person.
  */
 function Matches({ request }: { request: IdentityRequestDetail }) {
-  const [chosen, setChosen] = useState<{ id: number; name: string } | null>(null);
-  const [other, setOther] = useState("");
-  const people = useQuery(personOptionsQuery()).data?.managers ?? [];
+  const [chosen, setChosen] = useState<Candidate | null>(null);
   const link = useAction();
   return (
     <Section
@@ -43,67 +130,17 @@ function Matches({ request }: { request: IdentityRequestDetail }) {
       description="Link a person who is already here, e.g. one Personio imported or someone who returns, to approve the request without adding a new person."
     >
       {request.matches.length > 0 ? (
-        <Table scrollLabel="Possible matches">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Person</TableHead>
-              <TableHead>Work email</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Why</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {request.matches.map((match) => (
-              <TableRow key={match.id}>
-                <TableCell>
-                  <TextLink to={`/people/${match.id}`}>{match.name}</TextLink>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{match.workEmail ?? "—"}</TableCell>
-                <TableCell>
-                  <StatusBadge value={match.status} labels={PERSON_STATUS_LABELS} />
-                </TableCell>
-                <TableCell className="text-sm">{match.reason}</TableCell>
-                <TableCell className="text-right">
-                  <Button variant="outline" size="sm" onClick={() => setChosen(match)}>
-                    Link
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <PeopleTable label="Possible matches" people={request.matches} onChoose={setChosen} />
       ) : (
         <p className="text-muted-foreground text-sm">No one here has the same name or email.</p>
       )}
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="w-full sm:w-80">
-          <SelectField
-            id="link-person"
-            label="Another person"
-            options={people.map((person) => ({ value: String(person.id), label: person.name }))}
-            empty="Choose a person"
-            value={other}
-            onChange={setOther}
-          />
-        </div>
-        <Button
-          variant="outline"
-          disabled={other === ""}
-          onClick={() => {
-            const person = people.find((candidate) => String(candidate.id) === other);
-            if (person) setChosen(person);
-          }}
-        >
-          Link
-        </Button>
-      </div>
+      <FindPerson onChoose={setChosen} />
       <ConfirmDialog
         open={chosen !== null}
         onOpenChange={(open) => {
           if (!open) setChosen(null);
         }}
-        title={`Link the request to ${chosen?.name ?? ""}?`}
+        title={`Link the request to ${chosen?.name ?? ""}${chosen?.workEmail ? ` (${chosen.workEmail})` : ""}?`}
         description="The request counts as approved with this person. Nothing changes in the person's record; start onboarding or an access update from the person's page if needed."
         confirmLabel="Link"
         onConfirm={() =>

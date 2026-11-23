@@ -102,7 +102,6 @@ describe("identity request page", () => {
           ],
         }),
       },
-      "GET /people/options": { body: options },
       "POST /identity-requests/5/link": { body: { id: 9, message: "Linked the request to the person." } },
     });
     const click = userEvent.setup();
@@ -114,25 +113,48 @@ describe("identity request page", () => {
     expect(requests(fetch, "POST /identity-requests/5/link")[0]!.body).toEqual({ personId: 9 });
   });
 
-  it("links someone the suggestions miss", async () => {
+  it("finds and links someone the suggestions miss, archived people too", async () => {
     user.current = me("approver");
     const fetch = stubApi({
       "GET /identity-requests/5": { body: identityRequest() },
-      "GET /people/options": { body: options },
+      "GET /people": {
+        body: {
+          items: [
+            {
+              id: 7,
+              name: "Grace Brewster",
+              workEmail: "gb@example.invalid",
+              personType: "intern",
+              status: "archived",
+              team: null,
+              accessProfile: null,
+              startDate: null,
+              endDate: null,
+            },
+          ],
+          page: 1,
+          pages: 1,
+          total: 1,
+        },
+      },
       "POST /identity-requests/5/link": { body: { id: 7, message: "Linked the request to the person." } },
     });
     const click = userEvent.setup();
     renderPage(<RequestPage id={5} />);
     expect(await screen.findByText("No one here has the same name or email.")).toBeVisible();
-    const select = screen.getByLabelText("Another person");
-    await waitFor(() =>
-      expect(within(select).getByRole("option", { name: "Ada Lovelace" })).toBeInTheDocument(),
-    );
-    await click.selectOptions(select, "7");
-    await click.click(screen.getByRole("button", { name: "Link" }));
-    await click.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Link" }));
+    await click.type(screen.getByLabelText("Find another person"), "Brewster");
+    await click.click(screen.getByRole("button", { name: "Find" }));
+    const row = (await screen.findByRole("link", { name: "Grace Brewster" })).closest("tr")!;
+    expect(within(row).getByText("gb@example.invalid")).toBeVisible();
+    await click.click(within(row).getByRole("button", { name: "Link" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByText("Link the request to Grace Brewster (gb@example.invalid)?"),
+    ).toBeVisible();
+    await click.click(within(dialog).getByRole("button", { name: "Link" }));
     await waitFor(() => expect(requests(fetch, "POST /identity-requests/5/link")).toHaveLength(1));
     expect(requests(fetch, "POST /identity-requests/5/link")[0]!.body).toEqual({ personId: 7 });
+    expect(requests(fetch, "GET /people")[0]!.url).toContain("q=Brewster");
   });
 
   it("shows a viewer the request without the decision", async () => {
