@@ -109,8 +109,8 @@ function canonical(value: unknown): string {
 
 /**
  * The fingerprint of a request's details, after validation (trimmed,
- * defaults filled in) and with email addresses in lower case, as IAM
- * compares and stores them.
+ * defaults filled in), with every email address lower-cased for the
+ * fingerprint only: capitals in an address make no other request.
  */
 function requestFingerprint(input: CreateInput): string {
   const normalized = {

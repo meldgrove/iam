@@ -137,7 +137,7 @@ describe("identity requests", () => {
     });
     expect(again.status).toBe(200);
     expect(again.body.id).toBe(created.body.id);
-    // Email addresses in other capitals are the same details: IAM stores them in lower case.
+    // Email addresses in other capitals are the same details: the fingerprint lower-cases them.
     const capitals = await call("POST", "/identity-requests", key, {
       ...REQUEST,
       teamId: team.id,
