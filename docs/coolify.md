@@ -30,7 +30,10 @@ server.
 
 The operator commands
 ([deployment.md](deployment.md#settings-from-the-command-line)) run in a
-terminal of `web` (the resource's Terminal page): `cli settings list`. From
+terminal of `web` (the resource's Terminal page): `cli settings list`.
+`cli settings apply <name>` there asks for the body and does not show it:
+paste it, then press Ctrl-D. Do not type the body into the shell itself, for
+example as a heredoc: the shell's history would keep the secret. From
 the server's shell, `docker ps` names the `web` container
 (`web-<resource UUID>-…`); `docker exec -i <container> cli settings apply
 connections < body.json` pipes a body into it.
