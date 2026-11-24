@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
+import type { z } from "zod";
 import { settingsInputSchema, type Settings } from "@iam/shared/api/iam";
 import { appSettings } from "../db/schema";
 import { atomic, q } from "../db/tx";
 import type { AppEnv } from "../http/env";
 import { jsonBody, requireRole } from "../http/middleware";
-import { record } from "../engine/audit";
+import { record, type Actor } from "../engine/audit";
 import { loadSettings } from "../engine/settings";
 
 /** Admin › Settings: lifecycle rules, notifications and which identity requests other apps may send. */
@@ -33,14 +34,16 @@ function view(settings: Settings): Settings {
   };
 }
 
-router.get("/settings", async (c) => {
-  requireRole(c, "admin");
-  return c.json(view(await loadSettings()));
-});
+/** What Admin › Settings shows (GET /settings, `cli settings show app`). */
+export async function settingsView(): Promise<Settings> {
+  return view(await loadSettings());
+}
 
-router.put("/settings", async (c) => {
-  const user = requireRole(c, "admin");
-  const input = await jsonBody(c, settingsInputSchema);
+/** Saves Admin › Settings (PUT /settings, `cli settings apply app`). */
+export async function saveSettings(
+  actor: Actor,
+  input: z.infer<typeof settingsInputSchema>,
+): Promise<Settings & { message: string }> {
   await atomic(async () => {
     const current = view(await loadSettings());
     const changed = (Object.keys(FIELD_NAMES) as (keyof Settings)[]).filter(
@@ -48,11 +51,22 @@ router.put("/settings", async (c) => {
     );
     await q().update(appSettings).set(input).where(eq(appSettings.id, 1));
     await record("settings.saved", "Changed settings", {
-      actor: user,
+      actor,
       details: { fields: changed.map((key) => FIELD_NAMES[key]).sort() },
     });
   });
-  return c.json({ ...view(await loadSettings()), message: "Saved the settings." });
+  return { ...(await settingsView()), message: "Saved the settings." };
+}
+
+router.get("/settings", async (c) => {
+  requireRole(c, "admin");
+  return c.json(await settingsView());
+});
+
+router.put("/settings", async (c) => {
+  const user = requireRole(c, "admin");
+  const input = await jsonBody(c, settingsInputSchema);
+  return c.json(await saveSettings(user, input));
 });
 
 export default router;

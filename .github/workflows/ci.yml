@@ -98,6 +98,8 @@ jobs:
           curl -fsS -H "accept: text/html" http://localhost:8000/login | grep -q '<div id="root">'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/me)" = "401"
           docker run --rm --network host "${env_args[@]}" iam:ci cli generate-key | grep -Eq '^[A-Za-z0-9_-]{43}=$'
+          # `cli` is on the PATH too (docker compose exec web cli …).
+          docker run --rm --network host "${env_args[@]}" --entrypoint cli iam:ci settings list | grep -Eq '^app +'
 
       # The updater installs images, not files: a server of 0.2 starts the
       # image with the Django compose.yaml.
