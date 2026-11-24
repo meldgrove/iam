@@ -771,6 +771,8 @@ export const apiKeys = pgTable(
     lastUsedAt: stamp("last_used_at"),
     revokedAt: stamp("revoked_at"),
     createdById: ref("created_by_id"),
+    /** Created with the operator command, so by no user. */
+    createdByOperator: boolean("created_by_operator").notNull().default(false),
   },
   (t) => [
     unique("iam_apikey_key_hash_key").on(t.keyHash),

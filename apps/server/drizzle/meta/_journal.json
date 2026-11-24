@@ -36,6 +36,13 @@
       "when": 1795438533548,
       "tag": "0004_request_fingerprint",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795526532382,
+      "tag": "0005_token_created_by_operator",
+      "breakpoints": true
     }
   ]
 }

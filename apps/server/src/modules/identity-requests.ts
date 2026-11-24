@@ -20,6 +20,7 @@ import {
   users,
   type ApiKey,
   type IdentityRequest,
+  type User,
 } from "../db/schema";
 import { atomic, q } from "../db/tx";
 import type { AppEnv } from "../http/env";
@@ -207,16 +208,16 @@ export async function keyRows(where?: SQL): Promise<ApiKeyRow[]> {
     .leftJoin(users, eq(users.id, apiKeys.createdById))
     .where(where)
     .orderBy(desc(apiKeys.createdAt), desc(apiKeys.id));
-  return rows.map(({ key, user }) => keyRow(key, user ? user.displayName || user.email : null));
+  return rows.map(({ key, user }) => keyRow(key, user));
 }
 
-function keyRow(key: ApiKey, createdBy: string | null): ApiKeyRow {
+function keyRow(key: ApiKey, user: Pick<User, "displayName" | "email"> | null): ApiKeyRow {
   return {
     id: key.id,
     name: key.name,
     prefix: key.prefix,
     createdAt: key.createdAt.toISOString(),
-    createdBy,
+    createdBy: key.createdByOperator ? "Operator" : user ? user.displayName || user.email : null,
     lastUsedAt: iso(key.lastUsedAt),
     revokedAt: iso(key.revokedAt),
   };
@@ -237,7 +238,7 @@ export async function createApiKey(
   const created = await atomic(async () => {
     const [saved] = await q()
       .insert(apiKeys)
-      .values({ name, prefix, keyHash: hash, createdById: user?.id ?? null })
+      .values({ name, prefix, keyHash: hash, createdById: user?.id ?? null, createdByOperator: !user })
       .returning();
     await record("api_key.created", `Created the API key "${name}"`, {
       actor,
@@ -248,7 +249,7 @@ export async function createApiKey(
   });
   return {
     key,
-    apiKey: keyRow(created, user ? user.displayName || user.email : null),
+    apiKey: keyRow(created, user),
     message: "Created the key. Copy it now: it is shown only once.",
   };
 }
