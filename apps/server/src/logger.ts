@@ -31,14 +31,13 @@ export function serializeError(error: unknown) {
   };
 }
 
-const pretty = process.env.NODE_ENV === "development" && process.stdout.isTTY;
-
 /**
  * The operator commands (src/cli.ts) answer on stdout, e.g. with a new API
  * key that the operator redirects into a file: their log lines go to stderr.
  */
 const isCli = /^cli\.(?:m?js|ts)$/.test(path.basename(process.argv[1] ?? ""));
-const destination: DestinationStream | undefined = isCli && !pretty ? pino.destination(2) : undefined;
+const destination: DestinationStream | undefined = isCli ? pino.destination(2) : undefined;
+const pretty = !isCli && process.env.NODE_ENV === "development" && process.stdout.isTTY;
 
 /**
  * Structured JSON logs. Never log message texts, answers, tokens or other

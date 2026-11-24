@@ -49,7 +49,8 @@ const MAX_STDIN_BYTES = 1024 * 1024;
 
 const processIo: Io = {
   readStdin: async () => {
-    if (process.stdin.isTTY) process.stderr.write("Reading the JSON body from stdin; end it with Ctrl-D.\n");
+    // A terminal would show the secrets as they are typed.
+    if (process.stdin.isTTY) throw new UsageError("Pipe the JSON body into the command, e.g. < body.json.");
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of process.stdin as AsyncIterable<Buffer>) {

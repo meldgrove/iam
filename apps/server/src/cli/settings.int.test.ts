@@ -196,6 +196,7 @@ describe("cli settings and cli tokens", () => {
     expect(unknown.err).toMatch(/^Unknown adapter\. Adapters: keycloak, /);
     const missing = await settings(["apply", "connections", "--id", "99"], KEYCLOAK);
     expect(missing).toMatchObject({ code: 1, err: "No connection has the ID 99.\n" });
+    expect((await settings(["apply", "connections", "--id", "99"], "{ broken")).code).toBe(2);
 
     // The parser's message would quote the body.
     const broken = await settings(["apply", "connections"], `{"secrets": {"client_secret": "${SECRET}"`);

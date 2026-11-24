@@ -1,4 +1,6 @@
+import { CONCURRENT_CHANGE_MESSAGE, isConcurrentChange } from "../db/errors";
 import { AppError } from "../http/errors";
+import { logger } from "../logger";
 
 /**
  * What the operator commands share (docs/deployment.md, "Settings from the
@@ -7,8 +9,8 @@ import { AppError } from "../http/errors";
  * or a body that is not JSON.
  *
  * Secrets come only on stdin: arguments show in `ps` and the shell history.
- * No message repeats an argument or a value of the body: one could be a
- * secret typed in the wrong place.
+ * No message repeats an argument, which could be a secret typed in the wrong
+ * place, or a body that is not JSON. Refusals are the admin page's messages.
  */
 
 export type Io = {
@@ -89,7 +91,12 @@ function refusal(error: AppError): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** Runs a command and returns its exit code. Other errors fall through to cli.ts (exit 1). */
+/**
+ * Runs a command and returns its exit code. Other errors end it as the
+ * page's would: a concurrent change asks to try again; anything else is
+ * logged (on stderr, without the values of a failed query, logger.ts) and
+ * not printed, since a failed query's message quotes them.
+ */
 export async function run(io: Io, command: () => Promise<number | undefined | void>): Promise<number> {
   try {
     return (await command()) ?? 0;
@@ -102,6 +109,12 @@ export async function run(io: Io, command: () => Promise<number | undefined | vo
       io.err(refusal(error));
       return 1;
     }
-    throw error;
+    if (isConcurrentChange(error)) {
+      io.err(`${CONCURRENT_CHANGE_MESSAGE}\n`);
+      return 1;
+    }
+    logger.error({ err: error }, "operator command failed");
+    io.err("Something went wrong. The log line above has the details.\n");
+    return 1;
   }
 }

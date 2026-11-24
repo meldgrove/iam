@@ -181,8 +181,9 @@ The rules of the admin pages apply:
 - A secret left out of `secrets`, or empty, keeps the saved one. When a
   setting that says where a secret goes changes (a URL, the server, the
   port, the encryption), the body must hold the secret again.
-- A new connection starts turned off. Test it, then apply it with
-  `"enabled": true`.
+- A new connection starts turned off. Test it, then apply its body with
+  `"enabled": true`. Each save sets the status to untested, as the edit
+  form does: test it again afterwards.
 - Nothing needs a restart: web and worker read the settings from the
   database each time.
 

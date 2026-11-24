@@ -161,9 +161,8 @@ async function apply(name: SettingName, id: number | undefined, command: string,
     io.err(`${created.message} ID: ${created.id}\n`);
     io.out(json(await showConnection(created.id)));
   } else {
-    // As the route: an unknown ID before the body.
-    const editable = await found(`No connection has the ID ${id}.`, () => editableConnection(id));
     const body = await readJsonBody(io);
+    const editable = await found(`No connection has the ID ${id}.`, () => editableConnection(id));
     const saved = await updateConnection(actor, editable, parseWith(connectionInputSchema, body));
     io.err(`${saved.message}\n`);
     io.out(json(await showConnection(id)));

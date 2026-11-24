@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { DrizzleQueryError } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { isOperator, operator } from "../engine/audit";
-import { parseArgs, readJsonBody, UsageError, type Io } from "./command";
+import { parseArgs, readJsonBody, run, UsageError, type Io } from "./command";
 
 const SRC = path.resolve(import.meta.dirname, "..");
 
@@ -66,5 +67,32 @@ describe("readJsonBody", () => {
     expect(await readJsonBody(io('{"name": "Email"}'))).toEqual({ name: "Email" });
     await expect(readJsonBody(io("{ hunter2-value"))).rejects.toThrow("The body on stdin must be JSON.");
     await expect(readJsonBody(io(" \n"))).rejects.toBeInstanceOf(UsageError);
+  });
+});
+
+describe("run", () => {
+  async function exit(error: Error) {
+    const err: string[] = [];
+    const io: Io = { readStdin: async () => "", out: () => {}, err: (text) => void err.push(text) };
+    const code = await run(io, async () => {
+      throw error;
+    });
+    return { code, err: err.join("") };
+  }
+
+  it("asks to try again after a concurrent change, as the page does", async () => {
+    const cause = Object.assign(new Error("duplicate key value"), { code: "23505" });
+    expect(await exit(new DrizzleQueryError("insert into iam_apikey", ["hunter2-value"], cause))).toEqual({
+      code: 1,
+      err: "Someone else changed this at the same time. Try again.\n",
+    });
+  });
+
+  it("does not print a failed query, which quotes its values", async () => {
+    const failed = await exit(
+      new DrizzleQueryError("update iam_connection set x = $1", ["hunter2-value"], new Error("boom")),
+    );
+    expect(failed.code).toBe(1);
+    expect(failed.err).not.toContain("hunter2");
   });
 });
