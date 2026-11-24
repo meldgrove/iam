@@ -33,9 +33,9 @@ labels). One image, three processes: `migrate`, `web` and `worker`
 - The web app shows its pages in the app frame of `@meldgrove/ui`; the update
   button and the "Updates" card come from the package too. Secrets use its
   `SecretField`/`SecretInput`. Admin routes for updates: `/api/v1/admin/updates`.
-- The repository is public and has no license yet. Do not add a license file.
-  Use only `example.invalid` in examples; `scripts/check-public-repository.mjs`
-  must pass.
+- The repository is public and licensed under the Apache License 2.0
+  (`LICENSE`). Use only `example.invalid` in examples;
+  `scripts/check-public-repository.mjs` must pass.
 
 ## Checks
 

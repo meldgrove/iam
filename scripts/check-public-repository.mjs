@@ -27,6 +27,8 @@ const PUBLIC_HOSTS = new Set([
   "www.keycloak.org",
   "www.rfc-editor.org",
   "www.w3.org",
+  // The Apache License 2.0 in LICENSE.
+  "www.apache.org",
   "nodejs.org",
   "www.postgresql.org",
   "apt.postgresql.org",
