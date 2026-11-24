@@ -37,6 +37,19 @@ describe("config", () => {
     ).toThrow(/AUTH_SECRET: Set a random secret[\s\S]*ENCRYPTION_KEY: Set a Fernet key/);
   });
 
+  it("names APP_URL and AUTH_SECRET when compose.yaml passes them empty: neither name is in .env", () => {
+    expect(
+      configWith({
+        NODE_ENV: "production",
+        APP_URL: "",
+        AUTH_SECRET: "",
+        CSRF_TRUSTED_ORIGINS: undefined,
+        DJANGO_SECRET_KEY: undefined,
+        ENCRYPTION_KEY: KEY,
+      }),
+    ).toThrow(/APP_URL: Set the public URL[\s\S]*AUTH_SECRET: Set a random secret/);
+  });
+
   it("reads the variables of the Django version", () => {
     const settings = configWith({
       NODE_ENV: "production",

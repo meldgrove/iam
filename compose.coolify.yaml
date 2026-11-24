@@ -19,10 +19,12 @@ x-application: &application
   environment:
     # The public URL, e.g. https://iam.example.invalid. Settings of the Django
     # version (0.2) have none: its CSRF_TRUSTED_ORIGINS stands in.
-    APP_URL: ${APP_URL:-${CSRF_TRUSTED_ORIGINS:?Set APP_URL to the public HTTPS address}}
+    # Without either, the app does not start and names APP_URL. No :? inside:
+    # Docker Compose 2.x would then require the old name even next to the new.
+    APP_URL: ${APP_URL:-${CSRF_TRUSTED_ORIGINS:-}}
     # Signs sessions: at least 32 random characters. The Django version's
-    # DJANGO_SECRET_KEY stands in.
-    AUTH_SECRET: ${AUTH_SECRET:-${DJANGO_SECRET_KEY:?Set AUTH_SECRET to a random secret of at least 32 characters}}
+    # DJANGO_SECRET_KEY stands in. Without either, the app does not start.
+    AUTH_SECRET: ${AUTH_SECRET:-${DJANGO_SECRET_KEY:-}}
     ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a Fernet key (docs/configuration.md)}
     DATABASE_URL: ${DATABASE_URL:?Set the PostgreSQL URL}
     HEALTHCHECK_TOKEN: ${HEALTHCHECK_TOKEN:?Set a random health check token}
