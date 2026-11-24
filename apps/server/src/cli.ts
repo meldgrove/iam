@@ -28,7 +28,8 @@ const HELP = `Meldgrove IAM operator commands. On a server: docker compose run -
                                              connections without --id: add one, print its ID
   settings remove connections --id <id>      delete a connection
   settings test connections --id <id>        the test button
-  tokens create api-key --name <name>        a new API key for another app, alone on stdout
+  tokens create api-key --name <name>        a new API key for another app, alone on stdout; run it with
+                                             docker compose exec -T web cli …: Docker logs what "run" prints
   tokens list [--json]                       the API keys (never a key)
   tokens revoke <id>                         revoke an API key
   create-admin --email <address> [--name <name>]

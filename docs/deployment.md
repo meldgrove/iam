@@ -43,7 +43,7 @@ server first.
    | `IAM_VERSION` | `0.3` (a release series; with [automatic updates](updates.md), the server writes the exact version it installs here) |
    | `APP_URL` | `https://iam.example.invalid` |
    | `AUTH_SECRET` | random, 32+ characters: `openssl rand -base64 48` |
-   | `ENCRYPTION_KEY` | `docker run --rm ghcr.io/meldgrove/iam:0.3 cli generate-key`; keep a copy with the backups |
+   | `ENCRYPTION_KEY` | `docker run --rm --log-driver none ghcr.io/meldgrove/iam:0.3 cli generate-key`; keep a copy with the backups |
    | `DATABASE_URL` | your PostgreSQL, or the container below |
    | `HEALTHCHECK_TOKEN` | random |
    | `KEYCLOAK_URL`, `KEYCLOAK_REALM` or `OIDC_ISSUER` | the sign-in provider ([authentication.md](authentication.md)) |
@@ -167,7 +167,7 @@ command.
 | `cli settings apply connections --id <id>` | Saves a connection, as its edit form does. |
 | `cli settings remove connections --id <id>` | Deletes a connection that has no jobs and no access profile. |
 | `cli settings test connections --id <id>` | The "Test connection" button. |
-| `cli tokens create api-key --name <name>` | A new API key for another app ([api.md](api.md)): printed once, alone on stdout. |
+| `cli tokens create api-key --name <name>` | A new API key for another app ([api.md](api.md)): printed once, alone on stdout. Run it with `docker compose exec` ([API keys](#api-keys)). |
 | `cli tokens list [--json]` | The API keys: name, first characters, created, last used, revoked. |
 | `cli tokens revoke <id>` | Revokes an API key. |
 
@@ -235,9 +235,14 @@ that `cli settings show connections --adapter <slug>` lists. An edit
 
 ### API keys
 
-`cli tokens create api-key --name Helpdesk > helpdesk.key` writes only the
-key into the file; the note with its ID and first characters goes to
-stderr.
+```sh
+(umask 077; docker compose exec -T web cli tokens create api-key --name Helpdesk > helpdesk.key)
+```
+
+writes only the key into the file; the note with its ID and first
+characters goes to stderr. Use `exec` here, not `run`: Docker's log driver
+keeps what a container started with `run` prints, so the key would end up in
+a log (with `journald` or a remote driver also after `--rm`).
 
 ### AI with access to the server
 
