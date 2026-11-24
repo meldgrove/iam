@@ -4,6 +4,7 @@
 // external (they are installed in the image), @sentry/node too: its tracing
 // hooks into packages such as pg as they load, which does not work from
 // inside a bundle. The workspace package (@iam/shared) is bundled.
+// @meldgrove/ui/updates/server is bundled too: a root devDependency, so the image installs no React.
 import { build } from "esbuild";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";

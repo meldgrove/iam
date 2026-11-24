@@ -20,7 +20,8 @@ server.
    [deployment.md](deployment.md#setup), step 3, with `DATABASE_URL` set to
    the PostgreSQL resource's internal URL and `IAM_VERSION` to a release
    series such as `0.3`, or `preview` (see
-   [Automatic updates](#automatic-updates)).
+   [Automatic updates](#automatic-updates)). `UPDATER_TOKEN` is
+   recommended ([below](#protect-the-update-service)).
 5. Deploy. Sign in, then continue with the
    [first steps](deployment.md#first-steps-after-the-first-sign-in).
 6. **Automatic updates:** set them up [below](#automatic-updates).
@@ -93,6 +94,20 @@ move to a new series, take its upgrade steps, then change `IAM_VERSION` and rede
 
 To switch automatic updates off, clear `UPDATE_DEPLOY_HOOK_URL` and redeploy, or set
 `IAM_VERSION` to an exact version.
+
+### Protect the update service
+
+With `UPDATER_TOKEN` set, the app sends it with each request to the updater, and the
+updater refuses requests without it ([updates.md](updates.md#protect-the-update-service)).
+Recommended for resources set up before it existed; without it, everything works as
+before. Until it is done, Admin › Settings › Updates warns that the update service
+takes requests without a token (with updater 0.2.4 or later, which reports it).
+
+Do it once the tag in `IAM_VERSION` gives the release whose notes name this step, or
+a newer one: each deploy pulls that tag, and an older version sends no token, so its
+update button would get no answer. In the resource's environment variables, set
+`UPDATER_TOKEN` to the output of `openssl rand -hex 32`, then redeploy: Coolify reads
+`compose.coolify.yaml` from `stable` and pulls the images again.
 
 ## Moving an existing resource
 

@@ -49,6 +49,7 @@ server first.
    | `KEYCLOAK_URL`, `KEYCLOAK_REALM` or `OIDC_ISSUER` | the sign-in provider ([authentication.md](authentication.md)) |
    | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | the sign-in client |
    | `BOOTSTRAP_ADMIN_EMAILS` or `OIDC_ADMIN_GROUPS` | the first admin |
+   | `UPDATER_TOKEN` | recommended, random: `openssl rand -hex 32` ([it protects the update service](updates.md#protect-the-update-service)) |
 
 4. **Database:** set `DATABASE_URL` to a PostgreSQL 16 or newer of your own
    that the containers can reach (`localhost` would be the container

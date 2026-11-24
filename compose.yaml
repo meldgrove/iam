@@ -57,8 +57,10 @@ x-application: &application
     SENTRY_DSN: ${SENTRY_DSN:-}
     SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
     SENTRY_RELEASE: ${SENTRY_RELEASE:-}
-    # The updater below, for the admins' update button (docs/updates.md).
+    # The updater below, for the admins' update button (docs/updates.md), with
+    # UPDATER_TOKEN (openssl rand -hex 32), which the updater then requires.
     UPDATER_URL: ${UPDATER_URL:-http://updater:8080}
+    UPDATER_TOKEN: ${UPDATER_TOKEN:-}
 
 services:
   # One-time job before web and worker start.
@@ -121,8 +123,8 @@ services:
   # once the server runs `updater host-setup`: for each installation the
   # server writes the version into IAM_VERSION in .env, pulls it, runs
   # `docker compose up --wait`, and goes back to the version before when it
-  # does not become healthy. Without the host setup, it only checks. Its API
-  # has no authentication: never publish its port.
+  # does not become healthy. Without the host setup, it only checks. Never
+  # publish its port.
   updater:
     image: ghcr.io/meldgrove/updater:0.2
     restart: unless-stopped
@@ -130,6 +132,9 @@ services:
     environment:
       IMAGE: *image
       VERSION_VARIABLE: IAM_VERSION
+      # With UPDATER_TOKEN set, the API takes only requests that carry it, as
+      # the app's do. Empty: requests from anything on the Docker network.
+      API_TOKEN: ${UPDATER_TOKEN:-}
       COOLDOWN: ${UPDATE_COOLDOWN:-3d}
       WINDOW: ${UPDATE_WINDOW:-}
       TZ: ${TZ:-UTC}
