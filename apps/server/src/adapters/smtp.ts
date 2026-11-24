@@ -10,6 +10,7 @@ import {
   field,
   type TestResult,
 } from "./base";
+import { smtpReply } from "./smtp-reply";
 
 /**
  * Email over SMTP: notifications to admins and sign-in details to new people.
@@ -295,14 +296,26 @@ export class SmtpAdapter extends Adapter {
     return error;
   }
 
+  /** A failed test also names the server's own answer (without the login). */
   override async testConnection(): Promise<TestResult> {
-    const session = await this.connect();
     try {
-      await session.check();
+      const session = await this.connect();
+      try {
+        await session.check();
+      } catch (error) {
+        throw this.translate(error, "check");
+      } finally {
+        quietly(() => session.quit());
+      }
     } catch (error) {
-      throw this.translate(error, "check");
-    } finally {
-      quietly(() => session.quit());
+      if (error instanceof AdapterError) {
+        const reply = smtpReply(error.cause, {
+          username: String(this.setting("username", "")),
+          password: String(this.setting("password", "")),
+        });
+        if (reply) error.message += ` The server answered: ${reply}`;
+      }
+      throw error;
     }
     return { ok: true, message: `Connected to ${String(this.setting("host"))} and signed in.` };
   }

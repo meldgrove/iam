@@ -319,7 +319,7 @@ describe("SMTP", () => {
 // against a scripted SMTP server, so the errors the mapping above relies on
 // are the ones Nodemailer reports.
 
-type Script = { greet?: boolean; rcpt?: string };
+type Script = { greet?: boolean; auth?: string; rcpt?: string };
 
 async function scriptedServer(script: Script = {}) {
   const commands: string[] = [];
@@ -352,7 +352,9 @@ async function scriptedServer(script: Script = {}) {
         const verb = line.split(" ")[0]!.toUpperCase();
         if (verb === "EHLO") socket.write("250-smtp.test\r\n250-AUTH PLAIN\r\n250 8BITMIME\r\n");
         else if (verb === "AUTH")
-          socket.write(line === login ? "235 2.7.0 ok\r\n" : "535 5.7.8 bad credentials\r\n");
+          socket.write(
+            `${line === login ? "235 2.7.0 ok" : (script.auth ?? "535 5.7.8 bad credentials")}\r\n`,
+          );
         else if (verb === "MAIL" || verb === "RSET") socket.write("250 ok\r\n");
         else if (verb === "RCPT") socket.write(script.rcpt ?? "250 ok\r\n");
         else if (verb === "DATA") {
@@ -415,6 +417,19 @@ describe("SMTP through a real session", () => {
 
     expect(result).toEqual({ ok: true, message: "Connected to 127.0.0.1 and signed in." });
     expect(server.commands).toContain("RSET");
+  });
+
+  it("names the server's answer in a failed connection test", async () => {
+    server = await scriptedServer({ auth: "535 5.7.8 mailer: wrong is not the password" });
+
+    const error = await failure(
+      new SmtpAdapter(settings(server.port, { password: "wrong" })).testConnection(),
+    );
+
+    expect(error).toBeInstanceOf(ConfigurationError);
+    expect(error.message).toBe(
+      "The SMTP server refused the username or password. Check the connection's credentials. The server answered: 535 5.7.8 ***: *** is not the password",
+    );
   });
 
   it("never goes on without STARTTLS when it is chosen", async () => {
