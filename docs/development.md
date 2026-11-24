@@ -73,7 +73,8 @@ Integration tests recreate the database of `TEST_DATABASE_URL`. Adapters are
 tested against fake HTTP answers (`src/test/mock-fetch.ts`); the engine
 against an in-memory adapter (`src/test/fake-adapter.ts`). One test takes over
 a database of the Django version (`src/db/fixtures/django-0.2.sql`) and checks
-that it ends with the schema of a new one. No test reaches an updater.
+that it ends with the schema of a new one. The update routes are tested
+against the fake updater of `@meldgrove/ui/updates/testing`.
 
 The update button needs an updater at `UPDATER_URL` (`.env.example` leaves it
 empty, which hides the button). Any server that answers the updater's API

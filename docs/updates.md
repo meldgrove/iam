@@ -45,7 +45,9 @@ goes back to the version before, and the button says why. Admin › Settings ›
 shows the installed version, the channel, and when updates install automatically.
 
 The app reaches the updater at `UPDATER_URL` ([configuration.md](configuration.md));
-`compose.yaml` sets it. Read-only mode (`READ_ONLY=1`) does not hold back updates of
+`compose.yaml` sets it. With `UPDATER_TOKEN` set, the app sends it with each request,
+and the updater refuses requests without it ([below](#protect-the-update-service)).
+Read-only mode (`READ_ONLY=1`) does not hold back updates of
 the app itself; it only leaves connected apps unchanged.
 
 ## When an update installs
@@ -104,6 +106,33 @@ docker compose run --rm -T --pull always updater host-setup > updater-setup.sh &
 `git pull` brings the `compose.yaml` of the newest release from the branch `stable`
 (with updater 0.2). `docker compose up -d --pull always` starts that release of the
 app, not only the new updater; the last command replaces the host setup.
+
+## Protect the update service
+
+The updater's API installs versions and switches the channel. Without a token, it
+takes these requests from anything on the app's Docker network. With `UPDATER_TOKEN`
+in `.env`, `compose.yaml` gives the same value to the app and to the updater
+(`API_TOKEN`): the app sends it with each request, and the updater refuses requests
+without it. New servers set it in [Setup](deployment.md#setup), step 3.
+
+For servers set up before `UPDATER_TOKEN` existed, it is recommended, not required:
+without it, everything works as before. Until it is done, Admin › Settings › Updates
+warns that the update service takes requests without a token (with updater 0.2.4 or
+later, which reports it). Do it once IAM runs the release whose notes name this step,
+or a newer one: an older version sends no token, so its update button would get no
+answer from the updater. As root in `/srv/iam`:
+
+```sh
+git pull
+# in .env: UPDATER_TOKEN=<the output of: openssl rand -hex 32>
+docker compose pull updater
+docker compose up -d
+```
+
+`git pull` brings the `compose.yaml` that passes the token to the app and to the
+updater. `docker compose pull updater` makes sure the updater is one that checks it
+(0.2.1 or later). `docker compose up -d` restarts the services whose settings changed.
+On Coolify, see [Protect the update service](coolify.md#protect-the-update-service).
 
 ## Backups
 

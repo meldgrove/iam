@@ -146,6 +146,13 @@ describe("config", () => {
     expect(configWith({ UPDATER_URL: "" })().UPDATER_URL).toBe("");
     expect(configWith({ UPDATER_URL: "http://localhost:8080/" })().UPDATER_URL).toBe("http://localhost:8080");
   });
+
+  it("reads UPDATER_TOKEN: optional, empty means none, no spaces", () => {
+    expect(configWith({ UPDATER_TOKEN: undefined })().UPDATER_TOKEN).toBeUndefined();
+    expect(configWith({ UPDATER_TOKEN: " " })().UPDATER_TOKEN).toBeUndefined();
+    expect(configWith({ UPDATER_TOKEN: "0123abcd" })().UPDATER_TOKEN).toBe("0123abcd");
+    expect(configWith({ UPDATER_TOKEN: "two words" })).toThrow(/UPDATER_TOKEN: /);
+  });
 });
 
 /**

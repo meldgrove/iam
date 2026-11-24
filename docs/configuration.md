@@ -35,6 +35,7 @@ the database, and the sign-in settings.
 | `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `1` | With an `https` `APP_URL`, HSTS covers subdomains too. |
 | `HEALTHCHECK_TOKEN` | empty | Shows details on `/-/readyz` for requests with `X-Health-Token`. |
 | `UPDATER_URL` | `http://updater:8080` | The `updater` service that the admins' update button and Admin › Settings › Updates talk to ([updates.md](updates.md)). Under `compose.yaml`, an empty value falls back to this default; empty switches the update button off only where the app reads its environment directly, such as `npm run dev` with `.env`. The `updater` service's own variables (`UPDATE_*`) are in updates.md. |
+| `UPDATER_TOKEN` | empty | Recommended: the token the app sends to the updater. `compose.yaml` gives the updater the same value (`API_TOKEN`), and it then refuses requests without it. Make one with `openssl rand -hex 32` ([updates.md](updates.md#protect-the-update-service)). Empty: no token. |
 | `READ_ONLY` | `0` | `1`: read-only mode. The app reads connected apps but changes nothing in them and sends no email; jobs only check what they would change ([architecture.md](architecture.md#read-only-mode)). Set it for web and worker alike (`compose.yaml` does). Any value other than `1`/`0` (or `true`/`false`, `yes`/`no`, `on`/`off`) stops the app from starting. |
 | `TZ` | `UTC` | Time zone for dates, start and end days, and the schedule. |
 | `PORT` | `8000` | Port of the web process. |

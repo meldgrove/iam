@@ -46,8 +46,10 @@ x-application: &application
     SENTRY_DSN: ${SENTRY_DSN:-}
     SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
     SENTRY_RELEASE: ${SENTRY_RELEASE:-}
-    # The updater below, for the admins' update button (docs/updates.md).
+    # The updater below, for the admins' update button (docs/updates.md), with
+    # UPDATER_TOKEN (openssl rand -hex 32), which the updater then requires.
     UPDATER_URL: ${UPDATER_URL:-http://updater:8080}
+    UPDATER_TOKEN: ${UPDATER_TOKEN:-}
 
 services:
   # One-time job. Coolify leaves services with restart "no" out of the stack's
@@ -108,8 +110,8 @@ services:
   # Updates (docs/coolify.md): checks for new versions, shows them to admins in
   # the app (the update button, Admin > Settings > Updates), and with
   # UPDATE_DEPLOY_HOOK_URL set, calls Coolify's deploy link when the tag in
-  # IAM_VERSION points to a new image: the tag decides what installs. Its API
-  # has no authentication: never publish its port.
+  # IAM_VERSION points to a new image: the tag decides what installs. Never
+  # publish its port.
   updater:
     image: ghcr.io/meldgrove/updater:0.2
     pull_policy: always
@@ -118,6 +120,9 @@ services:
     environment:
       IMAGE: *image
       VERSION_VARIABLE: IAM_VERSION
+      # With UPDATER_TOKEN set, the API takes only requests that carry it, as
+      # the app's do. Empty: requests from anything on the Docker network.
+      API_TOKEN: ${UPDATER_TOKEN:-}
       DEPLOY_HOOK_URL: ${UPDATE_DEPLOY_HOOK_URL:-}
       DEPLOY_HOOK_TOKEN: ${UPDATE_DEPLOY_HOOK_TOKEN:-}
       COOLDOWN: ${UPDATE_COOLDOWN:-3d}
