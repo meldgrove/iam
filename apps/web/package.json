@@ -13,11 +13,11 @@
   "dependencies": {
     "@iam/shared": "*",
     "@meldgrove/ui": "^0.1.9",
-    "@sentry/browser": "11.12.0",
+    "@sentry/browser": "11.13.0",
     "@tanstack/react-query": "5.107.1",
     "@tanstack/react-router": "1.170.46",
     "cmdk": "1.1.1",
-    "lucide-react": "1.73.0",
+    "lucide-react": "1.74.0",
     "radix-ui": "1.8.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
