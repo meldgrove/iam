@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { z } from "zod";
 import { and, asc, count, desc, eq, ne, sql } from "drizzle-orm";
 import {
   connectionInputSchema,
@@ -35,7 +36,7 @@ import type { AppEnv } from "../http/env";
 import { idParam, jsonBody, requireRole } from "../http/middleware";
 import { AppError, notFound, validationError } from "../http/errors";
 import { logger } from "../logger";
-import { record } from "../engine/audit";
+import { record, type Actor } from "../engine/audit";
 import {
   adapterClassOf,
   buildAdapter,
@@ -93,7 +94,7 @@ function connectionRow(connection: Connection): ConnectionRow {
 }
 
 /** The saved secrets. Secrets no configured key can read count as not saved, so the admin enters them again. */
-function savedSecrets(connection: Connection | null): Record<string, string> {
+export function savedSecrets(connection: Connection | null): Record<string, string> {
   if (connection === null || !connection.secretData) return {};
   try {
     return secretsOf(connection);
@@ -113,15 +114,20 @@ router.get("/connection-names", async (c) => {
   return c.json(rows);
 });
 
-router.get("/connections", async (c) => {
-  requireRole(c, "admin");
+/** Every connection by kind (GET /connections, `cli settings show connections`). */
+export async function connectionList() {
   const rows = await q().select().from(connections).orderBy(asc(connections.name));
   const sections = (Object.keys(ADAPTER_KIND_LABELS) as AdapterKindName[]).map((kind) => ({
     kind,
     label: ADAPTER_KIND_LABELS[kind],
     connections: rows.filter((row) => (kindOf(row) || AdapterKind.PROVISIONING) === kind).map(connectionRow),
   }));
-  return c.json({ sections, hasConnections: rows.length > 0 });
+  return { sections, hasConnections: rows.length > 0 };
+}
+
+router.get("/connections", async (c) => {
+  requireRole(c, "admin");
+  return c.json(await connectionList());
 });
 
 router.get("/adapters", (c) => {
@@ -143,7 +149,7 @@ router.get("/adapters/:slug", (c) => {
   return c.json(adapterInfo(cls));
 });
 
-async function connectionOr404(id: number): Promise<Connection> {
+export async function connectionOr404(id: number): Promise<Connection> {
   const [connection] = await q().select().from(connections).where(eq(connections.id, id));
   if (!connection) throw notFound();
   return connection;
@@ -253,11 +259,16 @@ router.get("/connections/:id", async (c) => {
   return c.json(body);
 });
 
-router.get("/connections/:id/form", async (c) => {
-  requireRole(c, "admin");
-  const connection = await connectionOr404(idParam(c));
+/** A connection that its adapter still knows, to edit (404 otherwise). */
+export async function editableConnection(id: number): Promise<{ connection: Connection; cls: AdapterClass }> {
+  const connection = await connectionOr404(id);
   const cls = adapterClassOf(connection);
   if (!cls) throw notFound();
+  return { connection, cls };
+}
+
+/** What the edit form shows (GET /connections/:id/form, `cli settings show connections --id`): no secret values. */
+export function connectionForm(connection: Connection, cls: AdapterClass): ConnectionForm {
   const settings: Record<string, unknown> = {};
   for (const spec of cls.fields) {
     if (spec.kind === "secret") continue;
@@ -265,7 +276,7 @@ router.get("/connections/:id/form", async (c) => {
     settings[spec.name] =
       spec.name in connection.settings ? connection.settings[spec.name] : spec.kind === "bool" ? false : "";
   }
-  const body: ConnectionForm = {
+  return {
     adapter: adapterInfo(cls),
     name: connection.name,
     enabled: connection.enabled,
@@ -273,7 +284,12 @@ router.get("/connections/:id/form", async (c) => {
     settings,
     savedSecrets: Object.keys(savedSecrets(connection)),
   };
-  return c.json(body);
+}
+
+router.get("/connections/:id/form", async (c) => {
+  requireRole(c, "admin");
+  const { connection, cls } = await editableConnection(idParam(c));
+  return c.json(connectionForm(connection, cls));
 });
 
 const URL_PATTERN = /^https?:\/\/[^\s/?#]+(?:[/?#]\S*)?$/i;
@@ -415,24 +431,34 @@ function sameValue(a: unknown, b: unknown): boolean {
   return String(a ?? "") === String(b ?? "");
 }
 
-router.post("/connections", async (c) => {
-  const user = requireRole(c, "admin");
-  const body = await jsonBody(c, connectionInputSchema.extend({ adapter: connectionInputSchema.shape.name }));
+/** The body that adds a connection: an edit's body and the adapter's slug. */
+export const newConnectionSchema = connectionInputSchema.extend({
+  adapter: connectionInputSchema.shape.name,
+});
+
+/** Adds a connection (POST /connections, `cli settings apply connections`). */
+export async function createConnection(
+  actor: Actor,
+  body: z.infer<typeof newConnectionSchema>,
+): Promise<{ id: number; message: string }> {
   const cls = getAdapterClass(body.adapter);
   if (!cls) throw notFound();
   const { connection } = await atomic(async () => {
     const result = await saveConnection(cls, null, body);
     await record("connection.created", `Added connection ${result.connection.name} (${cls.label})`, {
-      actor: user,
+      actor,
       target: { type: "connection", id: result.connection.id },
       details: { settings_changed: changedNames(result.changed) },
     });
     return result;
   });
-  return c.json(
-    { id: connection.id, message: `Added ${connection.name}. Test it before turning it on.` },
-    201,
-  );
+  return { id: connection.id, message: `Added ${connection.name}. Test it before turning it on.` };
+}
+
+router.post("/connections", async (c) => {
+  const user = requireRole(c, "admin");
+  const body = await jsonBody(c, newConnectionSchema);
+  return c.json(await createConnection(user, body), 201);
 });
 
 /** Names of changed settings for the audit log, never values: settings first, then name, enabled, mode. */
@@ -444,27 +470,36 @@ function changedNames(names: string[]): string[] {
   ];
 }
 
-router.put("/connections/:id", async (c) => {
-  const user = requireRole(c, "admin");
-  const existing = await connectionOr404(idParam(c));
-  const cls = adapterClassOf(existing);
-  if (!cls) throw notFound();
-  const input = await jsonBody(c, connectionInputSchema);
+/** Saves a connection of `editableConnection` (PUT /connections/:id, `cli settings apply connections --id`). */
+export async function updateConnection(
+  actor: Actor,
+  { connection: existing, cls }: { connection: Connection; cls: AdapterClass },
+  input: z.infer<typeof connectionInputSchema>,
+): Promise<{ id: number; message: string }> {
   const connection = await atomic(async () => {
     const result = await saveConnection(cls, existing, input);
     await record("connection.updated", `Changed connection ${result.connection.name}`, {
-      actor: user,
+      actor,
       target: { type: "connection", id: existing.id },
       details: { settings_changed: changedNames(result.changed) },
     });
     return result.connection;
   });
-  return c.json({ id: connection.id, message: `Saved ${connection.name}.` });
+  return { id: connection.id, message: `Saved ${connection.name}.` };
+}
+
+router.put("/connections/:id", async (c) => {
+  const user = requireRole(c, "admin");
+  const editable = await editableConnection(idParam(c));
+  const input = await jsonBody(c, connectionInputSchema);
+  return c.json(await updateConnection(user, editable, input));
 });
 
-router.post("/connections/:id/test", async (c) => {
-  const user = requireRole(c, "admin");
-  const connection = await connectionOr404(idParam(c));
+/** The test button (POST /connections/:id/test, `cli settings test connections`): saves and returns the result. */
+export async function testConnection(
+  actor: Actor,
+  connection: Connection,
+): Promise<{ ok: boolean; message: string }> {
   let ok: boolean;
   let message: string;
   try {
@@ -485,10 +520,16 @@ router.post("/connections/:id/test", async (c) => {
     .set({ status: ok ? "ok" : "error", statusMessage: message.slice(0, 2000), checkedAt: new Date() })
     .where(eq(connections.id, connection.id));
   await record("connection.tested", `Tested ${connection.name}: ${ok ? "connected" : "error"}`, {
-    actor: user,
+    actor,
     target: { type: "connection", id: connection.id },
   });
-  return c.json({ ok, message });
+  return { ok, message };
+}
+
+router.post("/connections/:id/test", async (c) => {
+  const user = requireRole(c, "admin");
+  const connection = await connectionOr404(idParam(c));
+  return c.json(await testConnection(user, connection));
 });
 
 router.post("/connections/:id/toggle", async (c) => {
@@ -582,9 +623,8 @@ router.delete("/connections/:id/groups/:groupId", async (c) => {
   return c.json({ message: `Removed ${group.name}.` });
 });
 
-router.delete("/connections/:id", async (c) => {
-  const user = requireRole(c, "admin");
-  const connection = await connectionOr404(idParam(c));
+/** Deletes a connection without jobs or grants (DELETE /connections/:id, `cli settings remove connections`). */
+export async function deleteConnection(actor: Actor, connection: Connection): Promise<{ message: string }> {
   await atomic(async () => {
     // Locked through the delete: a workflow that plans a job here meanwhile
     // either comes first (and the check sees its job) or waits and fails.
@@ -612,9 +652,15 @@ router.delete("/connections/:id", async (c) => {
       );
     }
     await q().delete(connections).where(eq(connections.id, connection.id));
-    await record("connection.deleted", `Deleted connection ${connection.name}`, { actor: user });
+    await record("connection.deleted", `Deleted connection ${connection.name}`, { actor });
   });
-  return c.json({ message: `Deleted ${connection.name}.` });
+  return { message: `Deleted ${connection.name}.` };
+}
+
+router.delete("/connections/:id", async (c) => {
+  const user = requireRole(c, "admin");
+  const connection = await connectionOr404(idParam(c));
+  return c.json(await deleteConnection(user, connection));
 });
 
 export default router;

@@ -18,8 +18,8 @@ them should have, and the onboarding and offboarding that follow from it.
 - **Connections** to Keycloak, Google Workspace, any SCIM 2.0 app, HubSpot,
   Slack, Notion, Relution and apps without an API (manual tasks), plus
   Personio as a people source and SMTP for email. Admins add, test and
-  configure every connection in the admin section; credentials are stored
-  encrypted.
+  configure every connection in the admin section, or an operator on the
+  server with `cli settings`; credentials are stored encrypted.
 - **Safety**: the app only adds and removes the groups its policy manages,
   automatic removals beyond a daily limit wait for an admin, offboarding
   never skips an app silently, account comparisons report drift without
@@ -47,7 +47,7 @@ Keycloak connection: see [docs/development.md](docs/development.md).
 
 ## Documentation
 
-- [Deployment](docs/deployment.md): a Linux server (Debian, Ubuntu), PostgreSQL, keys, health checks
+- [Deployment](docs/deployment.md): a Linux server (Debian, Ubuntu), PostgreSQL, keys, health checks, settings from the command line
 - [Coolify](docs/coolify.md): running it on Coolify instead
 - [Configuration](docs/configuration.md): environment variables
 - [Sign-in and roles](docs/authentication.md): OpenID Connect, Keycloak, roles, first admin

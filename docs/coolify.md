@@ -25,6 +25,15 @@ server.
    [first steps](deployment.md#first-steps-after-the-first-sign-in).
 6. **Automatic updates:** set them up [below](#automatic-updates).
 
+## Settings from the command line
+
+The operator commands
+([deployment.md](deployment.md#settings-from-the-command-line)) run in a
+terminal of `web` (the resource's Terminal page): `cli settings list`. From
+the server's shell, `docker ps` names the `web` container
+(`web-<resource UUID>-…`); `docker exec -i <container> cli settings apply
+connections < body.json` pipes a body into it.
+
 ## Upgrades
 
 Releases that need operator action list their steps under "Upgrade steps

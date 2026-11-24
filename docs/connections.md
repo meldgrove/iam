@@ -1,8 +1,10 @@
 # Connections
 
 A connection links Meldgrove IAM to one app or service. Admins add, test and
-change connections in **Admin > Connections**. Every setting lives there; no
-connection needs an environment variable.
+change connections in **Admin > Connections**; an operator does the same on
+the server with `cli settings` ([deployment.md](deployment.md#settings-from-the-command-line)).
+Every setting lives in the database; no connection needs an environment
+variable.
 
 ## How connections work
 
@@ -48,7 +50,9 @@ the JSON key of a Google service account, as a whole: the field keeps it on
 one line, which JSON does not mind. When you change where a secret
 is sent (the URL or server, the port, the encryption), enter the secret
 again: a saved secret never follows to a new address. The audit log records
-which settings changed, never their values.
+which settings changed, never their values. On the server, `cli settings
+apply connections` takes secrets only in the JSON body on stdin, with the
+same rules.
 
 ### Buttons on the connection page
 

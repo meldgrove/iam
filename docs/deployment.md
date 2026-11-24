@@ -135,6 +135,127 @@ when a deploy stops it, and web 40 seconds to finish its requests.
    ([updates.md](updates.md#channels)).
 7. Turn the connections on.
 
+Connections, Admin › Settings and API keys can also be set on the server
+([Settings from the command line](#settings-from-the-command-line)).
+
+## Settings from the command line
+
+Everything an admin sets in **Admin › Connections**, **Admin › Settings**
+and **Admin › API keys** can also be set on the server, without a browser,
+by an operator or by AI with access to the server. The command runs the
+same code as the admin pages: the same checks, the same encryption, the
+same audit log, where it appears as `operator` with the command.
+
+```sh
+docker compose run --rm -T migrate cli settings list
+```
+
+In a running container, `cli` is on the `PATH`: `docker compose exec web cli
+settings list`, or a terminal of `web` on Coolify. `cli help` lists every
+command.
+
+| Command | What it does |
+| --- | --- |
+| `cli settings list [--json]` | Every setting: name, `set`, `not set` or `incomplete`, and hints. A secret shows as `saved` or `not saved`, never its value. |
+| `cli settings show app` | Admin › Settings as JSON: the body for `apply app`. |
+| `cli settings show connections` | The connections by kind. |
+| `cli settings show connections --id <id>` | A connection's edit form: name, on or off, mode, settings, which secrets are saved. |
+| `cli settings show connections --adapter <slug>` | An adapter's fields: names, kinds, defaults, which are required. |
+| `cli settings apply app` | Saves Admin › Settings from the JSON body on stdin. |
+| `cli settings apply connections` | Adds a connection from the body on stdin and prints its ID. |
+| `cli settings apply connections --id <id>` | Saves a connection, as its edit form does. |
+| `cli settings remove connections --id <id>` | Deletes a connection that has no jobs and no access profile. |
+| `cli settings test connections --id <id>` | The "Test connection" button. |
+| `cli tokens create api-key --name <name>` | A new API key for another app ([api.md](api.md)): printed once, alone on stdout. |
+| `cli tokens list [--json]` | The API keys: name, first characters, created, last used, revoked. |
+| `cli tokens revoke <id>` | Revokes an API key. |
+
+Exit codes: 0 done; 1 the app refuses, with the admin page's message on
+stderr; 2 a wrong command, or a body that is not JSON. After `apply`, the
+command prints what `show` prints.
+
+The rules of the admin pages apply:
+
+- Secrets go only into the body on stdin, never into arguments: arguments
+  show in `ps` and in the shell history.
+- A secret left out of `secrets`, or empty, keeps the saved one. When a
+  setting that says where a secret goes changes (a URL, the server, the
+  port, the encryption), the body must hold the secret again.
+- A new connection starts turned off. Test it, then apply its body with
+  `"enabled": true`. Each save sets the status to untested, as the edit
+  form does: test it again afterwards.
+- Nothing needs a restart: web and worker read the settings from the
+  database each time.
+
+### `app`: Admin › Settings
+
+Every field, as `cli settings show app` prints it. `identityRequestTypes`
+are the person types other apps may request ([api.md](api.md)):
+
+```json
+{
+  "organizationName": "Example",
+  "automaticOnboarding": true,
+  "onboardingLeadDays": 7,
+  "automaticOffboarding": true,
+  "removalLimitPerDay": 5,
+  "notificationEmails": "it@example.invalid",
+  "identityRequestTypes": ["employee", "intern"]
+}
+```
+
+### `connections`: Admin › Connections
+
+A new connection names its adapter: `keycloak`, `google_workspace`, `scim`,
+`hubspot`, `slack`, `notion`, `relution`, `manual`, `personio` or `smtp`
+([connections.md](connections.md) describes each). `settings` holds the
+fields that are not secrets, `secrets` the secrets, each by the field name
+that `cli settings show connections --adapter <slug>` lists. An edit
+(`--id`) sends the same body without `adapter`. `mode` (`automatic`,
+`manual`, `read_only`) counts for connections that change accounts.
+
+```json
+{
+  "adapter": "smtp",
+  "name": "Email",
+  "enabled": false,
+  "settings": {
+    "host": "smtp.example.invalid",
+    "port": 587,
+    "security": "starttls",
+    "username": "iam@example.invalid",
+    "from_address": "iam@example.invalid",
+    "from_name": "IT team",
+    "reply_to": ""
+  },
+  "secrets": { "password": "REPLACE_WITH_THE_PASSWORD" }
+}
+```
+
+### API keys
+
+`cli tokens create api-key --name Helpdesk > helpdesk.key` writes only the
+key into the file; the note with its ID and first characters goes to
+stderr.
+
+### AI with access to the server
+
+The secret arrives as a file: AI builds the body around it, pipes the body
+into `cli settings apply`, runs `cli settings test` and deletes the file.
+With `jq`, the secret stays out of arguments and out of AI's context:
+
+```sh
+jq -n --rawfile password smtp-password.txt '{
+  adapter: "smtp", name: "Email", enabled: false,
+  settings: { host: "smtp.example.invalid", port: 587, security: "starttls",
+              username: "iam@example.invalid", from_address: "iam@example.invalid" },
+  secrets: { password: ($password | rtrimstr("\n")) }
+}' | docker compose run --rm -T migrate cli settings apply connections
+# apply printed the new connection's ID, e.g. 3
+docker compose run --rm -T migrate cli settings test connections --id 3
+rm smtp-password.txt
+```
+
 ## Trying it with real data: read-only mode
 
 Start with `READ_ONLY=1` ([architecture.md](architecture.md#read-only-mode)).

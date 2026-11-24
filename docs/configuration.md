@@ -3,8 +3,11 @@
 Everything an admin changes while the app runs lives in the admin section:
 connections and their credentials (Admin › Connections), app users and roles
 (Admin › Users and roles), lifecycle rules and notifications (Admin ›
-Settings). Environment variables hold only what the process needs before it
-can read the database, and the sign-in settings.
+Settings). An operator sets connections and Admin › Settings on the server
+with `cli settings` too
+([deployment.md](deployment.md#settings-from-the-command-line)).
+Environment variables hold only what the process needs before it can read
+the database, and the sign-in settings.
 
 ## Required in production
 

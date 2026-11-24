@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { z } from "zod";
 import { and, desc, eq, isNull, ne, sql, type SQL } from "drizzle-orm";
 import {
   apiKeyInputSchema,
@@ -24,7 +25,7 @@ import { atomic, q } from "../db/tx";
 import type { AppEnv } from "../http/env";
 import { idParam, jsonBody, requireRole } from "../http/middleware";
 import { conflict, notFound, validationError } from "../http/errors";
-import { record } from "../engine/audit";
+import { isOperator, record, type Actor } from "../engine/audit";
 import { fullName } from "../engine/people";
 import {
   approveRequest,
@@ -198,7 +199,8 @@ router.post("/identity-requests/:id/reject", async (c) => {
 
 // -- API keys (admins) -----------------------------------------------------------------
 
-async function keyRows(where?: SQL): Promise<ApiKeyRow[]> {
+/** Every API key, newest first (GET /api-keys, `cli tokens list`). */
+export async function keyRows(where?: SQL): Promise<ApiKeyRow[]> {
   const rows = await q()
     .select({ key: apiKeys, user: users })
     .from(apiKeys)
@@ -225,33 +227,40 @@ router.get("/api-keys", async (c) => {
   return c.json(await keyRows());
 });
 
-router.post("/api-keys", async (c) => {
-  const user = requireRole(c, "admin");
-  const { name } = await jsonBody(c, apiKeyInputSchema);
+/** Creates an API key (POST /api-keys, `cli tokens create api-key`); `key` is the only copy. */
+export async function createApiKey(
+  actor: Actor,
+  { name }: z.infer<typeof apiKeyInputSchema>,
+): Promise<ApiKeyCreated> {
   const { key, prefix, hash } = newApiKey();
+  const user = isOperator(actor) ? null : actor;
   const created = await atomic(async () => {
     const [saved] = await q()
       .insert(apiKeys)
-      .values({ name, prefix, keyHash: hash, createdById: user.id })
+      .values({ name, prefix, keyHash: hash, createdById: user?.id ?? null })
       .returning();
     await record("api_key.created", `Created the API key "${name}"`, {
-      actor: user,
+      actor,
       target: { type: "apikey", id: saved!.id },
       details: { prefix },
     });
     return saved!;
   });
-  const body: ApiKeyCreated = {
+  return {
     key,
-    apiKey: keyRow(created, user.displayName || user.email),
+    apiKey: keyRow(created, user ? user.displayName || user.email : null),
     message: "Created the key. Copy it now: it is shown only once.",
   };
-  return c.json(body, 201);
+}
+
+router.post("/api-keys", async (c) => {
+  const user = requireRole(c, "admin");
+  const input = await jsonBody(c, apiKeyInputSchema);
+  return c.json(await createApiKey(user, input), 201);
 });
 
-router.post("/api-keys/:id/revoke", async (c) => {
-  const user = requireRole(c, "admin");
-  const id = idParam(c);
+/** Revokes an API key (POST /api-keys/:id/revoke, `cli tokens revoke`). */
+export async function revokeApiKey(actor: Actor, id: number): Promise<{ id: number; message: string }> {
   const name = await atomic(async () => {
     const [revoked] = await q()
       .update(apiKeys)
@@ -264,12 +273,17 @@ router.post("/api-keys/:id/revoke", async (c) => {
       throw conflict("This key is already revoked.");
     }
     await record("api_key.revoked", `Revoked the API key "${revoked.name}"`, {
-      actor: user,
+      actor,
       target: { type: "apikey", id },
     });
     return revoked.name;
   });
-  return c.json({ id, message: `Revoked the key "${name}".` });
+  return { id, message: `Revoked the key "${name}".` };
+}
+
+router.post("/api-keys/:id/revoke", async (c) => {
+  const user = requireRole(c, "admin");
+  return c.json(await revokeApiKey(user, idParam(c)));
 });
 
 export default router;

@@ -14,7 +14,9 @@ workflows.
    apps may request (employee, intern, freelancer, volunteer, external).
    With none chosen, the app accepts no requests.
 2. **Admin › API keys:** create a key per app, named after it. The key is
-   shown once; store it in the other app. IAM keeps its SHA-256 and its
+   shown once; store it in the other app. On the server,
+   `cli tokens create api-key --name Helpdesk` creates one and prints only
+   the key ([deployment.md](deployment.md#settings-from-the-command-line)). IAM keeps its SHA-256 and its
    first characters, to tell keys apart. Revoke a key that leaked or is no
    longer used; create a new one instead. Every key may read and cancel every
    request, so a new key takes over from the one it replaces.
