@@ -31,9 +31,6 @@ them should have, and the onboarding and offboarding that follow from it.
   and roles (viewer, approver, admin) decide what someone may do; roles can
   also come from the provider's group claim.
 
-Meldgrove IAM is meant to become open source. It has no license yet, so for
-now all rights are reserved.
-
 ## Quick start (development)
 
 ```sh
@@ -71,3 +68,9 @@ Docker image with three processes: `migrate` (one-time), `web` and `worker`
 (jobs and schedule; no Redis or queue needed). Versions 0.1 and 0.2 were a
 Django app; 0.3 takes over their database in place
 ([upgrade](docs/deployment.md#upgrade-from-the-django-version)).
+
+## License
+
+Copyright 2026 Meldgrove
+
+Licensed under the [Apache License 2.0](LICENSE).
