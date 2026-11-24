@@ -53,12 +53,13 @@ const tooLong = () => new UsageError("The body on stdin is longer than 1 MB.");
 /**
  * A body pasted into a terminal (Coolify's): read in raw mode, so the terminal shows
  * nothing and does not cut a line at its 4 KiB limit. Ctrl-D ends the body; Ctrl-C
- * stops the command. Node restores the terminal's mode when the process exits.
+ * stops the command. The rest of a body over the limit is read and dropped, still in
+ * raw mode, until Ctrl-D. Node restores the terminal's mode when the process exits.
  */
 function readPasted(): Promise<Buffer> {
   const stdin = process.stdin as ReadStream;
-  process.stderr.write("Paste the JSON body (it is not shown), then press Ctrl-D.\n");
   stdin.setRawMode(true);
+  process.stderr.write("Paste the JSON body (it is not shown), then press Ctrl-D.\n");
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -79,12 +80,9 @@ function readPasted(): Promise<Buffer> {
       }
       const part = end === -1 ? chunk : chunk.subarray(0, end);
       size += part.length;
-      if (size > MAX_STDIN_BYTES) {
-        finish(tooLong());
-        return;
-      }
-      chunks.push(part);
-      if (end !== -1) finish();
+      if (size > MAX_STDIN_BYTES) chunks.length = 0;
+      else chunks.push(part);
+      if (end !== -1) finish(size > MAX_STDIN_BYTES ? tooLong() : undefined);
     };
     stdin.on("data", onData);
     stdin.resume();
