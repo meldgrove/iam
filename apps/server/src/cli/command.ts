@@ -114,7 +114,7 @@ export async function run(io: Io, command: () => Promise<number | undefined | vo
       return 1;
     }
     logger.error({ err: error }, "operator command failed");
-    io.err("Something went wrong. The log line above has the details.\n");
+    io.err("Something went wrong. Try again.\n");
     return 1;
   }
 }

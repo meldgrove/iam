@@ -1,6 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { connectionInputSchema, settingsInputSchema } from "@iam/shared/api/iam";
-import { AdapterKind } from "../adapters/base";
+import { AdapterKind, type AdapterClass } from "../adapters/base";
 import { adapterClasses, getAdapterClass } from "../adapters/registry";
 import { appSettings, connections, type Connection } from "../db/schema";
 import { q } from "../db/tx";
@@ -53,7 +53,9 @@ async function found<T>(what: string, work: () => Promise<T>): Promise<T> {
 }
 
 const onOff = (value: boolean) => (value ? "on" : "off");
+const counted = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
+/** States and counts only: the values are in `show app`. */
 async function appRow(): Promise<Row> {
   // Read without creating the row, unlike the page.
   const [row] = await q().select().from(appSettings).where(eq(appSettings.id, 1));
@@ -64,11 +66,10 @@ async function appRow(): Promise<Row> {
     id: null,
     state: "set",
     hints: [
-      `organization: ${row.organizationName}`,
-      `automatic onboarding: ${onOff(row.automaticOnboarding)}, ${row.onboardingLeadDays} days ahead`,
-      `automatic offboarding: ${onOff(row.automaticOffboarding)}, at most ${row.removalLimitPerDay} removals a day`,
-      `task emails: ${emails} address${emails === 1 ? "" : "es"}`,
-      `identity requests: ${row.identityRequestTypes.join(", ") || "none"}`,
+      `automatic onboarding ${onOff(row.automaticOnboarding)}`,
+      `automatic offboarding ${onOff(row.automaticOffboarding)}`,
+      `task emails: ${counted(emails, "address", "addresses")}`,
+      `identity requests: ${counted(row.identityRequestTypes.length, "person type", "person types")}`,
     ],
   };
 }
@@ -145,6 +146,28 @@ export const adapterNames = () =>
     .map((cls) => cls.slug)
     .join(", ")}.`;
 
+/**
+ * A refusal names a key under `secrets` only when it is a secret field of the
+ * adapter: any other key of the body could be a secret pasted in its place.
+ */
+async function knownSecretKeys<T>(cls: AdapterClass | null, work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (!(error instanceof AppError) || !error.fields) throw error;
+    const known = new Set(
+      (cls?.fields ?? []).filter((spec) => spec.kind === "secret").map((spec) => spec.name),
+    );
+    const fields = Object.fromEntries(
+      Object.entries(error.fields).map(([key, message]) => [
+        key.startsWith("secrets.") && !known.has(key.slice("secrets.".length)) ? "secrets.(not shown)" : key,
+        message,
+      ]),
+    );
+    throw new AppError(error.status, error.code, error.message, fields, error.extra);
+  }
+}
+
 /** Saves the body on stdin as the page does, then prints what `show` prints. */
 async function apply(name: SettingName, id: number | undefined, command: string, io: Io) {
   const actor = operator(command);
@@ -156,14 +179,18 @@ async function apply(name: SettingName, id: number | undefined, command: string,
     io.out(json(settings));
   } else if (id === undefined) {
     const body = await readJsonBody(io);
-    const input = parseWith(newConnectionSchema, body);
+    const slug = (body as { adapter?: unknown } | null)?.adapter;
+    const input = await knownSecretKeys(getAdapterClass(typeof slug === "string" ? slug : ""), async () =>
+      parseWith(newConnectionSchema, body),
+    );
     const created = await found(`Unknown adapter. ${adapterNames()}`, () => createConnection(actor, input));
     io.err(`${created.message} ID: ${created.id}\n`);
     io.out(json(await showConnection(created.id)));
   } else {
     const body = await readJsonBody(io);
     const editable = await found(`No connection has the ID ${id}.`, () => editableConnection(id));
-    const saved = await updateConnection(actor, editable, parseWith(connectionInputSchema, body));
+    const input = await knownSecretKeys(editable.cls, async () => parseWith(connectionInputSchema, body));
+    const saved = await updateConnection(actor, editable, input);
     io.err(`${saved.message}\n`);
     io.out(json(await showConnection(id)));
   }

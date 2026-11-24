@@ -135,7 +135,11 @@ describe("cli settings and cli tokens", () => {
     await settings(["show", "app"]);
     const listed = await settings(["list"]);
     expect(listed.out).not.toContain(SECRET);
-    expect(listed.out).toContain("organization: Meldgrove IAM");
+    // States and counts, no values: those are in `show app`.
+    expect(listed.out).toMatch(
+      /^app\s+set\s+automatic onboarding on; automatic offboarding on; task emails: 0 addresses; identity requests: 0 person types\n/,
+    );
+    expect(listed.out).not.toContain("Meldgrove IAM");
     expect(listed.out).toMatch(
       new RegExp(
         `connections --id ${id}\\s+set\\s+Keycloak \\(keycloak\\); off; automatic; test: untested; Client secret: saved`,
@@ -197,6 +201,14 @@ describe("cli settings and cli tokens", () => {
     const missing = await settings(["apply", "connections", "--id", "99"], KEYCLOAK);
     expect(missing).toMatchObject({ code: 1, err: "No connection has the ID 99.\n" });
     expect((await settings(["apply", "connections", "--id", "99"], "{ broken")).code).toBe(2);
+
+    // A key under `secrets` that no field has could itself be a secret.
+    const pasted = await settings(["apply", "connections"], { ...KEYCLOAK, secrets: { [SECRET]: 1 } });
+    expect(pasted).toMatchObject({ code: 1, out: "" });
+    expect(pasted.err).toMatch(/^Check the highlighted fields\n {2}secrets\.\(not shown\): /);
+    expect(pasted.err).not.toContain(SECRET);
+    const known = await settings(["apply", "connections"], { ...KEYCLOAK, secrets: { client_secret: 1 } });
+    expect(known.err).toMatch(/^Check the highlighted fields\n {2}secrets\.client_secret: /);
 
     // The parser's message would quote the body.
     const broken = await settings(["apply", "connections"], `{"secrets": {"client_secret": "${SECRET}"`);
