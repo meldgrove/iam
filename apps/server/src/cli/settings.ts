@@ -179,8 +179,9 @@ async function apply(name: SettingName, id: number | undefined, command: string,
     io.out(json(settings));
   } else if (id === undefined) {
     const body = await readJsonBody(io);
-    const slug = (body as { adapter?: unknown } | null)?.adapter;
-    const input = await knownSecretKeys(getAdapterClass(typeof slug === "string" ? slug : ""), async () =>
+    // The adapter as the schema reads it (trimmed), for the names of its secret fields.
+    const slug = newConnectionSchema.shape.adapter.safeParse((body as { adapter?: unknown } | null)?.adapter);
+    const input = await knownSecretKeys(getAdapterClass(slug.success ? slug.data : ""), async () =>
       parseWith(newConnectionSchema, body),
     );
     const created = await found(`Unknown adapter. ${adapterNames()}`, () => createConnection(actor, input));

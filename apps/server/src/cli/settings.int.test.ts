@@ -207,8 +207,14 @@ describe("cli settings and cli tokens", () => {
     expect(pasted).toMatchObject({ code: 1, out: "" });
     expect(pasted.err).toMatch(/^Check the highlighted fields\n {2}secrets\.\(not shown\): /);
     expect(pasted.err).not.toContain(SECRET);
-    const known = await settings(["apply", "connections"], { ...KEYCLOAK, secrets: { client_secret: 1 } });
-    expect(known.err).toMatch(/^Check the highlighted fields\n {2}secrets\.client_secret: /);
+    for (const adapter of ["keycloak", " keycloak "]) {
+      const known = await settings(["apply", "connections"], {
+        ...KEYCLOAK,
+        adapter,
+        secrets: { client_secret: 1 },
+      });
+      expect(known.err).toMatch(/^Check the highlighted fields\n {2}secrets\.client_secret: /);
+    }
 
     // The parser's message would quote the body.
     const broken = await settings(["apply", "connections"], `{"secrets": {"client_secret": "${SECRET}"`);
