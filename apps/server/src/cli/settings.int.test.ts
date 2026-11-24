@@ -344,9 +344,9 @@ describe("cli settings and cli tokens", () => {
     expect(listed.out).toMatch(
       new RegExp(`^api-key ${saved!.id}\\s+active\\s+Helpdesk; ${saved!.prefix}…; created `),
     );
-    expect(JSON.parse((await tokens(["list", "--json"])).out)).toEqual(
-      (await request("GET", "/api/v1/api-keys", { user: await makeUser("admin") })).body,
-    );
+    const page = await request("GET", "/api/v1/api-keys", { user: await makeUser("admin") });
+    expect(page.body).toMatchObject([{ id: saved!.id, createdBy: "Operator" }]);
+    expect(JSON.parse((await tokens(["list", "--json"])).out)).toEqual(page.body);
 
     expect(await tokens(["revoke", String(saved!.id)])).toEqual({
       code: 0,

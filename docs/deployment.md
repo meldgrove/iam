@@ -236,11 +236,12 @@ that `cli settings show connections --adapter <slug>` lists. An edit
 ### API keys
 
 ```sh
-(umask 077; docker compose exec -T web cli tokens create api-key --name Helpdesk > helpdesk.key)
+(umask 077; set -C; docker compose exec -T web cli tokens create api-key --name Helpdesk > helpdesk.key)
 ```
 
-writes only the key into the file; the note with its ID and first
-characters goes to stderr. Use `exec` here, not `run`: Docker's log driver
+writes only the key into a new private file (`set -C` refuses to overwrite
+one that is there already); the note with its ID and first characters goes to
+stderr. Use `exec` here, not `run`: Docker's log driver
 keeps what a container started with `run` prints, so the key would end up in
 a log (with `journald` or a remote driver also after `--rm`).
 
